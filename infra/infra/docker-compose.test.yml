@@ -1,0 +1,10 @@
+name: tk-mg-test
+
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:${POSTGRES_TEST_PORT:-55432}:5432"
+
+volumes:
+  postgres-data:
+    name: tk-mg-test-postgres-data

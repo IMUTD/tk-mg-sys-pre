@@ -1,0 +1,145 @@
+.proxies-page {
+  display: grid;
+  gap: 16px;
+}
+
+.proxies-page .filter-label,
+.proxies-page .filter-row .filter-label {
+  color: #606266;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.proxies-page .filter-bar .resource-filter-row {
+  align-items: center;
+}
+
+.proxies-page .resource-crud-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.muted {
+  color: #909399;
+}
+
+.proxy-resource-bar {
+  align-items: center;
+  color: #606266;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 13px;
+  gap: 4px 8px;
+}
+
+.proxy-endpoint {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.proxy-endpoint-text {
+  margin-right: 4px;
+}
+
+.proxy-result-cell {
+  display: grid;
+  gap: 4px;
+}
+
+.proxy-result-toolbar,
+.proxy-result-summary,
+.proxy-mode-list {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.proxy-result-empty {
+  color: #909399;
+}
+
+.proxy-mode-tag.is-off {
+  color: #c0c4cc;
+}
+
+.proxy-mode-tag.mode-save.is-on {
+  color: #e6a23c;
+}
+
+.proxy-mode-tag.mode-tun.is-on,
+.proxy-mode-tag.mode-turbo.is-on {
+  color: #409eff;
+}
+
+.proxy-mode-tag.mode-safe.is-on {
+  color: #f56c6c;
+}
+
+.proxy-time-cell {
+  color: #606266;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.proxy-favorite-button.is-favorite {
+  color: #e6a23c;
+}
+
+.proxy-tag {
+  cursor: pointer;
+}
+
+.form-hint {
+  color: #909399;
+  font-size: 12px;
+  margin-left: 8px;
+}
+
+.form-hint-warn {
+  color: orange;
+}
+
+.form-hint-danger {
+  color: #f56c6c;
+}
+
+.proxy-detect-alert {
+  margin-bottom: 16px;
+}
+
+.proxy-result-json {
+  background: #f5f7fa;
+  border-radius: 4px;
+  font-size: 12px;
+  max-height: 360px;
+  overflow: auto;
+  padding: 12px;
+}
+
+.proxy-buy-list {
+  margin: 16px 0 0;
+  padding-left: 20px;
+}
+
+.material-import-hint {
+  font-size: 12px;
+  margin-top: 5px;
+}
+
+.dialog-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 760px) {
+  .proxies-page .resource-crud-toolbar {
+    width: 100%;
+  }
+}

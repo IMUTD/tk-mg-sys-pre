@@ -1,0 +1,52 @@
+.storage-page {
+  display: grid;
+  gap: 16px;
+}
+
+.storage-kind-bar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.storage-card-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
+
+.storage-card .storage-endpoint {
+  color: #606266;
+  font-size: 13px;
+  margin: 0 0 8px;
+  word-break: break-all;
+}
+
+.storage-card .storage-meta {
+  color: #909399;
+  font-size: 12px;
+  margin: 8px 0 0;
+}
+
+.storage-card-actions {
+  margin-top: 16px;
+}
+
+.storage-empty {
+  color: #909399;
+  text-align: center;
+}
+
+.storage-form-hint {
+  color: #909399;
+  font-size: 12px;
+  margin: 0;
+}
+
+.dialog-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}

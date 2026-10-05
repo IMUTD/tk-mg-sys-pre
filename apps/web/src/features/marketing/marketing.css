@@ -1,0 +1,47 @@
+.marketing-page,
+.studio-page {
+  display: grid;
+  gap: 16px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.marketing-legend {
+  color: #606266;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.legend-dot {
+  border-radius: 50%;
+  display: inline-block;
+  height: 8px;
+  margin-right: 6px;
+  width: 8px;
+}
+
+.trend-chart {
+  height: auto;
+  max-width: 100%;
+  width: 100%;
+}
+
+.studio-board {
+  align-items: center;
+  background: repeating-linear-gradient(0deg, #fafafa, #fafafa 24px, #f0f0f0 25px);
+  border: 1px dashed #d9d9d9;
+  border-radius: 8px;
+  color: #909399;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
+  min-height: 360px;
+  padding: 24px;
+  text-align: center;
+}
+
+.muted {
+  color: #909399;
+}

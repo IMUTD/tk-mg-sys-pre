@@ -1,0 +1,149 @@
+.registration-resources-page {
+  display: grid;
+  gap: 16px;
+}
+
+.registration-resources-page .filter-label {
+  color: #606266;
+  font-size: 13px;
+}
+
+.registration-resources-page .resource-crud-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.registration-resources-page .muted {
+  color: #909399;
+}
+
+.registration-resources-page .parsed-data-summary {
+  line-height: 18px;
+}
+
+.registration-resources-page .parsed-data-summary-row {
+  display: flex;
+  min-width: 0;
+}
+
+.registration-resources-page .parsed-data-summary-label {
+  color: #606266;
+  flex: 0 0 auto;
+  font-weight: 500;
+  margin-right: 4px;
+}
+
+.registration-resources-page .parsed-data-summary-value {
+  color: #909399;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.registration-resources-page .parsed-data-more {
+  padding: 0;
+}
+
+.registration-resources-page .resource-tag {
+  cursor: pointer;
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.registration-resources-page .time-cell {
+  color: #666;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.parsed-data-editor {
+  width: 500px;
+}
+
+.parsed-data-empty {
+  color: #909399;
+  line-height: 32px;
+  margin-bottom: 8px;
+}
+
+.parsed-data-row {
+  align-items: center;
+  display: flex;
+  margin-bottom: 8px;
+}
+
+.parsed-data-key {
+  margin-right: 8px;
+  width: 160px;
+}
+
+.parsed-data-value {
+  flex: 1;
+}
+
+.parsed-data-delete {
+  color: #f56c6c;
+  margin-left: 8px;
+}
+
+.parsed-data-detail-value {
+  cursor: pointer;
+  word-break: break-all;
+}
+
+.smart-import-editor textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 16px;
+  white-space: pre-wrap;
+}
+
+.smart-import-result {
+  display: grid;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.statistics-actions {
+  margin-bottom: 12px;
+}
+
+.dialog-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 760px) {
+  .registration-resources-page .resource-crud-toolbar {
+    width: 100%;
+  }
+
+  .parsed-data-editor {
+    width: 100%;
+  }
+
+  .parsed-data-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .parsed-data-key {
+    margin-bottom: 8px;
+    margin-right: 0;
+    width: 100%;
+  }
+
+  .parsed-data-delete {
+    align-self: flex-start;
+    margin-left: 0;
+  }
+}

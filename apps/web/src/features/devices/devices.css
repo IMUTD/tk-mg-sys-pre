@@ -1,0 +1,218 @@
+.device-message {
+  background: #fff;
+  border: 1px solid #e3e8f0;
+  border-radius: 8px;
+  color: #718096;
+  margin: 16px 0;
+  padding: 20px;
+}
+
+.device-edit-form,
+.instance-edit-form {
+  background: #fff;
+  border: 1px solid #e3e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 18px;
+}
+
+.device-edit-form label,
+.instance-edit-form label {
+  color: #58657b;
+  display: grid;
+  font-size: 13px;
+  gap: 6px;
+}
+
+.device-edit-form input,
+.instance-edit-form input {
+  border: 1px solid #d9e0eb;
+  border-radius: 6px;
+  min-height: 38px;
+  padding: 0 11px;
+}
+
+.device-edit-form .device-checkbox,
+.instance-edit-form .device-checkbox {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.device-edit-form .device-checkbox input,
+.instance-edit-form .device-checkbox input {
+  min-height: auto;
+}
+
+.device-instance-editor {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.device-filter-bar,
+.device-status-card,
+.device-command-card {
+  margin-bottom: 16px;
+}
+
+.device-command-card .ant-card-body {
+  display: grid;
+  gap: 12px;
+}
+
+.device-command-actions {
+  align-items: center;
+}
+
+.device-command-result {
+  display: grid;
+  gap: 8px;
+}
+
+.device-name-cell {
+  display: grid;
+  gap: 2px;
+}
+
+.device-instance-editor h3 {
+  font-size: 16px;
+}
+
+.instance-edit-form {
+  grid-template-columns: minmax(0, 1fr) 100px 100px auto;
+}
+
+.devices-page .filter-label {
+  color: #606266;
+  font-size: 13px;
+}
+
+.devices-page .device-crud-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.devices-page .device-auth-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.devices-page .serial-ip-cell,
+.devices-page .remote-actions,
+.devices-page .device-operation-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.devices-page .mono-tag {
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  width: fit-content;
+}
+
+.devices-page .meta-cell {
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.devices-page .muted {
+  color: #909399;
+}
+
+.devices-page .firmware-version {
+  color: #909399;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.devices-page .disk-row {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.devices-page .device-enable-cell {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+}
+
+.devices-page .is-enabled {
+  color: #67c23a;
+}
+
+.devices-page .is-disabled {
+  color: #909399;
+}
+
+.devices-page .label-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.devices-page .label-row-title {
+  font-weight: 600;
+  min-width: 36px;
+}
+
+.devices-page .label-row.tone-remark .label-row-title {
+  color: #0958d9;
+}
+
+.devices-page .label-row.tone-group .label-row-title {
+  color: #d46b08;
+}
+
+.devices-page .label-tag-on {
+  box-shadow: 0 0 0 2px currentColor;
+}
+
+.label-choice-danger {
+  color: #cf1322;
+}
+
+.devices-page .box-label-pair {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.devices-page .label-plus {
+  width: 24px;
+}
+
+.device-form-hint {
+  color: #909399;
+  font-size: 12px;
+}
+
+.devices-page .auth-query-section {
+  margin-bottom: 8px;
+}
+
+@media (max-width: 760px) {
+  .device-edit-form,
+  .instance-edit-form {
+    grid-template-columns: 1fr;
+  }
+
+  .devices-page .device-crud-toolbar,
+  .devices-page .device-auth-actions {
+    margin-left: 0;
+    width: 100%;
+  }
+}

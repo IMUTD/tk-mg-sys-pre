@@ -1,0 +1,142 @@
+.accounts-page {
+  display: grid;
+  gap: 16px;
+}
+
+.accounts-page .filter-label,
+.accounts-page .filter-row .filter-label {
+  color: #606266;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.accounts-page .filter-bar .resource-filter-row {
+  align-items: center;
+}
+
+.accounts-page .quick-filters {
+  align-items: center;
+}
+
+.accounts-page .resource-crud-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.muted,
+.accounts-page .muted {
+  color: #909399;
+}
+
+.accounts-page .avatar-cell {
+  position: relative;
+  width: 50px;
+}
+
+.accounts-page .avatar-cell .status-indicator {
+  background: #909399;
+  border-radius: 8px;
+  bottom: -2px;
+  color: #fff;
+  font-size: 10px;
+  line-height: 14px;
+  min-width: 22px;
+  padding: 0 4px;
+  position: absolute;
+  right: -4px;
+  text-align: center;
+}
+
+.accounts-page .avatar-cell .status-indicator-online {
+  background: #67c23a;
+}
+
+.accounts-page .avatar-cell .status-indicator-offline {
+  background: #909399;
+}
+
+.accounts-page .uid-cell {
+  line-height: 1.4;
+}
+
+.accounts-page .uid-cell .ant-tag {
+  cursor: pointer;
+  margin-inline-end: 4px;
+}
+
+.dialog-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.parsed-resource-editor {
+  width: 100%;
+}
+
+.parsed-resource-empty {
+  color: #909399;
+  line-height: 32px;
+  margin-bottom: 8px;
+}
+
+.parsed-resource-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.recycle-filter,
+.statistic-toolbar,
+.batch-form {
+  margin-bottom: 12px;
+}
+
+.recycle-alert {
+  margin-bottom: 12px;
+}
+
+.check-task-rows {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.filter-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.danger-text {
+  color: #f56c6c;
+  font-weight: 700;
+  line-height: 22px;
+  margin-top: 16px;
+}
+
+.play-stats-summary {
+  margin-bottom: 12px;
+}
+
+.play-stats-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.play-stats-table th,
+.play-stats-table td {
+  border: 1px solid #ebeef5;
+  padding: 8px;
+  text-align: left;
+}
+
+@media (max-width: 760px) {
+  .accounts-page .resource-crud-toolbar {
+    width: 100%;
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@tk-mg/device-adapter",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.3.5"
+  },
+  "devDependencies": {
+    "bun-types": "^1.4.2",
+    "typescript": "^5.9.3"
+  }
+}

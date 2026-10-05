@@ -1,0 +1,78 @@
+.account-pool-page {
+  display: grid;
+  gap: 16px;
+}
+
+.account-pool-page .filter-label {
+  color: #606266;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.account-pool-page .filter-bar .resource-filter-row {
+  align-items: center;
+}
+
+.account-pool-page .resource-crud-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.pool-analysis {
+  max-width: 280px;
+}
+
+.pool-help h4 {
+  font-size: 14px;
+  margin: 12px 0 8px;
+}
+
+.pool-help p {
+  color: #606266;
+  line-height: 1.7;
+  margin: 0 0 8px;
+}
+
+.stats-notice {
+  color: #e6a23c;
+  font-size: 12px;
+  margin: 0 0 8px;
+}
+
+.stats-summary {
+  margin-bottom: 12px;
+}
+
+.pool-create-layout {
+  display: flex;
+  gap: 24px;
+}
+
+.pool-create-form {
+  flex: 0 0 320px;
+}
+
+.pool-create-table {
+  flex: 1;
+  min-width: 0;
+}
+
+.dialog-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 960px) {
+  .pool-create-layout {
+    flex-direction: column;
+  }
+
+  .pool-create-form {
+    flex-basis: auto;
+    width: 100%;
+  }
+}

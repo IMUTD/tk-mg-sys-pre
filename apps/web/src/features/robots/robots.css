@@ -1,0 +1,73 @@
+.robots-page {
+  display: grid;
+  gap: 16px;
+}
+
+.robots-kind-bar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.robots-card-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
+
+.robots-card .robots-scope {
+  color: #606266;
+  font-size: 13px;
+  margin: 0 0 8px;
+  word-break: break-all;
+}
+
+.robots-card .robots-meta {
+  color: #909399;
+  font-size: 12px;
+  margin: 8px 0 0;
+}
+
+.robots-card-actions {
+  margin-top: 16px;
+}
+
+.robots-empty {
+  color: #909399;
+  text-align: center;
+}
+
+.robots-hint {
+  color: #909399;
+  font-size: 13px;
+}
+
+.robot-form-hint {
+  color: #909399;
+  font-size: 12px;
+  margin: 0;
+}
+
+.robot-log-pre {
+  background: #f5f7fa;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  padding: 12px;
+  white-space: pre-wrap;
+}
+
+.robot-log-link {
+  margin-right: auto;
+}
+
+.dialog-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}

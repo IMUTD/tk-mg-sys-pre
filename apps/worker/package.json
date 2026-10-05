@@ -1,0 +1,20 @@
+{
+  "name": "@tk-mg/worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "test:integration": "bun -e \"const url=Bun.env.TEST_DATABASE_URL; if (!url) { console.error('TEST_DATABASE_URL is required and must target tk_mg_test_*'); process.exit(1) } if (!new URL(url).pathname.slice(1).startsWith('tk_mg_test_')) { console.error('TEST_DATABASE_URL must target tk_mg_test_*'); process.exit(1) }\" && bun test --timeout 120000 --max-concurrency 1 src/integration.test.ts src/outbox.postgres.test.ts src/process.integration.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tk-mg/device-adapter": "workspace:*",
+    "@tk-mg/task-execution": "workspace:*",
+    "postgres": "^3.4.9",
+    "zod": "^4.3.5"
+  },
+  "devDependencies": {
+    "bun-types": "^1.4.2",
+    "typescript": "^5.9.3"
+  }
+}

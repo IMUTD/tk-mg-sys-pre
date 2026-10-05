@@ -1,0 +1,33 @@
+.work-logs-page {
+  display: grid;
+  gap: 16px;
+}
+
+.work-logs-page .filter-label {
+  color: #606266;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.work-logs-page .filter-bar .resource-filter-row {
+  align-items: center;
+}
+
+.work-logs-page .work-log-time-filters {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.work-logs-page .work-log-time-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.work-logs-page .work-log-time-row .ant-input {
+  max-width: 100%;
+  width: min(220px, 100%);
+}
