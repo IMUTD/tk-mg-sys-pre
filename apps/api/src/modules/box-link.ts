@@ -8,6 +8,7 @@ import { guardCatalog, normalizeGuards, xmlHasText, type GuardCode } from "./gua
 const guardLabel = (code: string): string =>
   code === "ad" || code === "transcode" ? guardCatalog[code].label : code
 import { skillCatalog, type SkillSpec } from "./skills"
+import { agentSkillStep, isSharedVideoSkill, sharedVideoCommand } from "./video-share"
 
 const unassignedGroup = "00000000-0000-4000-8000-000000000001"
 const noBatch = new Set(["CreateAndroid", "BoxStart", "BoxStop", "BoxRestart", "BoxDelete", "RandomizeDevice", "SetProxy", "IndependentV5S5", "TestIndependentProxy", "Uninstall", "ClearData", "FileDelete", "CreateAndroidContainerV2", "ResetAndroidContainer", "ResetAndroidContainerV2", "RenameAndroidContainer", "SwitchAndroidImage", "SwitchAndroidImageV2", "SwitchAndroidPhoneModel", "SetMacvlan", "PullAndroidImage", "RemoveAndroidImage", "RemoveAndroidImageTar", "ExportAndroidImage", "ImportAndroidImage", "ExportAndroidContainer", "ImportAndroidContainer", "AndroidPruneAllImages", "RemovePhoneModelBackup"])
@@ -351,8 +352,7 @@ const taskPointer = (row: ClaimRow) => ({
     steps: [{
       ...(row.afterMs > 0 ? { afterMs: row.afterMs } : {}),
       id: row.stepId,
-      input: row.parameters ?? {},
-      skill: row.kind,
+      ...agentSkillStep(row.kind, row.parameters),
     }],
     version: "1",
   },
@@ -390,6 +390,7 @@ export const registerBoxLink = (app: Hono, sql: Sql, databaseUrl: string): void 
         version?: string
       }
       boxId?: string
+      fileBrowserUrl?: string
       slots?: ReadonlyArray<Record<string, unknown>>
     } | null
     const boxId = body?.boxId ?? ""
@@ -399,7 +400,13 @@ export const registerBoxLink = (app: Hono, sql: Sql, databaseUrl: string): void 
     const text = (value: unknown): string => (typeof value === "string" ? value.trim() : "")
     const diskPct = Number(facts.diskPct ?? 0)
     const reportedPct = Number.isFinite(diskPct) && diskPct > 0 ? Math.round(diskPct) : 0
-    await sql`update device_agent set last_heartbeat_at = now() where device_id = ${device.deviceId}::uuid`
+    const fileBrowserUrl = text(body?.fileBrowserUrl)
+    await sql`
+      update device_agent set
+        last_heartbeat_at = now(),
+        file_browser_url = case when ${fileBrowserUrl} <> '' then ${fileBrowserUrl} else file_browser_url end
+      where device_id = ${device.deviceId}::uuid
+    `
     await sql`
       update device set
         status = 'online',
@@ -949,11 +956,14 @@ export const registerBoxLink = (app: Hono, sql: Sql, databaseUrl: string): void 
     if (device === null) return context.json({ error: "not_found" }, 404)
     const rows = await sql`
       select di.instance_index as index, di.label, di.status, di.width, di.height, di.api_port as "apiPort", di.rpa_port as "rpaPort",
+        d.host, coalesce(da.file_browser_url, '') as "fileBrowserUrl",
         exists (
           select 1 from execution_task_device_lease l
           where l.instance_id = di.id and l.released_at is null and l.expires_at > now()
         ) as busy
       from device_instance di
+      join device d on d.id = di.device_id
+      left join device_agent da on da.device_id = d.id
       where di.device_id = ${device.deviceId}::uuid
       order by di.instance_index
     `
@@ -1012,6 +1022,9 @@ export const registerBoxLink = (app: Hono, sql: Sql, databaseUrl: string): void 
     if (guards.some((item) => item === null) || delays.some((item) => item === null)) return context.json({ error: "skill_rejected" }, 400)
     if (steps.some((step) => !skillByCode.has(step.skill ?? "") || (noBatch.has(step.skill ?? "") && steps.length > 1))) {
       return context.json({ error: "skill_rejected" }, 400)
+    }
+    if (steps.some((step) => isSharedVideoSkill(step.skill ?? "") && sharedVideoCommand(step.skill ?? "", step.input ?? {}) === null)) {
+      return context.json({ error: "video_path_rejected" }, 400)
     }
     const parameters = steps.map((step) => ({ input: step.input ?? {}, skill: step.skill ?? "" }))
     const existing = await sql<{ id: string; status: string }[]>`

@@ -14,6 +14,38 @@ export type SkillSpec = {
 
 export const skillCatalog: readonly SkillSpec[] = [
   {
+    "batch": true,
+    "code": "UploadVideoThenDelete",
+    "defaults": {
+      "视频目录": "",
+      "视频名": ""
+    },
+    "group": "共享文件",
+    "hint": "视频目录是 /dev/hmg/video 下的文件夹名，视频名是文件名。视频移到云机 /sdcard/Movies，盒子上的源文件删除。",
+    "name": "上传视频后删除",
+    "params": [
+      "视频目录",
+      "视频名"
+    ],
+    "risk": "write"
+  },
+  {
+    "batch": true,
+    "code": "CopyVideoOnly",
+    "defaults": {
+      "视频目录": "",
+      "视频名": ""
+    },
+    "group": "共享文件",
+    "hint": "视频目录是 /dev/hmg/video 下的文件夹名，视频名是文件名。视频复制到云机 /sdcard/Movies，源文件保留。",
+    "name": "只复制视频",
+    "params": [
+      "视频目录",
+      "视频名"
+    ],
+    "risk": "write"
+  },
+  {
     "batch": false,
     "code": "CreateAndroid",
     "defaults": {

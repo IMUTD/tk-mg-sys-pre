@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, height=device-height, user-scalable=no, initial-scale=1, minimum-scale=1, maximum-scale=1">
+    <title>魔云腾</title>
+    <link rel="icon" href="/webplayer/favicon.ico" type="image/x-icon" />
+    <link rel="stylesheet" href="/webplayer/css/play.css" />
+
+    <!-- Wails V3 兼容性层 -->
+    <script type="module" src="/webplayer/js/wails-ipc.js"></script>
+
+    <!-- 在 SDK 之前拦截 WebSocket，处理被踢下线消息 -->
+    <script>
+    (function() {
+        var _WS = window.WebSocket;
+        window._evicted = false;
+        window.WebSocket = function(url, protocols) {
+            var ws = (protocols !== undefined) ? new _WS(url, protocols) : new _WS(url);
+            ws.addEventListener('message', function(e) {
+                if (typeof e.data !== 'string') return;
+                try {
+                    var msg = JSON.parse(e.data);
+                    if (msg.id === 'evicted') {
+                        window._evicted = true;
+                    }
+                } catch(ex) {}
+            });
+            return ws;
+        };
+        window.WebSocket.prototype = _WS.prototype;
+        window.WebSocket.CONNECTING = _WS.CONNECTING;
+        window.WebSocket.OPEN = _WS.OPEN;
+        window.WebSocket.CLOSING = _WS.CLOSING;
+        window.WebSocket.CLOSED = _WS.CLOSED;
+    })();
+    </script>
+
+    <!-- defer: 并行下载，按顺序执行，不阻塞渲染 -->
+    <script defer src="/webplayer/js/adapter-latest.js"></script>
+    <script defer src="/webplayer/js/jquery-3.2.1.min.js"></script>
+    <script defer src="/webplayer/js/h5.lgair.wt.all.min-2.3.js?v=20260413b"></script>
+    <script defer src="/webplayer/js/play.js?v=20260413b"></script>
+</head>
+
+<body class="webpBack">
+<div id="root">
+	<div id="assistDiv">
+		<!-- 视频区域 -->
+		<div id="container"></div>
+		<div id="uicontainer"></div>
+	</div>
+</div>
+<div id="splash" class="splash"></div>
+</body>
+</html>
