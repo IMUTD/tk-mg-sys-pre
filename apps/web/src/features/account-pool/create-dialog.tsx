@@ -14,8 +14,9 @@ import {
 } from "antd"
 import type { Key } from "react"
 import { type ReactNode, useMemo, useState } from "react"
-
+import { PageKey } from "../../lib/pages"
 import { type AccountDevice, type MytAccount, STATUS_OPTIONS } from "../accounts/myt-account"
+import { BusinessLabelFilter } from "../labels/filter-row"
 import {
   CREATE_BACK_TYPE_OPTIONS,
   type CreatePoolQuery,
@@ -227,10 +228,11 @@ export const CreatePoolDialog = ({
           ) : null}
           <Form.Item label="账号分组">
             <Space wrap>
-              <Select
-                aria-label="创建账号分组"
-                mode="multiple"
-                onChange={(value: string[]) => {
+              <BusinessLabelFilter
+                page={PageKey.AccountPool}
+                title="创建账号分组"
+                multiple
+                onChange={(value) => {
                   setQuery({ ...query, tag: value })
                   setSelectedIds([])
                 }}
@@ -238,10 +240,7 @@ export const CreatePoolDialog = ({
                   label: `${item.tag}(${item.total})`,
                   value: item.tag,
                 }))}
-                placeholder="请选择"
-                style={{ width: 180 }}
                 value={[...query.tag]}
-                virtual={false}
               />
               <Button onClick={refreshTags} type="primary">
                 刷新
@@ -250,27 +249,23 @@ export const CreatePoolDialog = ({
           </Form.Item>
           <Form.Item label="标签组合">
             <Space direction="vertical" size={8}>
-              <Select
-                allowClear
-                aria-label="包含标签"
-                mode="multiple"
-                onChange={(value: string[]) => setQuery({ ...query, tagInclude: value })}
+              <BusinessLabelFilter
+                page={PageKey.AccountPool}
+                title="包含标签"
+                scope="account-tag"
+                multiple
+                onChange={(value) => setQuery({ ...query, tagInclude: value })}
                 options={bucketOptions.map((item) => ({ label: item, value: item }))}
-                placeholder="包含标签"
-                style={{ width: 220 }}
                 value={[...query.tagInclude]}
-                virtual={false}
               />
-              <Select
-                allowClear
-                aria-label="排除标签"
-                mode="multiple"
-                onChange={(value: string[]) => setQuery({ ...query, tagExclude: value })}
+              <BusinessLabelFilter
+                page={PageKey.AccountPool}
+                title="排除标签"
+                scope="account-tag"
+                multiple
+                onChange={(value) => setQuery({ ...query, tagExclude: value })}
                 options={bucketOptions.map((item) => ({ label: item, value: item }))}
-                placeholder="排除标签"
-                style={{ width: 220 }}
                 value={[...query.tagExclude]}
-                virtual={false}
               />
               <Radio.Group
                 onChange={(event) => setQuery({ ...query, tagQueryMode: event.target.value })}

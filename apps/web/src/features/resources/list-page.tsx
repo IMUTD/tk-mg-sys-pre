@@ -1,5 +1,5 @@
 import { DeleteOutlined, EditOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons"
-import { App, AutoComplete, Button, Card, Space, Table } from "antd"
+import { App, Button, Card, Space, Table } from "antd"
 import type { Key } from "react"
 import { type ReactNode, useMemo, useState } from "react"
 
@@ -16,6 +16,8 @@ import {
   uniqueTags,
 } from "./myt-material"
 import "./resources.css"
+import { PageKey } from "../../lib/pages"
+import { BusinessLabelFilter } from "../labels/filter-row"
 import { MaterialStatisticsDialog } from "./statistics-dialog"
 
 type ResourcesListPageProps = {
@@ -98,17 +100,16 @@ export const ResourcesListPage = ({ canDelete, canWrite }: ResourcesListPageProp
   return (
     <section className="module-page resources-page">
       <Card className="filter-bar" size="small">
+        <BusinessLabelFilter
+          page={PageKey.StudioTextPool}
+          title="标签"
+          options={tagOptions}
+          value={draft.tag}
+          onChange={(tag) => applyQuery({ tag })}
+          canWrite={canWrite}
+          canDelete={allowDelete}
+        />
         <Space className="resource-filter-row" wrap>
-          <span className="filter-label">标签</span>
-          <AutoComplete
-            allowClear
-            aria-label="标签"
-            onChange={(value: string) => applyQuery({ tag: value ?? "" })}
-            options={tagOptions}
-            placeholder="请选择或输入标签"
-            style={{ width: 185 }}
-            value={draft.tag}
-          />
           <Button icon={<SearchOutlined aria-hidden />} onClick={() => applyQuery()} type="primary">
             搜索
           </Button>

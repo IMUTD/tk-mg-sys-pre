@@ -2,12 +2,17 @@ import { sql } from "drizzle-orm"
 import {
   bigint,
   boolean,
+  check,
+  foreignKey,
   index,
+  integer,
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
@@ -70,6 +75,12 @@ export const operationProxies = pgTable(
     createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).defaultNow().notNull(),
     encryptedCredentials: text("encrypted_credentials").notNull(),
     endpoint: text("endpoint").notNull(),
+    displayId: bigint("display_id", { mode: "number" }).generatedAlwaysAsIdentity().notNull(),
+    configuration: jsonb("configuration"),
+    revision: bigint("revision", { mode: "number" }).notNull().default(1),
+    checkResult: jsonb("check_result"),
+    probeToken: uuid("probe_token"),
+    probeStartedAt: timestamp("probe_started_at", { mode: "date", withTimezone: true }),
     groupId: uuid("group_id")
       .notNull()
       .references(() => accessGroups.id, { onDelete: "cascade" }),
@@ -80,7 +91,50 @@ export const operationProxies = pgTable(
     tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
     updatedAt: timestamp("updated_at", { mode: "date", withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index("operation_proxy_group_created_index").on(table.groupId, table.createdAt)],
+  (table) => [
+    index("operation_proxy_group_created_index").on(table.groupId, table.createdAt),
+    uniqueIndex("operation_proxy_display_id_unique").on(table.displayId),
+    uniqueIndex("operation_proxy_group_id_unique").on(table.groupId, table.id),
+    check("operation_proxy_revision_positive", sql`${table.revision} > 0`),
+    check(
+      "operation_proxy_configuration_object",
+      sql`${table.configuration} is null or jsonb_typeof(${table.configuration}) = 'object'`,
+    ),
+    check(
+      "operation_proxy_result_object",
+      sql`${table.checkResult} is null or jsonb_typeof(${table.checkResult}) = 'object'`,
+    ),
+  ],
+)
+
+export const operationProxyAccelerators = pgTable(
+  "operation_proxy_accelerator",
+  {
+    groupId: uuid("group_id").notNull(),
+    proxyId: uuid("proxy_id").notNull(),
+    acceleratorId: uuid("accelerator_id").notNull(),
+    position: integer("position").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.proxyId, table.acceleratorId] }),
+    unique("operation_proxy_accelerator_position_unique").on(table.proxyId, table.position),
+    index("operation_proxy_accelerator_target_index").on(table.acceleratorId),
+    foreignKey({
+      name: "operation_proxy_accelerator_owner_fk",
+      columns: [table.groupId, table.proxyId],
+      foreignColumns: [operationProxies.groupId, operationProxies.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "operation_proxy_accelerator_target_fk",
+      columns: [table.groupId, table.acceleratorId],
+      foreignColumns: [operationProxies.groupId, operationProxies.id],
+    }).onDelete("restrict"),
+    check(
+      "operation_proxy_accelerator_position_check",
+      sql`${table.position} >= 0 and ${table.position} <= 10`,
+    ),
+    check("operation_proxy_accelerator_check", sql`${table.proxyId} <> ${table.acceleratorId}`),
+  ],
 )
 
 export const operationAccounts = pgTable(

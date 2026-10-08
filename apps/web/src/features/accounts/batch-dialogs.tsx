@@ -1,6 +1,7 @@
 import { Alert, Button, Checkbox, Form, Input, Modal, Radio, Select } from "antd"
 import { type ReactNode, useMemo } from "react"
-
+import { PageKey } from "../../lib/pages"
+import { BusinessLabelFilter } from "../labels/filter-row"
 import {
   type AccountBackType,
   type AccountDevice,
@@ -108,14 +109,13 @@ export const MoveTagDialog = ({
     <Alert message="将旧的分组账号合并到新的分组" showIcon type="info" />
     <Form className="batch-form" layout="vertical" size="small">
       <Form.Item label="旧的分组" required>
-        <Select
-          aria-label="旧的分组"
-          mode="multiple"
-          onChange={(value: string[]) => onChange(value, newTag)}
+        <BusinessLabelFilter
+          page={PageKey.Accounts}
+          title="旧的分组"
+          multiple
+          onChange={(value) => onChange(value, newTag)}
           options={tags.map((tag) => ({ label: tag, value: tag }))}
-          placeholder="请选择待移动的分组"
           value={[...oldTags]}
-          virtual={false}
         />
       </Form.Item>
       <Form.Item label="新的分组" required>
@@ -188,32 +188,27 @@ export const AssignProxyDialog = ({
     <Alert message="将所选代理分组或目标代理分配给所选账号分组" showIcon type="info" />
     <Form className="batch-form" layout="vertical" size="small">
       <Form.Item label="账号分组" required>
-        <Select
-          aria-label="分配账号分组"
-          mode="multiple"
-          onChange={(value: string[]) =>
-            onChange({ accountTags: value, assignMode, proxyId, proxyTags })
-          }
+        <BusinessLabelFilter
+          page={PageKey.Accounts}
+          title="分配账号分组"
+          multiple
+          onChange={(value) => onChange({ accountTags: value, assignMode, proxyId, proxyTags })}
           options={tags.map((tag) => ({ label: tag, value: tag }))}
-          placeholder="请选择账号分组"
           value={[...accountTags]}
-          virtual={false}
         />
       </Form.Item>
       <Form.Item label="代理分组">
-        <Select
-          aria-label="代理分组"
-          mode="multiple"
-          onChange={(value: string[]) =>
-            onChange({ accountTags, assignMode, proxyId, proxyTags: value })
-          }
-          options={[...new Set(proxies.map((proxy) => proxy.remark))].map((tag) => ({
+        <BusinessLabelFilter
+          page={PageKey.Accounts}
+          title="代理分组"
+          scope="proxy"
+          multiple
+          onChange={(value) => onChange({ accountTags, assignMode, proxyId, proxyTags: value })}
+          options={[...new Set(proxies.flatMap((proxy) => proxy.tags ?? []))].map((tag) => ({
             label: tag,
             value: tag,
           }))}
-          placeholder="请选择代理分组"
           value={[...proxyTags]}
-          virtual={false}
         />
       </Form.Item>
       <Form.Item label="目标代理">

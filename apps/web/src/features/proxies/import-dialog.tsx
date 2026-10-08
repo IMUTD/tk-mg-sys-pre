@@ -7,7 +7,7 @@ type ProxyImportDialogProps = {
   readonly nextId: number
   readonly now: string
   readonly onCancel: () => void
-  readonly onImported: (proxies: readonly MytProxy[]) => void
+  readonly onImported: (proxies: readonly MytProxy[]) => Promise<void> | void
 }
 
 export const ProxyImportDialog = ({
@@ -34,29 +34,32 @@ export const ProxyImportDialog = ({
       ? "每行一条 vmess:// 或 vless:// 链接"
       : "IP|端口|用户名|密码 或 IP:端口:用户名:密码，一行一条"
 
-  const submit = (): void => {
+  const submit = async (): Promise<void> => {
     if (!canSubmit) return
     setImporting(true)
-    onImported(
-      importProxies(
-        {
-          autoSeq,
-          content,
-          expiredTime: expiredTime.trim().length === 0 ? null : expiredTime.trim(),
-          proxyType,
-          remark,
-          safe,
-          save,
-          tag: tag.trim(),
-          tun,
-          turbo,
-          type,
-        },
-        nextId,
-        now,
-      ),
-    )
-    setImporting(false)
+    try {
+      await onImported(
+        importProxies(
+          {
+            autoSeq,
+            content,
+            expiredTime: expiredTime.trim().length === 0 ? null : expiredTime.trim(),
+            proxyType,
+            remark,
+            safe,
+            save,
+            tag: tag.trim(),
+            tun,
+            turbo,
+            type,
+          },
+          nextId,
+          now,
+        ),
+      )
+    } finally {
+      setImporting(false)
+    }
   }
 
   return (
@@ -64,7 +67,12 @@ export const ProxyImportDialog = ({
       footer={
         <div className="dialog-footer">
           <Button onClick={onCancel}>取消</Button>
-          <Button disabled={!canSubmit} loading={importing} onClick={submit} type="primary">
+          <Button
+            disabled={!canSubmit}
+            loading={importing}
+            onClick={() => void submit()}
+            type="primary"
+          >
             确认导入
           </Button>
         </div>
@@ -103,7 +111,7 @@ export const ProxyImportDialog = ({
         <Form.Item label="强力安全模式">
           <Switch checked={safe} onChange={setSafe} />
         </Form.Item>
-        {type === "2" ? (
+        {type === "2" || type === "1" ? (
           <Form.Item label="加速节点">
             <Switch checked={turbo} onChange={setTurbo} />
           </Form.Item>

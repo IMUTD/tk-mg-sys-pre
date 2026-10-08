@@ -124,7 +124,7 @@ describe("member PostgreSQL transactions", () => {
       values
         (${firstAdministratorId}, ${"first.admin@example.com"}, ${"unused"}, ${Role.Administrator}, true),
         (${secondAdministratorId}, ${"second.admin@example.com"}, ${"unused"}, ${Role.Administrator}, true),
-        (${auditActorId}, ${"auditor@example.com"}, ${"unused"}, ${Role.Operator}, true)
+        (${auditActorId}, ${"auditor@example.com"}, ${"unused"}, ${Role.Administrator}, false)
     `
       const service = createService(activeDatabase)
       const actorId = UserIdSchema.parse(auditActorId)

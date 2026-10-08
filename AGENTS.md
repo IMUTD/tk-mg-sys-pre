@@ -1,5 +1,76 @@
 # Repository Guidelines
 
+## Mandatory Integration Boundaries
+
+- Only this repository may be modified. `IMUTD/hmg-init-tool` and
+  `IMUTD/hmg-RPA-agent` are read-only references; do not edit their source,
+  wire protocols, or behavior.
+- Preserve completed business behavior, skill semantics, guard order, delays,
+  per-slot execution order, and existing UI layout and interactions.
+- Frontend exceptions authorized for this work are limited to necessary API
+  data wiring, behavior-preserving type fixes, and stale test fixtures. Do not
+  redesign pages, invent undefined business workflows, delete tests, or weaken
+  assertions. Any further exception needs explicit user authorization.
+- On 2026-10-07 the user explicitly authorized replacing group/category filters
+  with the box-management label-row style and sharing remark/group catalogs in
+  one database table. This exception covers the necessary classification UI,
+  API, additive migration, and tests only. Preserve existing assignments and
+  unrelated workflows. Business labels must never replace authorization
+  `access_group` membership or weaken administrator isolation.
+- On 2026-10-07 the user authorized correcting classification visibility to
+  match the read-only reference investigation. One shared table does not mean
+  one global catalog: isolate device, account group, account tag, proxy, resource,
+  and registration classifications. Account-pool selectors reuse account
+  classifications; task device selectors reuse device classifications. Free-text
+  record notes are not classification catalogs. Preserve IDs and assignments;
+  retain ambiguous unused legacy labels for reconciliation instead of guessing
+  their origin or deleting them. Do not invent unverified video/material sharing.
+  Preserve the existing label-row UI, administrator isolation and page permissions.
+- On 2026-10-07 the user authorized aligning proxy configuration, API and
+  persistence with the read-only reference proxy page, enabling V2 acceleration
+  and optional HTTP/SOCKS5 acceleration, and adding real egress IP detection.
+  This exception covers proxy forms, API wiring, validation, additive schema,
+  probe transport and tests. Do not modify the reference website or repositories,
+  implement vendor purchasing, or change device/Agent execution contracts.
+  The original connectivity-probe interpretation is superseded by the explicit
+  IP-only lookup authorization below. Never report server egress or simulated
+  results as the configured IP or as proof of proxy connectivity.
+  Keep secrets encrypted and out of list responses/logs. Block private/reserved
+  probe destinations, validate acceleration ownership and cycles, and discard
+  results if any configuration used by the probe changed during detection.
+- On 2026-10-07 the user explicitly corrected detection to mean IP-information
+  lookup only, without connecting to the proxy node. Query the configured public
+  IP (or its validated public DNS answer) using fixed HTTPS provider endpoints.
+  Do not send proxy ports, credentials or accelerator configuration to providers,
+  use a proxy tunnel, or treat an IP lookup as proof of proxy availability.
+  This exception authorizes detection API/service, result metadata/UI, automatic
+  lookup after creation/import with bounded batches, related tests and docs.
+  Preserve ownership checks, encrypted credentials, history, existing proxy
+  configuration semantics, private/reserved-address checks and database safeguards.
+- The initializer database and business database must remain separate. Read
+  initializer tables with read-only credentials; never copy plaintext passwords.
+  Failed source reads must not be interpreted as deletions.
+- Use additive database migrations only. Preserve existing data and history;
+  do not rewrite published migrations or automatically import `docs/public.sql`.
+- Destructive tests must target disposable databases named `tk_mg_test_*`.
+  Never run schema-reset helpers against a business or initializer database.
+- The backend must not directly execute box RPA or Android commands. Unknown
+  execution outcomes require reconciliation, not automatic replay.
+- Test machine: Debian 13. Use an authorized SSH channel for deployment. Never
+  commit credentials or put them in logs, and never register this machine as a
+  runner for untrusted pull requests. Software-only acceptance is not proof of
+  real hardware execution.
+- Work on `fix/backend-business-integration`, based on `15dcafb`. Never modify
+  `main`, create a commit, push, open a PR, or merge without a subsequent explicit
+  user request after verification. Implementation approval is not commit approval.
+- On 2026-10-08, after the verification report, the user explicitly authorized
+  committing and pushing the reviewed changes with commit notes to the separate
+  `fix/backend-business-integration` branch. This one-time authorization does not
+  permit modifying or pushing `main`, opening a PR, merging, or unrelated future
+  commits.
+- Deliver `docs/后端完善与联调说明.md` with compatibility, configuration,
+  migrations, verification, rollback, and honestly reported remaining gaps.
+
 ## Project Structure & Module Organization
 
 This TypeScript monorepo uses pnpm workspaces:

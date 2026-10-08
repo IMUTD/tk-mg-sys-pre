@@ -1,0 +1,36 @@
+services:
+  web:
+    ports:
+      - "${WEB_BIND_ADDRESS}:18443:443"
+    volumes:
+      - ./nginx.integration.conf:/etc/nginx/conf.d/integration-tls.conf:ro
+      - ./.tls.integration:/etc/nginx/integration-tls:ro
+
+  postgres:
+    ports:
+      - "127.0.0.1:55432:5432"
+
+  redis:
+    ports:
+      - "127.0.0.1:16379:6379"
+
+  initializer-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tk_mg_test_initializer
+      POSTGRES_USER: tk_mg_init
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tk_mg_init -d tk_mg_test_initializer"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - initializer-test-data:/var/lib/postgresql/data
+    networks: [backend]
+
+volumes:
+  initializer-test-data:

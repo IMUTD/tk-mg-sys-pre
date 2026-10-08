@@ -12,6 +12,7 @@ const config = {
     "./src/db/schema/device-commands.ts",
     "./src/db/schema/devices.ts",
     "./src/db/schema/execution-tasks.ts",
+    "./src/db/schema/initializer-sync.ts",
     "./src/db/schema/operations.ts",
     "./src/db/schema/registration-resources.ts",
     "./src/db/schema/storage.ts",

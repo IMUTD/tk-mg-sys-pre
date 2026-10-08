@@ -5,6 +5,8 @@ import { type ReactNode, useState } from "react"
 import { DataTable, type TableColumn } from "../../components/tables/data-table"
 import { type AuditApi, type AuditEvent, type AuditFilter, createAuditApi } from "./api"
 import "./work-logs.css"
+import { createDevicesApi } from "../devices/api"
+import { LabelFilterRow } from "../labels/filter-row"
 
 const groupIdFromMetadata = (metadata: Readonly<Record<string, string>>): string => {
   const value = Object.getOwnPropertyDescriptor(metadata, "groupId")?.value
@@ -33,11 +35,25 @@ export const AuditPage = ({ api: suppliedApi }: AuditPageProps): ReactNode => {
   const [draft, setDraft] = useState(emptyFilter)
   const [filter, setFilter] = useState(emptyFilter)
   const events = useQuery({ queryFn: () => api.list(filter), queryKey: ["audit", filter] })
+  const groups = useQuery({
+    queryKey: ["audit-access-groups"],
+    queryFn: () => createDevicesApi().groups(),
+  })
   const page = events.data ?? { items: [], page: filter.page, pageSize: filter.pageSize, total: 0 }
   const changePage = (nextPage: number): void => setFilter({ ...filter, page: nextPage })
   return (
     <section className="module-page work-logs-page">
       <Card className="filter-bar" size="small">
+        <LabelFilterRow
+          title="分组筛选"
+          options={(groups.data ?? []).map((group) => ({ value: group.id, label: group.name }))}
+          selected={draft.groupId ? [draft.groupId] : []}
+          onChange={(values) => {
+            const next = { ...draft, groupId: values[0] ?? "" }
+            setDraft(next)
+            setFilter({ ...next, page: 1 })
+          }}
+        />
         <Space className="resource-filter-row" wrap>
           <span className="filter-label">操作</span>
           <Input
@@ -56,15 +72,6 @@ export const AuditPage = ({ api: suppliedApi }: AuditPageProps): ReactNode => {
             placeholder="操作者 UUID"
             style={{ width: 200 }}
             value={draft.actorId ?? ""}
-          />
-          <span className="filter-label">分组</span>
-          <Input
-            allowClear
-            aria-label="分组筛选"
-            onChange={(event) => setDraft({ ...draft, groupId: event.target.value })}
-            placeholder="分组 UUID"
-            style={{ width: 200 }}
-            value={draft.groupId ?? ""}
           />
           <span className="filter-label">目标</span>
           <Input

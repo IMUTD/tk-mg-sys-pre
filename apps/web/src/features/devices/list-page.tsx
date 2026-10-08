@@ -1,13 +1,28 @@
-import { PlusOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons"
+import { ReloadOutlined, SearchOutlined } from "@ant-design/icons"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Alert, App, Button, Checkbox, Empty, Input, Modal, Progress, Select, Space, Table, Tag, Typography } from "antd"
+import {
+  Alert,
+  App,
+  Button,
+  Checkbox,
+  Empty,
+  Input,
+  Modal,
+  Progress,
+  Select,
+  Space,
+  Table,
+  Tag,
+  Typography,
+} from "antd"
 import type { ColumnsType } from "antd/es/table"
-import { type ReactNode, useMemo, useState } from "react"
+import { type ReactNode, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-
-import { hideMiddle, shortDate } from "./myt-device"
 import { type BoxLabel, createDevicesApi, type DevicesApi, type OwnedBox } from "./api"
+import { hideMiddle, shortDate } from "./myt-device"
 import "./devices.css"
+import { labelsChanged } from "../labels/api"
+import { LabelFilterRow } from "../labels/filter-row"
 
 type DeviceListPageProps = {
   readonly api?: DevicesApi
@@ -43,10 +58,9 @@ const matchesLabel = (filter: LabelFilter, id: string | null): boolean => {
 export const DeviceListPage = ({
   api = createDevicesApi(),
   canDelete,
-  canWrite: _canWrite,
-  isAdministrator: _isAdministrator,
+  canWrite,
+  isAdministrator,
 }: DeviceListPageProps): ReactNode => {
-  void canDelete
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { message } = App.useApp()
@@ -77,6 +91,14 @@ export const DeviceListPage = ({
     await queryClient.invalidateQueries({ queryKey: ["owned-boxes"] })
     await queryClient.invalidateQueries({ queryKey: ["box-labels"] })
   }
+  useEffect(() => {
+    const reload = () => {
+      void queryClient.invalidateQueries({ queryKey: ["box-labels"] })
+      void queryClient.invalidateQueries({ queryKey: ["owned-boxes"] })
+    }
+    window.addEventListener("business-labels-changed", reload)
+    return () => window.removeEventListener("business-labels-changed", reload)
+  }, [queryClient])
 
   const copyText = async (value: string) => {
     try {
@@ -108,8 +130,8 @@ export const DeviceListPage = ({
         if (!haystack.includes(versionText)) return false
       }
       if (text.length === 0) return true
-      return [box.remarkName ?? "", box.boxGroupName ?? "", box.host, box.externalId].some((value) =>
-        value.toLowerCase().includes(text),
+      return [box.remarkName ?? "", box.boxGroupName ?? "", box.host, box.externalId].some(
+        (value) => value.toLowerCase().includes(text),
       )
     })
   }, [boxes.data, enabled, groupFilter, keyword, remarkFilter, version])
@@ -148,6 +170,7 @@ export const DeviceListPage = ({
       setAddKind(null)
       setAddName("")
       await refresh()
+      labelsChanged()
     } catch (error) {
       message.error(displayError(error))
     }
@@ -160,6 +183,7 @@ export const DeviceListPage = ({
       if (kind === "remark" && remarkFilter === item.id) setRemarkFilter("all")
       if (kind === "group" && groupFilter === item.id) setGroupFilter("all")
       await refresh()
+      labelsChanged()
     } catch (error) {
       message.error(displayError(error))
     }
@@ -167,14 +191,18 @@ export const DeviceListPage = ({
 
   const clearOnBox = async (box: OwnedBox, kind: "remark" | "group") => {
     await api.assignLabels(
-      kind === "remark" ? { deviceIds: [box.id], remarkId: null } : { deviceIds: [box.id], boxGroupId: null },
+      kind === "remark"
+        ? { deviceIds: [box.id], remarkId: null }
+        : { deviceIds: [box.id], boxGroupId: null },
     )
     await refresh()
   }
 
   const applyBatch = async () => {
     const deviceIds = [...selected]
-    const input: { boxGroupId?: string | null; deviceIds: string[]; remarkId?: string | null } = { deviceIds }
+    const input: { boxGroupId?: string | null; deviceIds: string[]; remarkId?: string | null } = {
+      deviceIds,
+    }
     if (batchRemark === "clear") input.remarkId = null
     else if (batchRemark !== "keep") input.remarkId = batchRemark
     if (batchGroup === "clear") input.boxGroupId = null
@@ -195,11 +223,20 @@ export const DeviceListPage = ({
     }
   }
 
-  const labelMark = (kind: "remark" | "group", name: string | null, clearLabel: string, onClear: () => void) =>
+  const labelMark = (
+    kind: "remark" | "group",
+    name: string | null,
+    clearLabel: string,
+    onClear: () => void,
+  ) =>
     name === null || name.length === 0 ? null : (
       <Tag
-        closable
-        closeIcon={<span aria-label={clearLabel}>×</span>}
+        closable={canWrite}
+        closeIcon={
+          <span role="img" aria-label={clearLabel}>
+            ×
+          </span>
+        }
         color={kind === "remark" ? "blue" : "orange"}
         onClose={(event) => {
           event.preventDefault()
@@ -223,7 +260,11 @@ export const DeviceListPage = ({
       ),
       width: 48,
       render: (_value, box) => (
-        <Checkbox aria-label={`选择 ${box.host}`} checked={selected.has(box.id)} onChange={() => toggleOne(box.id)} />
+        <Checkbox
+          aria-label={`选择 ${box.host}`}
+          checked={selected.has(box.id)}
+          onChange={() => toggleOne(box.id)}
+        />
       ),
     },
     {
@@ -245,8 +286,12 @@ export const DeviceListPage = ({
       title: "备注/分组",
       width: 220,
       render: (_value, box) => {
-        const remark = labelMark("remark", box.remarkName, `清除 ${box.host} 的备注`, () => clearOnBox(box, "remark"))
-        const group = labelMark("group", box.boxGroupName, `清除 ${box.host} 的分组`, () => clearOnBox(box, "group"))
+        const remark = labelMark("remark", box.remarkName, `清除 ${box.host} 的备注`, () =>
+          clearOnBox(box, "remark"),
+        )
+        const group = labelMark("group", box.boxGroupName, `清除 ${box.host} 的分组`, () =>
+          clearOnBox(box, "group"),
+        )
         return (
           <div className="meta-cell">
             <div className="box-label-pair">
@@ -255,7 +300,15 @@ export const DeviceListPage = ({
               {remark === null && group === null ? <span className="muted">-</span> : null}
             </div>
             <div>
-              <Tag color={box.status === "online" ? "success" : box.status === "offline" ? "error" : "default"}>
+              <Tag
+                color={
+                  box.status === "online"
+                    ? "success"
+                    : box.status === "offline"
+                      ? "error"
+                      : "default"
+                }
+              >
                 {box.status === "online" ? "在线" : box.status === "offline" ? "离线" : "未知"}
               </Tag>
             </div>
@@ -268,7 +321,9 @@ export const DeviceListPage = ({
       title: "型号",
       width: 80,
       render: (_value, box) => (
-        <Tag color={modelLabel(box.model) === "P1" ? "success" : "processing"}>{modelLabel(box.model)}</Tag>
+        <Tag color={modelLabel(box.model) === "P1" ? "success" : "processing"}>
+          {modelLabel(box.model)}
+        </Tag>
       ),
     },
     {
@@ -301,7 +356,9 @@ export const DeviceListPage = ({
                 <Progress
                   percent={box.diskPct}
                   showInfo={false}
-                  strokeColor={box.diskPct >= 90 ? "#F56C6C" : box.diskPct >= 70 ? "#E6A23C" : "#67C23A"}
+                  strokeColor={
+                    box.diskPct >= 90 ? "#F56C6C" : box.diskPct >= 70 ? "#E6A23C" : "#67C23A"
+                  }
                   strokeWidth={6}
                   style={{ width: 80 }}
                 />
@@ -333,43 +390,50 @@ export const DeviceListPage = ({
       title: "操作",
       width: 90,
       render: (_value, box) => (
-        <Button onClick={() => navigate(`/operations/devices/${box.id}/control`)} size="small" type="primary">
+        <Button
+          onClick={() => navigate(`/operations/devices/${box.id}/control`)}
+          size="small"
+          type="primary"
+        >
           中控
         </Button>
       ),
     },
   ]
 
-  const catalogRow = (kind: "remark" | "group", title: string, items: readonly BoxLabel[], filter: LabelFilter, setFilter: (value: LabelFilter) => void) => (
-    <div className={`label-row tone-${kind}`}>
-      <span className="label-row-title">{title}</span>
-      {items.map((item) => (
-        <Tag
-          className={filter === item.id ? "label-tag-on" : undefined}
-          closable
-          color={kind === "remark" ? "blue" : "orange"}
-          key={item.id}
-          onClick={() => setFilter(filter === item.id ? "all" : item.id)}
-          onClose={(event) => {
-            event.preventDefault()
-            void removeCatalog(kind, item)
-          }}
-        >
-          {item.name}
-        </Tag>
-      ))}
-      <Button
-        aria-label={`添加${title}`}
-        className="label-plus"
-        icon={<PlusOutlined />}
-        onClick={() => {
-          setAddKind(kind)
-          setAddName("")
-        }}
-        size="small"
-        type="text"
-      />
-    </div>
+  const catalogRow = (
+    kind: "remark" | "group",
+    title: string,
+    items: readonly BoxLabel[],
+    filter: LabelFilter,
+    setFilter: (value: LabelFilter) => void,
+  ) => (
+    <LabelFilterRow
+      title={title}
+      kind={kind}
+      selected={filter === "all" ? [] : [filter]}
+      onChange={(values) => setFilter(values[0] ?? "all")}
+      options={[
+        { value: "none", label: kind === "group" ? "未分组" : "未备注" },
+        ...items.map((item) => ({
+          value: item.id,
+          label: item.name,
+          removable: canDelete === true && isAdministrator,
+        })),
+      ]}
+      {...(canWrite
+        ? {
+            onAdd: () => {
+              setAddKind(kind)
+              setAddName("")
+            },
+          }
+        : {})}
+      onRemove={(id) => {
+        const item = items.find((label) => label.id === id)
+        if (item !== undefined) void removeCatalog(kind, item)
+      }}
+    />
   )
 
   if (boxes.isError) {
@@ -422,30 +486,6 @@ export const DeviceListPage = ({
             style={{ width: 110 }}
             value={enabled}
           />
-          <span className="filter-label">备注</span>
-          <Select
-            aria-label="筛选备注"
-            onChange={setRemarkFilter}
-            options={[
-              { label: "全部备注", value: "all" },
-              { label: "未备注", value: "none" },
-              ...remarks.map((item) => ({ label: item.name, value: item.id })),
-            ]}
-            style={{ width: 140 }}
-            value={remarkFilter}
-          />
-          <span className="filter-label">分组</span>
-          <Select
-            aria-label="筛选分组"
-            onChange={setGroupFilter}
-            options={[
-              { label: "全部分组", value: "all" },
-              { label: "未分组", value: "none" },
-              ...groups.map((item) => ({ label: item.name, value: item.id })),
-            ]}
-            style={{ width: 140 }}
-            value={groupFilter}
-          />
           <Button icon={<SearchOutlined />} onClick={() => void boxes.refetch()}>
             搜索
           </Button>
@@ -474,7 +514,9 @@ export const DeviceListPage = ({
         scroll={{ x: 1280 }}
         size="small"
       />
-      <Typography.Text type="secondary">点击序列号或 IP 可以复制。全选只选中当前筛选结果。</Typography.Text>
+      <Typography.Text type="secondary">
+        点击序列号或 IP 可以复制。全选只选中当前筛选结果。
+      </Typography.Text>
       <Modal
         okText="添加"
         onCancel={() => setAddKind(null)}
@@ -491,11 +533,29 @@ export const DeviceListPage = ({
           value={addName}
         />
       </Modal>
-      <Modal okText="分配" onCancel={() => setBatchOpen(false)} onOk={() => void applyBatch()} open={batchOpen} title="批量分配备注和分组">
+      <Modal
+        okText="分配"
+        onCancel={() => setBatchOpen(false)}
+        onOk={() => void applyBatch()}
+        open={batchOpen}
+        title="批量分配备注和分组"
+      >
         <Space direction="vertical" style={{ width: "100%" }}>
           <span>已选 {selected.size} 台</span>
-          <Select aria-label="批量备注" onChange={setBatchRemark} options={remarkOptions} style={{ width: "100%" }} value={batchRemark} />
-          <Select aria-label="批量分组" onChange={setBatchGroup} options={groupOptions} style={{ width: "100%" }} value={batchGroup} />
+          <Select
+            aria-label="批量备注"
+            onChange={setBatchRemark}
+            options={remarkOptions}
+            style={{ width: "100%" }}
+            value={batchRemark}
+          />
+          <Select
+            aria-label="批量分组"
+            onChange={setBatchGroup}
+            options={groupOptions}
+            style={{ width: "100%" }}
+            value={batchGroup}
+          />
         </Space>
       </Modal>
     </section>

@@ -70,7 +70,7 @@ export const registerFoundationAccessRoutes = (
       }
       const allGroups = await groups.listGroups()
       const visibleGroups =
-        principal.scope.role === Role.Administrator
+        principal.scope.role === Role.Administrator && !principal.scope.restrictGroups
           ? allGroups
           : allGroups.filter((group) => principal.scope.groupIds.includes(group.id))
       return context.json({ items: visibleGroups })

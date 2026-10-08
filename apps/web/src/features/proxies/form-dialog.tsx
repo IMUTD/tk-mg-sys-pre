@@ -11,6 +11,7 @@ import {
 } from "./myt-proxy"
 
 type ProxyFormDialogProps = {
+  readonly busy?: boolean
   readonly onCancel: () => void
   readonly onSubmit: (proxy: MytProxy) => void
   readonly proxies: readonly MytProxy[]
@@ -22,6 +23,7 @@ export const ProxyFormDialog = ({
   onSubmit,
   proxies,
   record,
+  busy = false,
 }: ProxyFormDialogProps): ReactNode => {
   const { message } = App.useApp()
   const [extra, setExtra] = useState(record.extra)
@@ -42,10 +44,12 @@ export const ProxyFormDialog = ({
   const [turboNodeList, setTurboNodeList] = useState<number[]>([...record.turboNodeList])
   const [type, setType] = useState(record.type)
   const [username, setUsername] = useState(record.username)
-  const turboOptions = turboNodeProxies(proxies).map((item) => ({
-    label: turboNodeLabel(item),
-    value: item.id,
-  }))
+  const turboOptions = turboNodeProxies(proxies)
+    .filter((item) => item.id !== record.id && item.groupId === record.groupId)
+    .map((item) => ({
+      label: turboNodeLabel(item),
+      value: item.id,
+    }))
   const isV2 = type === "0"
   const isBuiltin = type === "3"
   const showHttpFields = !isBuiltin
@@ -54,6 +58,17 @@ export const ProxyFormDialog = ({
   const showSaveTurbo = !isV2
 
   const submit = (): void => {
+    if (
+      !isV2 &&
+      (ip.trim().length === 0 || !/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535)
+    ) {
+      message.error("请填写代理 IP 或域名，以及 1-65535 的端口")
+      return
+    }
+    if (isV2 && extra.trim().length === 0) {
+      message.error("请填写 VMess/VLESS 链接或出站 JSON")
+      return
+    }
     if (showHttpFields && ip.trim().length > 0 && port.trim().length === 0) {
       message.error("请填写端口")
       return
@@ -73,7 +88,7 @@ export const ProxyFormDialog = ({
       save: showSaveTurbo ? save : false,
       tag,
       tun,
-      turbo: type === "2" ? turbo : false,
+      turbo: isV2 || turbo,
       turboNode: showSaveTurbo ? turboNode : null,
       turboNodeList: showSaveTurbo ? turboNodeList : [],
       type,
@@ -95,12 +110,13 @@ export const ProxyFormDialog = ({
 
   return (
     <Modal
+      centered
       footer={
         <div className="dialog-footer">
           <Button onClick={onCancel} type="text">
             取消
           </Button>
-          <Button onClick={submit} type="primary">
+          <Button loading={busy} onClick={submit} type="primary">
             确认
           </Button>
         </div>
@@ -108,6 +124,7 @@ export const ProxyFormDialog = ({
       onCancel={onCancel}
       open
       title={record.id === 0 ? "新增代理" : "修改代理"}
+      styles={{ body: { maxHeight: "calc(100dvh - 180px)", overflowY: "auto" } }}
       width={600}
     >
       <Form labelCol={{ style: { width: 110 } }} layout="horizontal" size="small">
@@ -136,7 +153,7 @@ export const ProxyFormDialog = ({
               <Input
                 aria-label="IP"
                 onChange={(event) => setIp(event.target.value)}
-                placeholder="域名或者IP地址,留空直连走本地网络"
+                placeholder="域名或者IP地址"
                 value={ip}
               />
             </Form.Item>
@@ -206,7 +223,7 @@ export const ProxyFormDialog = ({
                 onChange={(value: number | null) => setTurboNode(value ?? null)}
                 options={turboOptions}
                 placeholder="请选择"
-                style={{ width: 370 }}
+                style={{ width: "100%", maxWidth: 370 }}
                 value={turboNode}
                 virtual={false}
               />
@@ -215,12 +232,12 @@ export const ProxyFormDialog = ({
               <Select
                 allowClear
                 aria-label="加速列表"
-                maxCount={100}
+                maxCount={10}
                 mode="multiple"
                 onChange={(value: number[]) => setTurboNodeList(value)}
                 options={turboOptions}
                 placeholder="请选择多个加速节点（优先使用）"
-                style={{ width: 370 }}
+                style={{ width: "100%", maxWidth: 370 }}
                 value={turboNodeList}
                 virtual={false}
               />
@@ -237,10 +254,9 @@ export const ProxyFormDialog = ({
             配合TUN模式打开,强隐私,使用前请联系客服确认
           </span>
         </Form.Item>
-        {type === "2" ? (
+        {type === "2" || type === "1" ? (
           <Form.Item label="加速节点">
-            <Switch checked={turbo} onChange={setTurbo} />
-            <span className="form-hint form-hint-warn">让S5可作为加速节点使用</span>
+            <Switch aria-label="加速节点" checked={turbo} onChange={setTurbo} />
           </Form.Item>
         ) : null}
         {showSaveTurbo ? (

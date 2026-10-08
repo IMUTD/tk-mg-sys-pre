@@ -10,12 +10,14 @@ import {
 const text = (value: unknown): string => (typeof value === "string" ? value : "")
 
 const resourceOf = (extra: Readonly<Record<string, unknown>>): Record<string, string> => {
-  const task = extra.task_param_copy
+  const task = extra["task_param_copy"]
   if (task === null || typeof task !== "object" || Array.isArray(task)) return {}
   const parsed = (task as { parsed_reg_resource?: unknown }).parsed_reg_resource
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {}
   return Object.fromEntries(
-    Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+    Object.entries(parsed).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
   )
 }
 
@@ -24,9 +26,9 @@ const deskExtra = (item: OperationAccount): AccountExtra => {
   const base = emptyExtra()
   return {
     ...base,
-    avatar: text(source.avatar) || item.avatar,
-    nickname: text(source.nickname) || item.name,
-    proxyLabel: text(source.proxyLabel),
+    avatar: text(source["avatar"]) || item.avatar,
+    nickname: text(source["nickname"]) || item.name,
+    proxyLabel: text(source["proxyLabel"]),
     region: item.region,
     task_param_copy: { parsed_reg_resource: resourceOf(source) },
   }
@@ -70,9 +72,9 @@ export const toDeskAccount = (item: OperationAccount, index: number): MytAccount
 
 export const applyCredential = (account: MytAccount, credential: AccountCredential): MytAccount => {
   const resource = { ...account.extra.task_param_copy.parsed_reg_resource }
-  if (credential.emailPassword.length > 0) resource.emailPassword = credential.emailPassword
-  if (credential.msToken.length > 0) resource.msToken = credential.msToken
-  if (credential.pop3Password.length > 0) resource.pop3Password = credential.pop3Password
+  if (credential.emailPassword.length > 0) resource["emailPassword"] = credential.emailPassword
+  if (credential.msToken.length > 0) resource["msToken"] = credential.msToken
+  if (credential.pop3Password.length > 0) resource["pop3Password"] = credential.pop3Password
   return {
     ...account,
     extra: { ...account.extra, task_param_copy: { parsed_reg_resource: resource } },
@@ -92,7 +94,9 @@ export const accountWrite = (account: MytAccount) => {
     if (value.length > 0) resourceSecrets[key] = value
     delete resource[key]
   }
-  const tags = [account.tag, ...account.tagBucket].map((item) => item.trim()).filter((item) => item.length > 0)
+  const tags = [account.tag, ...account.tagBucket]
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
   return {
     app: (account.app || "tiktok") as "tiktok",
     extra: {
@@ -110,7 +114,11 @@ export const accountWrite = (account: MytAccount) => {
     region: account.region,
     ...(Object.keys(resourceSecrets).length > 0 ? { resourceSecrets } : {}),
     ...(account.password.length > 0 ? { secret: account.password } : {}),
-    status: !account.enable ? ("disabled" as const) : account.status === "1" ? ("suspended" as const) : ("ready" as const),
+    status: !account.enable
+      ? ("disabled" as const)
+      : account.status === "1"
+        ? ("suspended" as const)
+        : ("ready" as const),
     tags,
     ...(account.totp.length > 0 ? { totp: account.totp } : {}),
   }

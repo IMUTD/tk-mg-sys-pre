@@ -47,6 +47,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD_URL_ENCODED}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://:${REDIS_PASSWORD_URL_ENCODED}@redis:6379/0
       SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY}
+      PROXY_PROBE_BINARY: ${PROXY_PROBE_BINARY:-/usr/local/bin/sing-box}
       TK_MG_SYSTEM_ACTOR_ID: ${TK_MG_SYSTEM_ACTOR_ID}
       PORT: "3000"
     depends_on:
@@ -93,6 +94,24 @@ services:
       start_period: 15s
     stop_signal: SIGTERM
     stop_grace_period: 30s
+    networks: [backend]
+
+  init-sync:
+    profiles: ["initializer"]
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: api
+    restart: unless-stopped
+    command: ["bun", "apps/api/src/init-sync.ts"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD_URL_ENCODED}@postgres:5432/${POSTGRES_DB}
+      INIT_SOURCE_DATABASE_URL: ${INIT_SOURCE_DATABASE_URL:-}
+      INIT_SOURCE_KEY: ${INIT_SOURCE_KEY:-default}
+      INIT_SYNC_INTERVAL_MS: ${INIT_SYNC_INTERVAL_MS:-5000}
+    depends_on:
+      api:
+        condition: service_healthy
     networks: [backend]
 
   bootstrap-admin:

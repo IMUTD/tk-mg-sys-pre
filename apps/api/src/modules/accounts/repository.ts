@@ -114,6 +114,7 @@ export type AccountCreateInput = {
   readonly proxyId?: string | null | undefined
   readonly region?: string | undefined
   readonly secret: string
+  readonly resourceSecrets?: Readonly<Record<string, string>> | undefined
   readonly status: OperationAccountStatus
   readonly tags: readonly string[]
   readonly totp?: string | undefined
@@ -502,7 +503,7 @@ export const createPostgresAccountRepository = (client: Sql): AccountRepository 
         ${input.platformUid ?? ""}, ${binding.online ?? false}, ${input.region ?? ""}, ${binding.deviceId},
         ${binding.deviceInstanceId}, ${binding.proxyId}, ${input.backupType ?? null},
         ${input.follower ?? null}, ${input.following ?? null}, ${input.avatar ?? ""},
-        ${input.favorite ?? null}, ${client.json(input.extra ?? {})}
+        ${input.favorite ?? null}, ${client.json(z.json().parse(input.extra ?? {}))}
       )
       returning id
     `
@@ -616,7 +617,7 @@ export const createPostgresAccountRepository = (client: Sql): AccountRepository 
         following = ${next.following},
         avatar = ${next.avatar},
         favorite = ${next.favorite},
-        extra = ${client.json(next.extra)},
+        extra = ${client.json(z.json().parse(next.extra))},
         online = ${next.online},
         region = ${next.region},
         device_id = ${binding.deviceId},

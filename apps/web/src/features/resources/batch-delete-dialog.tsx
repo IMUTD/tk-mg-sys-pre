@@ -1,5 +1,7 @@
-import { App, Button, Form, Modal, Radio, Select } from "antd"
+import { App, Button, Form, Modal, Radio } from "antd"
 import { type ReactNode, useState } from "react"
+import { PageKey } from "../../lib/pages"
+import { BusinessLabelFilter } from "../labels/filter-row"
 
 type BatchDeleteDialogProps = {
   readonly onCancel: () => void
@@ -78,14 +80,12 @@ export const BatchDeleteDialog = ({
         </Radio.Group>
         {deleteType === "byTag" ? (
           <Form.Item label="选择标签" required>
-            <Select
-              aria-label="选择标签"
-              onChange={(value: string) => setTag(value)}
+            <BusinessLabelFilter
+              page={PageKey.StudioTextPool}
+              title="选择标签"
+              onChange={(value) => setTag(value || null)}
               options={tags.map((item) => ({ label: item, value: item }))}
-              placeholder="请选择要删除的标签"
-              showSearch
-              value={tag}
-              virtual={false}
+              value={tag ?? ""}
             />
           </Form.Item>
         ) : null}

@@ -27,6 +27,9 @@ import { type ReactNode, useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 
 import "./accounts.css"
+import { PageKey } from "../../lib/pages"
+import { BusinessLabelFilter } from "../labels/filter-row"
+import { accountRequestError, createAccountsApi, type OperationAccount } from "./api"
 import {
   AssignProxyDialog,
   BackupDialog,
@@ -39,7 +42,6 @@ import {
   RestoreDialog,
   TagBucketDialog,
 } from "./batch-dialogs"
-import { accountRequestError, createAccountsApi } from "./api"
 import { accountWrite, applyCredential, toDeskAccount } from "./desk-account"
 import { AccountFormDialog } from "./form-dialog"
 import {
@@ -232,28 +234,39 @@ export const AccountsListPage = ({
     if (groupId.length === 0) return
     const api = createAccountsApi()
     let stop = false
-    void api
-      .list({ groupId, page: 1, pageSize: 500 })
-      .then(async (page) => {
-        const desk = page.items.map(toDeskAccount)
-        const ids = desk.flatMap((item) => (item.recordId === undefined ? [] : [item.recordId]))
-        const credentials = ids.length === 0 ? [] : await api.credentials(groupId, ids)
-        const byId = new Map(credentials.map((item) => [item.id, item]))
-        if (stop) return
-        setAccounts(
-          desk.map((item) => {
-            const credential = item.recordId === undefined ? undefined : byId.get(item.recordId)
-            return credential === undefined ? item : applyCredential(item, credential)
-          }),
-        )
-      })
-      .catch(() => {
-        if (!stop) message.error("账号加载失败")
-      })
+    setAccounts([])
+    setSelectedIds([])
+    const load = async () => {
+      const records: OperationAccount[] = []
+      for (const deleted of [false, true]) {
+        for (let page = 1; !stop; page += 1) {
+          const result = await api.list({ groupId, page, pageSize: 500, deleted })
+          records.push(...result.items)
+          if (result.items.length === 0 || page * result.pageSize >= result.total) break
+        }
+      }
+      const desk = records.map(toDeskAccount)
+      const ids = desk.flatMap((item) => (item.recordId === undefined ? [] : [item.recordId]))
+      const credentials = []
+      for (let offset = 0; offset < ids.length && !stop; offset += 500) {
+        credentials.push(...(await api.credentials(groupId, ids.slice(offset, offset + 500))))
+      }
+      const byId = new Map(credentials.map((item) => [item.id, item]))
+      if (stop) return
+      setAccounts(
+        desk.map((item) => {
+          const credential = item.recordId === undefined ? undefined : byId.get(item.recordId)
+          return credential === undefined ? item : applyCredential(item, credential)
+        }),
+      )
+    }
+    void load().catch(() => {
+      if (!stop) message.error("账号加载失败")
+    })
     return () => {
       stop = true
     }
-  }, [groupId])
+  }, [groupId, message.error])
 
   const applyQuery = (next = draft): void => {
     setDraft(next)
@@ -393,7 +406,7 @@ export const AccountsListPage = ({
     const proxyIds =
       assignForm.proxyId === null
         ? proxies
-            .filter((proxy) => assignForm.proxyTags.includes(proxy.remark))
+            .filter((proxy) => (proxy.tags ?? []).some((tag) => assignForm.proxyTags.includes(tag)))
             .map((proxy) => proxy.id)
         : [assignForm.proxyId]
     return {
@@ -407,22 +420,26 @@ export const AccountsListPage = ({
   return (
     <section className="module-page accounts-page">
       <Card className="filter-bar" size="small">
+        <BusinessLabelFilter
+          page={PageKey.Accounts}
+          title="账号分组"
+          options={tags.map((tag) => ({ value: tag, label: tag }))}
+          value={draft.tag}
+          onChange={(tag) => changeSelectQuery({ tag })}
+          canWrite={canWrite}
+          canDelete={allowDelete}
+        />
+        <BusinessLabelFilter
+          page={PageKey.Accounts}
+          title="标签"
+          scope="account-tag"
+          options={tagBuckets.map((tag) => ({ value: tag, label: tag }))}
+          value={draft.tagBucket}
+          onChange={(tagBucket) => changeSelectQuery({ tagBucket })}
+          canWrite={canWrite}
+          canDelete={allowDelete}
+        />
         <Space className="resource-filter-row" wrap>
-          <span className="filter-label">账号分组：</span>
-          <Select
-            allowClear
-            aria-label="账号分组"
-            onChange={(value: string | null) => changeSelectQuery({ tag: value ?? "" })}
-            options={statistics.map((row) => ({
-              label: `${row.tag}(${row.total})`,
-              value: row.tag === "未分组" ? "" : row.tag,
-            }))}
-            placeholder="请选择账号分组"
-            showSearch
-            style={{ width: 185 }}
-            value={draft.tag.length === 0 ? null : draft.tag}
-            virtual={false}
-          />
           <span className="filter-label">账号状态：</span>
           <Select
             allowClear
@@ -568,16 +585,6 @@ export const AccountsListPage = ({
             placeholder="转移码"
             style={{ width: 180 }}
             value={draft.transferKey}
-          />
-          <Select
-            allowClear
-            aria-label="标签"
-            onChange={(value: string | null) => changeSelectQuery({ tagBucket: value ?? "" })}
-            options={tagBuckets.map((tag) => ({ label: tag, value: tag }))}
-            placeholder="标签"
-            style={{ width: 140 }}
-            value={draft.tagBucket.length === 0 ? null : draft.tagBucket}
-            virtual={false}
           />
           <Button icon={<SearchOutlined aria-hidden />} onClick={() => applyQuery()} type="primary">
             搜索
@@ -839,8 +846,9 @@ export const AccountsListPage = ({
                 </Button>
                 <div>
                   <Tag onClick={() => copyValue(account.username)}>{account.username}</Tag>
-                  {account.extra.task_param_copy.parsed_reg_resource.email === undefined ? null : (
-                    <div>{account.extra.task_param_copy.parsed_reg_resource.email}</div>
+                  {account.extra.task_param_copy.parsed_reg_resource["email"] ===
+                  undefined ? null : (
+                    <div>{account.extra.task_param_copy.parsed_reg_resource["email"]}</div>
                   )}
                   <Tag
                     onClick={() => {

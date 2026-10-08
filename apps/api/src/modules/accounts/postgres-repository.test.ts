@@ -28,6 +28,71 @@ afterEach(async () => {
 
 describe("PostgreSQL account repository", () => {
   databaseIntegrationTest(
+    "seals resource credentials on create and preserves them when editing extra",
+    async () => {
+      activeDatabase = await createMigratedTestDatabase()
+      const client = activeDatabase.client
+      await client`insert into access_group(id,name) values (${groupId},'Resource credentials')`
+      await client`insert into app_user(id,email,password_hash,role)
+      values (${actorId},'resource@example.test','unused','operator')`
+      const accountService = createAccountService({
+        auditRepository: createPostgresAuditRepository(client),
+        cipher: createSecretCipher("12345678901234567890123456789012"),
+        repository: createPostgresAccountRepository(client),
+      })
+      const resourceSecrets = {
+        emailPassword: "private-email-password",
+        msToken: "private-ms-token",
+        pop3Password: "private-pop3-password",
+      }
+      const created = await accountService.create(UserIdSchema.parse(actorId), groupId, {
+        identifier: "resource-account",
+        name: "Resource account",
+        note: "",
+        secret: accountSecret,
+        status: "ready",
+        tags: [],
+        resourceSecrets,
+        extra: {
+          task_param_copy: {
+            parsed_reg_resource: { email: "resource@example.test", ...resourceSecrets },
+          },
+        },
+      })
+      const stored =
+        await client`select extra,encrypted_secret from operation_account where id = ${created.id}`
+      for (const value of Object.values(resourceSecrets)) {
+        expect(JSON.stringify(created)).not.toContain(value)
+        expect(JSON.stringify(stored)).not.toContain(value)
+      }
+      expect(created.extra).not.toHaveProperty("sealed")
+      const edited = await accountService.update(UserIdSchema.parse(actorId), groupId, created.id, {
+        extra: {
+          nickname: "Renamed",
+          task_param_copy: { parsed_reg_resource: { email: "updated@example.test" } },
+        },
+      })
+      expect(edited?.extra).not.toHaveProperty("sealed")
+      expect(
+        await accountService.reveal(UserIdSchema.parse(actorId), groupId, [created.id]),
+      ).toEqual([{ id: created.id, password: accountSecret, totp: "", ...resourceSecrets }])
+      await accountService.update(UserIdSchema.parse(actorId), groupId, created.id, {
+        resourceSecrets: { msToken: "rotated-ms-token" },
+      })
+      expect(
+        await accountService.reveal(UserIdSchema.parse(actorId), groupId, [created.id]),
+      ).toEqual([
+        {
+          id: created.id,
+          password: accountSecret,
+          totp: "",
+          ...resourceSecrets,
+          msToken: "rotated-ms-token",
+        },
+      ])
+    },
+  )
+  databaseIntegrationTest(
     "encrypts an account secret at rest and masks it from the list API",
     async () => {
       // Given

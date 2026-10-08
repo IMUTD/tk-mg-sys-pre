@@ -27,7 +27,7 @@ export const RobotFormDialog = ({
   const [remark, setRemark] = useState(record.remark)
 
   const draft = (): Robot => {
-    const chain = chains.find((item) => item.id === chainId)
+    const chain = chains.find((item) => item.id === String(chainId))
     return {
       ...record,
       accountCount,

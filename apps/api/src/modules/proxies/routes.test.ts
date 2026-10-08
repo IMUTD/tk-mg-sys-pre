@@ -25,6 +25,20 @@ const proxy: OperationProxy = {
 }
 
 const proxyService: ProxyService = {
+  credentials: async () => ({ username: "fixture", password: "fixture-secret", extra: "" }),
+  detect: async () => ({
+    ok: false,
+    message: "proxy_address_not_public",
+    check_time: Date.now(),
+    channel: "us",
+    mode: "quick",
+    use_turbo: false,
+    include_response: false,
+    successes: 0,
+    failures: 1,
+    status: 0,
+    results: [],
+  }),
   create: async () => proxy,
   delete: async () => 0,
   list: async (): Promise<ProxyPage> => ({ items: [proxy], page: 1, pageSize: 20, total: 1 }),
@@ -65,6 +79,44 @@ const login = async (app: ReturnType<typeof createApp>): Promise<string> => {
 }
 
 describe("proxy routes", () => {
+  for (const action of ["credentials", "detect"]) {
+    it(`denies ${action} for read-only operators and hidden groups`, async () => {
+      for (const [scope, status, permissions] of [
+        [groupId, 403, [Permission.OperationsRead]],
+        [hiddenGroupId, 404, [Permission.OperationsWrite]],
+      ] as const) {
+        const { app } = createAuthenticatedApp(permissions)
+        const cookie = await login(app)
+        expect(
+          (
+            await app.request(`/api/groups/${scope}/operations/proxies/${proxy.id}/${action}`, {
+              method: "POST",
+              body: "{}",
+              headers: { "Content-Type": "application/json", Cookie: cookie },
+            })
+          ).status,
+        ).toBe(status)
+      }
+    })
+  }
+  it("validates probe options and sends no-store for sensitive responses", async () => {
+    const { app } = createAuthenticatedApp([Permission.OperationsWrite])
+    const cookie = await login(app)
+    const path = `/api/groups/${groupId}/operations/proxies/${proxy.id}`
+    const headers = { "Content-Type": "application/json", Cookie: cookie }
+    expect(
+      (
+        await app.request(`${path}/detect`, {
+          method: "POST",
+          headers,
+          body: '{"url":"http://127.0.0.1"}',
+        })
+      ).status,
+    ).toBe(400)
+    const response = await app.request(`${path}/credentials`, { method: "POST", headers })
+    expect(response.status).toBe(200)
+    expect(response.headers.get("cache-control")).toBe("no-store")
+  })
   it("hides a proxy group outside the operator scope and audits the denial", async () => {
     // Given
     const { app, auditRepository } = createAuthenticatedApp([Permission.OperationsRead])

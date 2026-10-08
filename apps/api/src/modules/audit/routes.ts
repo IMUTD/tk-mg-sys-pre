@@ -35,7 +35,14 @@ export const registerAuditRoutes = (
     if (hasPageAuthorizationFailure(authorization)) return authorization.response
     const query = AuditQuerySchema.safeParse(context.req.query())
     return query.success
-      ? context.json(await explorerRepository.list(query.data))
+      ? context.json(
+          await explorerRepository.list({
+            ...query.data,
+            ...(authorization.principal.scope.restrictGroups
+              ? { allowedGroupIds: authorization.principal.scope.groupIds }
+              : {}),
+          }),
+        )
       : context.json({ error: "invalid_audit_filter" }, 400)
   })
 }

@@ -22,6 +22,8 @@ export type MemberConflictCode =
   | "invalid_group_ids"
   | "last_administrator"
   | "member_in_use"
+  | "init_tool_account"
+  | "administrator_only_in_init_tool"
 
 export class MemberConflictError extends Error {
   public readonly code: MemberConflictCode
@@ -385,7 +387,9 @@ export const createPostgresMemberRepository = (client: Sql): MemberRepository =>
   },
   listGroups: async () => {
     const rows = await client<{ readonly id: string; readonly name: string }[]>`
-      select id, name from access_group order by name asc, id asc
+      select id, name from access_group
+      where id <> '00000000-0000-4000-8000-000000000001'::uuid
+      order by name asc, id asc
     `
     return rows.map((row) => ({ id: GroupIdSchema.parse(row.id), name: row.name }))
   },

@@ -113,14 +113,17 @@ const sealResource = (
   secrets: Readonly<Record<string, string>>,
 ): Record<string, unknown> => {
   const next = { ...(extra ?? {}) }
-  const task = next.task_param_copy
+  const task = next["task_param_copy"]
   const parsed =
-    task !== null && typeof task === "object" && !Array.isArray(task) && "parsed_reg_resource" in task
+    task !== null &&
+    typeof task === "object" &&
+    !Array.isArray(task) &&
+    "parsed_reg_resource" in task
       ? { ...(task.parsed_reg_resource as Record<string, unknown>) }
       : {}
   for (const key of Object.keys(secrets)) delete parsed[key]
-  next.task_param_copy = { parsed_reg_resource: parsed }
-  next.sealed = cipher.encrypt(JSON.stringify(secrets))
+  next["task_param_copy"] = { parsed_reg_resource: parsed }
+  next["sealed"] = cipher.encrypt(JSON.stringify(secrets))
   return next
 }
 
@@ -148,8 +151,14 @@ export const createAccountService = (dependencies: Dependencies): AccountService
     return count
   },
   create: async (actorId, rawGroupId, input) => {
+    const { resourceSecrets, ...rest } = input
     const account = await dependencies.repository.create({
-      ...input,
+      ...rest,
+      ...(resourceSecrets === undefined
+        ? {}
+        : {
+            extra: sealResource(dependencies.cipher, rest.extra, resourceSecrets),
+          }),
       encryptedSecret: encryptOptional(dependencies.cipher, input.secret),
       encryptedTotp: encryptOptional(dependencies.cipher, input.totp),
       groupId: GroupIdSchema.parse(rawGroupId),
@@ -220,8 +229,8 @@ export const createAccountService = (dependencies: Dependencies): AccountService
       const stored = await dependencies.repository.find(groupId, id)
       if (stored === null) continue
       const sealed =
-        typeof stored.extra.sealed === "string" && stored.extra.sealed.length > 0
-          ? decryptJson(dependencies.cipher, stored.extra.sealed)
+        typeof stored.extra["sealed"] === "string" && stored.extra["sealed"].length > 0
+          ? decryptJson(dependencies.cipher, stored.extra["sealed"])
           : {}
       rows.push({
         emailPassword: textField(sealed, "emailPassword"),
@@ -245,7 +254,30 @@ export const createAccountService = (dependencies: Dependencies): AccountService
         ? {}
         : { encryptedTotp: dependencies.cipher.encrypt(input.totp) }
     const { resourceSecrets, ...rest } = input
-    const extra = resourceSecrets === undefined ? rest.extra : sealResource(dependencies.cipher, rest.extra, resourceSecrets)
+    const stored = await dependencies.repository.find(
+      GroupIdSchema.parse(rawGroupId),
+      OperationAccountIdSchema.parse(rawAccountId),
+    )
+    if (stored === null) return null
+    const oldSealed =
+      typeof stored.extra["sealed"] === "string" ? { sealed: stored.extra["sealed"] } : {}
+    const extra =
+      resourceSecrets === undefined
+        ? rest.extra === undefined
+          ? undefined
+          : { ...rest.extra, ...oldSealed }
+        : sealResource(
+            dependencies.cipher,
+            { ...stored.extra, ...rest.extra },
+            {
+              ...Object.fromEntries(
+                Object.entries(decryptJson(dependencies.cipher, oldSealed.sealed ?? "")).filter(
+                  (item): item is [string, string] => typeof item[1] === "string",
+                ),
+              ),
+              ...resourceSecrets,
+            },
+          )
     const account = await dependencies.repository.update(
       GroupIdSchema.parse(rawGroupId),
       OperationAccountIdSchema.parse(rawAccountId),

@@ -105,6 +105,7 @@ export type AccountProxy = {
   ip: string
   port: number
   remark: string
+  tags?: readonly string[]
 }
 
 export type MytAccount = {
@@ -312,7 +313,7 @@ export const uniqueTagBuckets = (accounts: readonly MytAccount[]): string[] =>
   ].sort((left, right) => left.localeCompare(right, "zh-CN"))
 
 export const uniqueProxyTags = (proxies: readonly AccountProxy[]): string[] => [
-  ...new Set(proxies.map((proxy) => proxy.remark).filter((item) => item.length > 0)),
+  ...new Set(proxies.flatMap((proxy) => proxy.tags ?? []).filter((item) => item.length > 0)),
 ]
 
 export const isRecentlyDeleted = (account: MytAccount, now = Date.now()): boolean => {

@@ -11,7 +11,7 @@ import {
 } from "drizzle-orm/pg-core"
 
 import { accessGroups, appUsers } from "./auth"
-import { deviceInstances, devices } from "./devices"
+import { deviceGroupHistory, deviceInstances, devices } from "./devices"
 
 export const deviceCommands = pgTable(
   "device_command",
@@ -56,13 +56,13 @@ export const deviceCommands = pgTable(
     index("device_command_device_created_index").on(table.groupId, table.deviceId, table.createdAt),
     foreignKey({
       columns: [table.deviceId, table.groupId],
-      foreignColumns: [devices.id, devices.groupId],
-      name: "device_command_device_group_fk",
+      foreignColumns: [deviceGroupHistory.deviceId, deviceGroupHistory.groupId],
+      name: "device_command_device_fk",
     }),
     foreignKey({
       columns: [table.instanceId, table.deviceId],
       foreignColumns: [deviceInstances.id, deviceInstances.deviceId],
-      name: "device_command_instance_device_fk",
+      name: "device_command_instance_fk",
     }),
   ],
 )

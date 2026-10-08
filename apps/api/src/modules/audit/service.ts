@@ -22,6 +22,7 @@ export type AuditEvent = AuditEventInput & {
 }
 
 export type AuditFilter = {
+  readonly allowedGroupIds?: readonly string[]
   readonly action?: string | undefined
   readonly actorId?: string | undefined
   readonly createdAfter?: Date | undefined
@@ -85,6 +86,8 @@ export const createInMemoryAuditRepository = (): AuditRepository &
           (filter.createdAfter === undefined || event.createdAt >= filter.createdAfter) &&
           (filter.createdBefore === undefined || event.createdAt <= filter.createdBefore) &&
           (filter.groupId === undefined || eventGroupId === filter.groupId) &&
+          (filter.allowedGroupIds === undefined ||
+            (eventGroupId !== undefined && filter.allowedGroupIds.includes(eventGroupId))) &&
           (filter.target === undefined || event.target === filter.target)
         )
       })
@@ -150,6 +153,8 @@ export const createPostgresAuditRepository = (
     const createdBefore = filter.createdBefore ?? null
     const groupId = filter.groupId ?? null
     const target = filter.target ?? null
+    const allowedGroups = filter.allowedGroupIds ?? []
+    const scoped = filter.allowedGroupIds !== undefined
     const offset = (filter.page - 1) * filter.pageSize
     const rows = await client<AuditEventRow[]>`
       select id, actor_id as "actorId", action, outcome, target, metadata, created_at as "createdAt"
@@ -160,6 +165,7 @@ export const createPostgresAuditRepository = (
         and (${createdBefore}::timestamptz is null or created_at <= ${createdBefore}::timestamptz)
         and (${groupId}::text is null or metadata ->> 'groupId' = ${groupId})
         and (${target}::text is null or target = ${target})
+        and (not ${scoped} or metadata ->> 'groupId' = any(${allowedGroups}::text[]))
       order by created_at desc, id desc
       limit ${filter.pageSize}
       offset ${offset}
@@ -173,6 +179,7 @@ export const createPostgresAuditRepository = (
         and (${createdBefore}::timestamptz is null or created_at <= ${createdBefore}::timestamptz)
         and (${groupId}::text is null or metadata ->> 'groupId' = ${groupId})
         and (${target}::text is null or target = ${target})
+        and (not ${scoped} or metadata ->> 'groupId' = any(${allowedGroups}::text[]))
     `
     return {
       items: rows.map(toAuditEvent),

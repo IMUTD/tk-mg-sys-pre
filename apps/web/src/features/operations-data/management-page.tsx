@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { Alert, Button, Card, Input, Select, Space, Typography } from "antd"
 import { type ReactNode, useMemo, useState } from "react"
-
+import { LabelFilterRow } from "../labels/filter-row"
 import type { ManagedRecord, OperationsDataApi } from "./api"
 import { type CreateField, ManagementDialog } from "./management-dialog"
 import { ManagementTable } from "./management-table"
@@ -96,23 +96,21 @@ export const ManagementPage = ({
         ) : null}
       </div>
       <Card className="filter-bar" size="small">
+        <LabelFilterRow
+          title={`${title}分组`}
+          allowClear={false}
+          options={groupIds.map((id) => ({ label: id, value: id }))}
+          selected={groupId.length === 0 ? [] : [groupId]}
+          onChange={(values) => {
+            const value = values[0]
+            if (value === undefined) return
+            setGroupId(value)
+            onGroupChange?.(value)
+            setPage(1)
+            setSelectedIds(new Set())
+          }}
+        />
         <Space wrap>
-          <span>
-            分组
-            <Select
-              aria-label={`${title}分组`}
-              onChange={(value: string) => {
-                setGroupId(value)
-                onGroupChange?.(value)
-                setPage(1)
-                setSelectedIds(new Set())
-              }}
-              options={groupIds.map((id) => ({ label: id, value: id }))}
-              style={{ marginLeft: 8, minWidth: 240 }}
-              value={groupId.length === 0 ? null : groupId}
-              virtual={false}
-            />
-          </span>
           <Input
             allowClear
             aria-label={`搜索${title}`}

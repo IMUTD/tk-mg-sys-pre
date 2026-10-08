@@ -45,6 +45,27 @@ const device: Device = {
 }
 
 const createApi = (): DevicesApi => ({
+  owned: vi.fn().mockResolvedValue([
+    {
+      ...device,
+      externalId: "test-box",
+      boxGroupId: null,
+      boxGroupName: null,
+      remarkId: null,
+      remarkName: null,
+      firmware: "",
+      disk: "",
+      diskPct: 0,
+      memory: "",
+      lastSeenAt: null,
+    },
+  ]),
+  labels: vi.fn().mockResolvedValue({ administratorId: null, groups: [], remarks: [] }),
+  createRemark: vi.fn(),
+  deleteRemark: vi.fn(),
+  createBoxGroup: vi.fn(),
+  deleteBoxGroup: vi.fn(),
+  assignLabels: vi.fn(),
   cancelCommand: vi.fn(),
   create: vi.fn(),
   createInstance: vi.fn(),

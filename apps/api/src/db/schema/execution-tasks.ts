@@ -13,7 +13,7 @@ import {
 } from "drizzle-orm/pg-core"
 
 import { accessGroups, appUsers } from "./auth"
-import { deviceInstances, devices } from "./devices"
+import { deviceGroupHistory, deviceInstances } from "./devices"
 
 export const executionTasks = pgTable(
   "execution_task",
@@ -49,7 +49,7 @@ export const executionTasks = pgTable(
     uniqueIndex("execution_task_group_idempotency_unique").on(table.groupId, table.idempotencyKey),
     foreignKey({
       columns: [table.deviceId, table.groupId],
-      foreignColumns: [devices.id, devices.groupId],
+      foreignColumns: [deviceGroupHistory.deviceId, deviceGroupHistory.groupId],
       name: "execution_task_device_group_fk",
     }),
     foreignKey({
@@ -78,9 +78,12 @@ export const executionTaskSteps = pgTable(
     finishedAt: timestamp("finished_at", { mode: "date", withTimezone: true }),
     guardCode: text("guard_code"),
     guardIndex: integer("guard_index").notNull().default(0),
+    guardProbeIndex: integer("guard_probe_index"),
+    guardResponse: jsonb("guard_response"),
     guards: jsonb("guards").notNull().default(sql`'[]'::jsonb`),
     groupId: uuid("group_id").notNull(),
     id: uuid("id").defaultRandom().primaryKey(),
+    instanceId: uuid("instance_id").references(() => deviceInstances.id),
     kind: text("kind").notNull(),
     parameters: jsonb("parameters").notNull(),
     parentStepId: uuid("parent_step_id"),
@@ -250,7 +253,7 @@ export const executionTaskDeviceLeases = pgTable(
     }),
     foreignKey({
       columns: [table.deviceId, table.groupId],
-      foreignColumns: [devices.id, devices.groupId],
+      foreignColumns: [deviceGroupHistory.deviceId, deviceGroupHistory.groupId],
       name: "execution_task_device_lease_device_group_fk",
     }),
     foreignKey({

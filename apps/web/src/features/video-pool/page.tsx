@@ -1,4 +1,4 @@
-import { App, Button, Card, Input, Select, Space, Table, type TableColumnsType } from "antd"
+import { App, Button, Card, Input, Space, Table, type TableColumnsType } from "antd"
 import type { Key } from "react"
 import { type ReactNode, useMemo, useState } from "react"
 
@@ -10,6 +10,7 @@ import {
   type VideoWork,
 } from "./catalog"
 import "../mall/mall.css"
+import { LabelFilterRow } from "../labels/filter-row"
 
 const columns: TableColumnsType<VideoWork> = [
   { dataIndex: "uid", title: "UID/作品ID", width: 140 },
@@ -67,6 +68,17 @@ export const VideoPoolPage = ({ canDelete = false }: VideoPoolPageProps): ReactN
   return (
     <section className="module-page video-pool-page">
       <Card size="small">
+        <LabelFilterRow
+          title="账号分组"
+          options={groups}
+          selected={draft.group === "" ? [] : [draft.group]}
+          onChange={(groups) => {
+            const next = { ...draft, group: groups[0] ?? "" }
+            setDraft(next)
+            setQuery(next)
+            setSelectedIds([])
+          }}
+        />
         <Space wrap>
           <Input
             allowClear
@@ -87,16 +99,6 @@ export const VideoPoolPage = ({ canDelete = false }: VideoPoolPageProps): ReactN
             placeholder="文案"
             style={{ width: 200 }}
             value={draft.caption}
-          />
-          <Select
-            allowClear
-            aria-label="账号分组"
-            onChange={(value) => setDraft((current) => ({ ...current, group: value ?? "" }))}
-            options={groups}
-            placeholder="账号分组"
-            style={{ width: 180 }}
-            value={draft.group.length === 0 ? null : draft.group}
-            virtual={false}
           />
           <Button
             onClick={() => {
