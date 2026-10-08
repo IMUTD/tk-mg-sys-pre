@@ -1,5 +1,7 @@
 import { Hono } from "hono"
 import { registerFoundationAccessRoutes } from "./modules/access/routes"
+import { registerPoolRoutes } from "./modules/account-pool/pool-routes"
+import type { PoolService } from "./modules/account-pool/pool-service"
 import { registerAccountPoolRoutes } from "./modules/account-pool/routes"
 import type { AccountPoolService } from "./modules/account-pool/service"
 import { registerAccountRoutes } from "./modules/accounts/routes"
@@ -34,6 +36,7 @@ type AppOptions = {
   readonly authService?: AuthService
   readonly accessGroupRepository?: Pick<MemberRepository, "listGroups">
   readonly accountPoolService?: AccountPoolService
+  readonly poolService?: PoolService
   readonly accountService?: AccountService
   readonly deviceService?: DeviceService
   readonly deviceCommandService?: DeviceCommandService
@@ -128,6 +131,9 @@ export const createApp = (options: AppOptions = {}): Hono => {
         options.auditRepository,
         options.accountPoolService,
       )
+    }
+    if (options.poolService !== undefined) {
+      registerPoolRoutes(app, options.authService, options.auditRepository, options.poolService)
     }
     if (options.proxyService !== undefined) {
       registerProxyRoutes(app, options.authService, options.auditRepository, options.proxyService)

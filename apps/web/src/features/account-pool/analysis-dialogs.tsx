@@ -95,7 +95,11 @@ export const StatsDialog = ({ onClose, pool, variant }: StatsDialogProps): React
     { dataIndex: "playTotal", key: "playTotal", title: "播放总量", width: 90 },
     {
       key: "queryStatus",
-      render: () => <Tag color="success">成功</Tag>,
+      render: (_value: unknown, item: PoolAccount) => (
+        <Tag color={item.statisticsState === "stored" ? "success" : "default"}>
+          {item.statisticsState === "stored" ? "已存数据" : "未查询"}
+        </Tag>
+      ),
       title: "查询状态",
       width: 90,
     },
@@ -162,6 +166,25 @@ export const ProgressDialog = ({ onClose, pool }: ProgressDialogProps): ReactNod
         <Progress percent={progressPercent(item)} size="small" />
       ),
       title: "消耗进度",
+    },
+    {
+      key: "export",
+      render: (_value: unknown, item: PoolProgress) => (
+        <Button
+          onClick={() => {
+            const accounts = pool.accounts.filter(
+              (account) =>
+                account.recordId !== undefined && item.unusedAccountIds?.includes(account.recordId),
+            )
+            downloadCsv(poolAccountsToCsv(accounts), `${item.key}-未使用.csv`)
+            message.success("导出成功")
+          }}
+        >
+          导出未使用
+        </Button>
+      ),
+      title: "操作",
+      width: 130,
     },
   ]
 

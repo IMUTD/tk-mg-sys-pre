@@ -7,6 +7,7 @@ const config = {
   dialect: "postgresql",
   out: "./src/db/migrations",
   schema: [
+    "./src/db/schema/account-pools.ts",
     "./src/db/schema/auth.ts",
     "./src/db/schema/behavior-chains.ts",
     "./src/db/schema/device-commands.ts",

@@ -68,6 +68,19 @@
   `fix/backend-business-integration` branch. This one-time authorization does not
   permit modifying or pushing `main`, opening a PR, merging, or unrelated future
   commits.
+- On 2026-10-08 the user authorized completing account-pool management,
+  additive persistence, necessary frontend API wiring, and simulated fixtures
+  in disposable `tk_mg_test_*` databases. Preserve existing page interactions
+  and the separate account-lease contract. Never change the reference Agent
+  protocol or present simulated consumption as hardware execution. This work
+  must remain uncommitted and unpushed until the user completes manual
+  acceptance and explicitly authorizes its submission.
+- On 2026-10-09, after the account-pool verification and acceptance report,
+  the user explicitly authorized committing and pushing this work to a new
+  branch with commit notes and the integration documentation. Use
+  `feat/account-pool-persistence`, based on the verified business-integration
+  branch. This one-time authorization excludes unrelated workspace changes,
+  modifying or pushing `main`, opening a PR, merging, and future commits.
 - Deliver `docs/后端完善与联调说明.md` with compatibility, configuration,
   migrations, verification, rollback, and honestly reported remaining gaps.
 

@@ -176,10 +176,12 @@ const AccountsPage = (): ReactNode => {
 
 const AccountPoolPage = (): ReactNode => {
   const { session } = useAuth()
+  const [searchParams] = useSearchParams()
   return session.kind === "authenticated" ? (
     <AccountPoolListPage
       canDelete={pageFlags(session.user, PageKey.AccountPool).canDelete}
       canWrite={pageFlags(session.user, PageKey.AccountPool).canWrite}
+      groupId={deviceGroupId(session.user.scope.groupIds, searchParams.get("groupId"))}
     />
   ) : null
 }

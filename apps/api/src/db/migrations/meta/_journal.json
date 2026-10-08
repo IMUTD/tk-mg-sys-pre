@@ -267,6 +267,13 @@
       "when": 1794307200000,
       "tag": "0037_business_label_scopes",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794393600000,
+      "tag": "0038_account_pool_catalog",
+      "breakpoints": true
     }
   ]
 }

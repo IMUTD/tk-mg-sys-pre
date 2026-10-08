@@ -34,9 +34,15 @@ test("real login, synchronized devices, account persistence and compatible Agent
   expect(boxesResponse.ok()).toBe(true)
   const box = z.array(Box).parse(await boxesResponse.json())[0]
   if (box === undefined) throw new Error("Missing synchronized box")
+  const filterFixture = async () => {
+    await page.getByLabel("用户名", { exact: true }).fill("integration.account")
+    await page.getByRole("button", { name: "搜索", exact: true }).click()
+  }
   await page.goto("/operations/accounts")
+  await filterFixture()
   await expect(page.getByText("integration.account", { exact: true })).toBeVisible()
   await page.reload()
+  await filterFixture()
   await expect(page.getByText("integration.account", { exact: true })).toBeVisible()
   const accountsPath = `/api/groups/${box.groupId}/operations/accounts`
   await page.getByRole("button", { name: "编辑", exact: true }).click()
@@ -50,11 +56,13 @@ test("real login, synchronized devices, account persistence and compatible Agent
   expect((await saved).ok()).toBe(true)
   await expect(editor).not.toBeVisible()
   await page.reload()
+  await filterFixture()
   await page.getByRole("button", { name: "编辑", exact: true }).click()
   await expect(editor.getByLabel("备注", { exact: true })).toHaveValue("persisted-ui-note")
   await expect(editor.getByLabel("uid", { exact: true })).toHaveValue("integration-uid")
   await editor.getByRole("button", { name: "取消", exact: true }).click()
-  const result = await page.request.get(accountsPath)
+  const fixtureQuery = `${accountsPath}?query=integration.account&pageSize=100`
+  const result = await page.request.get(fixtureQuery)
   const accounts = z
     .object({ items: z.array(z.object({ id: z.string().uuid(), identifier: z.string() })) })
     .parse(await result.json())
@@ -64,7 +72,7 @@ test("real login, synchronized devices, account persistence and compatible Agent
     data: { note: "persisted-browser-note", tags: ["integration", "browser"] },
   })
   expect(update.ok()).toBe(true)
-  expect(await (await page.request.get(accountsPath)).json()).toMatchObject({
+  expect(await (await page.request.get(fixtureQuery)).json()).toMatchObject({
     items: [
       expect.objectContaining({
         id: account.id,

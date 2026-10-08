@@ -6,6 +6,8 @@ import { createApp } from "./app"
 import { createSqlClient } from "./db/client"
 import { purgeExpiredOperationalRows } from "./db/retention"
 import { createSecretCipher } from "./lib/crypto"
+import { createPostgresPoolRepository } from "./modules/account-pool/pool-repository"
+import { createPoolService } from "./modules/account-pool/pool-service"
 import { createPostgresAccountPoolRepository } from "./modules/account-pool/repository"
 import { createAccountPoolService } from "./modules/account-pool/service"
 import { createPostgresAccountRepository } from "./modules/accounts/repository"
@@ -84,6 +86,7 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
     auditRepository,
     repository: createPostgresAccountPoolRepository(client),
   })
+  const poolService = createPoolService(createPostgresPoolRepository(client))
   const ipLookupTransport = createIpLookupTransport()
   const proxyService = createProxyService({
     auditRepository,
@@ -125,6 +128,7 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
     deviceCommandService,
     memberService,
     accountPoolService,
+    poolService,
     accountService,
     proxyService,
     registrationResourceService,

@@ -30,6 +30,8 @@ export type PoolAccount = {
   following: number
   heart: number
   id: number
+  recordId?: string
+  statisticsState?: "stored" | "unavailable"
   online: boolean
   playBeforeYesterday: number
   playToday: number
@@ -52,6 +54,8 @@ export type PoolProgress = {
   key: string
   size: number
   total: number
+  round?: number
+  unusedAccountIds?: readonly string[]
 }
 
 export type MytTaskRes = {
@@ -64,13 +68,16 @@ export type MytTaskRes = {
   enable: boolean
   filterCondition: string
   id: number
+  recordId?: string
+  deviceLabel?: string
+  expiresAt?: string
   key: string
   progress: readonly PoolProgress[]
   remark: string
   tag: readonly string[]
   times: number
   updateTime: string
-  userId: number
+  userId: number | string
 }
 
 export type TaskResQuery = {
@@ -136,9 +143,11 @@ export const poolBackTypeLabel = (backType: string): string => {
 
 export const deviceLabel = (
   devices: readonly AccountDevice[],
-  pool: Pick<MytTaskRes, "backType" | "deviceId" | "deviceSeq">,
+  pool: Pick<MytTaskRes, "backType" | "deviceId" | "deviceSeq" | "deviceLabel">,
 ): string => {
   if (pool.backType === "3" || pool.backType === "5") return "-"
+  if (pool.deviceLabel)
+    return pool.deviceSeq === null ? pool.deviceLabel : `${pool.deviceLabel} #${pool.deviceSeq}`
   const device = devices.find((item) => item.id === pool.deviceId)
   const name = device
     ? `${device.ip}-${device.name}`
@@ -164,7 +173,8 @@ export const needsDevice = (backType: string): boolean =>
 
 export const needsSeq = (backType: string): boolean => backType === "1"
 
-export const canJoinPool = (account: MytAccount): boolean => account.transferKey.length === 0
+export const canJoinPool = (account: MytAccount): boolean =>
+  !account.deleted && account.enable && !account.transferred && account.transferKey.length === 0
 
 export const validatePoolKey = (key: string): string | null => {
   const trimmed = key.trim()
@@ -178,6 +188,7 @@ export const toPoolAccount = (account: MytAccount): PoolAccount => ({
   following: account.following,
   heart: account.extra.playTotal,
   id: account.id,
+  ...(account.recordId === undefined ? {} : { recordId: account.recordId }),
   online: account.online,
   playBeforeYesterday: account.extra.playBeforeYesterday,
   playToday: account.extra.playToday,
@@ -261,6 +272,7 @@ export const filterSourceAccounts = (
   if (needsDevice(query.backType) && query.deviceId === null) return []
   return accounts.filter((account) => {
     if (account.deleted) return false
+    if (!canJoinPool(account)) return false
     if (needsDevice(query.backType) && account.deviceId !== query.deviceId) return false
     if (query.deviceSeq !== null && account.deviceSeq !== query.deviceSeq) return false
     if (query.tag.length > 0 && !query.tag.includes(account.tag)) return false
@@ -294,6 +306,10 @@ export const countMatchingAccounts = (
 }
 
 export const poolAccountsToCsv = (accounts: readonly PoolAccount[]): string => {
+  const csvCell = (value: string): string => {
+    const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value
+    return `"${safe.replaceAll('"', '""')}"`
+  }
   const header = "UID,用户名,分组,状态,粉丝,关注,播放总量,备注"
   const rows = accounts.map((item) =>
     [
@@ -305,17 +321,26 @@ export const poolAccountsToCsv = (accounts: readonly PoolAccount[]): string => {
       String(item.following),
       String(item.playTotal),
       item.remark,
-    ].join(","),
+    ]
+      .map(csvCell)
+      .join(","),
   )
   return [header, ...rows].join("\n")
 }
 
 export const unusedAccountsToCsv = (pool: MytTaskRes): string => {
-  const unused: PoolAccount[] = []
+  const unused = new Map<string | number, PoolAccount>()
   for (const item of pool.progress) {
-    unused.push(...pool.accounts.filter((account) => account.tag === item.key).slice(0, item.size))
+    const accounts =
+      item.unusedAccountIds === undefined
+        ? pool.accounts.filter((account) => account.tag === item.key).slice(0, item.size)
+        : pool.accounts.filter(
+            (account) =>
+              account.recordId !== undefined && item.unusedAccountIds?.includes(account.recordId),
+          )
+    for (const account of accounts) unused.set(account.recordId ?? account.id, account)
   }
-  return poolAccountsToCsv(unused)
+  return poolAccountsToCsv([...unused.values()])
 }
 
 export const createPoolFromAccounts = (
