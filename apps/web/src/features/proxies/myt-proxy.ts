@@ -21,8 +21,8 @@ export const DETECT_MODE_OPTIONS = [
 ] as const
 
 export const DETECT_CHANNEL_OPTIONS = [
-  { label: "国内通道", value: "cn" },
-  { label: "海外通道", value: "us" },
+  { label: "IP.SB", value: "cn" },
+  { label: "IPAPI", value: "us" },
 ] as const
 
 export const PROXY_FAQS = [
@@ -40,7 +40,8 @@ export const PROXY_FAQS = [
   {
     key: "detect",
     question: "代理检测失败怎么办？",
-    answer: "请核对 IP、端口、账号和密码，并确认当前环境可访问海外网络，或先配置加速节点后再检测。",
+    answer:
+      "检测只查询配置 IP 的归属信息，不验证代理连通性。请核对公网 IP 或域名，查询服务限流时稍后重试。",
   },
   {
     key: "save",
@@ -68,6 +69,14 @@ export type DetectMode = "detailed" | "quick"
 export type DetectChannel = "cn" | "us"
 
 export type MytProxy = {
+  uuid?: string
+  groupId?: string
+  revision?: number
+  credentialState?: "configured" | "none"
+  v2Protocol?: "vmess" | "vless" | null
+  apiName?: string
+  apiTags?: readonly string[]
+  apiStatus?: string
   bindNumber: number
   createTime: string
   expiredTime: string | null
@@ -113,12 +122,23 @@ export type ProxyQuery = {
 export type ProxyCheckItem = {
   delay: number
   ok: boolean
-  response_body?: { country?: string; ip?: string }
+  response_body?: {
+    country?: string
+    ip?: string
+    countryName?: string
+    region?: string
+    city?: string
+    isp?: string
+    asn?: string
+  }
   status: number
   url: string
 }
 
 export type ProxyCheckResult = {
+  detection_type?: "ip_lookup" | "proxy_connectivity"
+  target_ip?: string
+  connectivity_checked?: boolean
   channel: DetectChannel
   check_time: number
   failures: number
@@ -193,12 +213,6 @@ export const nowText = (): string => {
 
 const formatDateTime = (date: Date, time = "00:00:00"): string =>
   `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${time}`
-
-const daysFromNow = (days: number, time = "12:00:00"): string => {
-  const date = new Date()
-  date.setDate(date.getDate() + days)
-  return formatDateTime(date, time)
-}
 
 const startOfDay = (date: Date): number =>
   new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
@@ -287,13 +301,13 @@ export const getModeTags = (proxy: MytProxy): readonly ProxyModeTag[] => [
 ]
 
 export const turboNodeLabel = (proxy: MytProxy): string => {
-  const kind = proxy.type === "0" ? "[V2🚀]" : "[S5🧦]"
+  const kind = proxy.type === "0" ? "[V2]" : proxy.type === "1" ? "[HTTP]" : "[SOCKS5]"
   const remark = proxy.remark.length > 0 ? `-${proxy.remark}` : ""
   return `${kind}-[${proxy.id}] ${proxy.ip}:${proxy.port}${remark}`
 }
 
 export const turboNodeProxies = (proxies: readonly MytProxy[]): MytProxy[] =>
-  proxies.filter((item) => item.turbo && (item.type === "0" || item.type === "2"))
+  proxies.filter((item) => item.status && (item.type === "0" || item.turbo) && item.type !== "3")
 
 export const uniqueTagOptions = (
   proxies: readonly MytProxy[],
@@ -326,13 +340,18 @@ export const filterProxies = (proxies: readonly MytProxy[], query: ProxyQuery): 
     if (query.tun === "false" && item.tun) return false
     if (query.turboNode.length > 0 && item.turboNode !== Number(query.turboNode)) return false
     if (query.expiredTime.length > 0) {
-      if (item.expiredTime === null || item.expiredTime > query.expiredTime) return false
+      if (
+        item.expiredTime === null ||
+        new Date(item.expiredTime.replace(" ", "T")).getTime() >
+          new Date(query.expiredTime.replace(" ", "T")).getTime()
+      )
+        return false
     }
     if (query.noTag && item.tag.length > 0) return false
     if (query.favorite && !item.favorite) return false
     if (query.search.trim().length > 0) {
       const keyword = query.search.trim()
-      const haystack = [item.ip, item.port, item.username, item.password, item.remark, item.tag]
+      const haystack = [item.ip, item.port, item.remark, item.tag]
       if (!haystack.some((field) => includesIgnoreCase(field, keyword))) return false
     }
     return true
@@ -364,6 +383,24 @@ export const getResultCountry = (item: ProxyCheckItem | null): string =>
   item?.response_body?.country ?? "-"
 
 export const getResultStatusLabel = (ok: boolean): string => (ok ? "成功" : "失败")
+
+const checkMessages: Readonly<Record<string, string>> = {
+  ip_information_found: "IP 信息查询成功",
+  ip_information_failed: "IP 信息查询失败",
+  ip_information_mismatch: "查询响应 IP 与目标不一致",
+  ip_lookup_timeout: "IP 信息查询超时",
+  proxy_address_not_public: "不允许检测内网或保留地址",
+  proxy_connection_failed: "代理连接或身份验证失败",
+  proxy_probe_timeout: "检测超时",
+  probe_start_failed: "检测核心启动失败",
+  accelerator_required: "请先配置加速节点",
+  proxy_region_mismatch: "IP 地区与目标不符",
+  ip_provider_rate_limited: "IP 查询服务限流，请稍后重试",
+  ip_provider_failed: "IP 查询服务暂不可用",
+  invalid_ip_information: "IP 查询响应无效",
+  probe_capacity_exceeded: "检测服务繁忙",
+}
+export const checkMessage = (message: string): string => checkMessages[message] ?? message
 
 export const simulateCheckResult = (proxy: MytProxy, options: DetectOptions, now: Date): string => {
   const reachable = proxy.ip.length > 0 || (proxy.type === "0" && proxy.extra.length > 0)
@@ -461,7 +498,7 @@ export const importProxies = (input: ImportProxyInput, nextId: number, now: stri
       save: input.type === "0" ? false : input.save,
       tag,
       tun: input.tun,
-      turbo: input.type === "2" ? input.turbo : false,
+      turbo: input.type === "0" || input.turbo,
       type: input.type,
     }
     if (input.type === "0") {
@@ -589,36 +626,13 @@ export const proxiesToCsv = (proxies: readonly MytProxy[]): string => {
       item.remark,
       expireDate(item.expiredTime),
       item.updateTime,
-      item.password.length > 0 ? "已配置" : "无",
+      item.password.length > 0 || item.credentialState === "configured" ? "已配置" : "无",
     ]
   })
   return [header, ...rows]
     .map((row) => row.map((cell) => `"${cell.replaceAll('"', '""')}"`).join(","))
     .join("\n")
 }
-
-const seedCheckResult = (ip: string, country: string): string =>
-  JSON.stringify({
-    channel: "us",
-    check_time: 1_726_560_000_000,
-    failures: 0,
-    include_response: true,
-    message: "成功",
-    mode: "detailed",
-    ok: true,
-    results: [
-      {
-        delay: 86,
-        ok: true,
-        response_body: { country, ip },
-        status: 200,
-        url: "ipinfo.io",
-      },
-    ],
-    status: 200,
-    successes: 1,
-    use_turbo: false,
-  } satisfies ProxyCheckResult)
 
 export const createSeedProxies = (): MytProxy[] => []
 

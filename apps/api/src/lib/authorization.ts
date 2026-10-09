@@ -65,6 +65,7 @@ export const ConfigurableRoleSchema = RoleSchema.exclude([Role.Administrator])
 export type ConfigurableRole = z.infer<typeof ConfigurableRoleSchema>
 
 export type AccessScope = {
+  readonly restrictGroups?: boolean
   readonly groupIds: readonly GroupId[]
   readonly pages: readonly PageAccess[]
   readonly permissions: readonly Permission[]
@@ -72,6 +73,7 @@ export type AccessScope = {
 }
 
 type AccessScopeInput = {
+  readonly restrictGroups?: boolean
   readonly groupIds: readonly GroupId[]
   readonly pages?: readonly PageAccess[]
   readonly permissions?: readonly Permission[]
@@ -83,6 +85,7 @@ export const createAccessScope = (input: AccessScopeInput): AccessScope => {
   const permissions =
     input.permissions ?? PermissionSchema.array().parse(permissionsForPages(pages))
   return {
+    ...(input.restrictGroups ? { restrictGroups: true } : {}),
     groupIds: input.groupIds,
     pages,
     permissions,
@@ -94,7 +97,7 @@ export const hasPermission = (scope: AccessScope, permission: Permission): boole
   scope.role === Role.Administrator || scope.permissions.includes(permission)
 
 export const canAccessGroup = (scope: AccessScope, groupId: GroupId): boolean =>
-  scope.role === Role.Administrator || scope.groupIds.includes(groupId)
+  (scope.role === Role.Administrator && !scope.restrictGroups) || scope.groupIds.includes(groupId)
 
 export const canViewPage = (scope: AccessScope, path: string): boolean => {
   if (isAdminOnlyPath(path)) return scope.role === Role.Administrator

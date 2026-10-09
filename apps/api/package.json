@@ -4,16 +4,20 @@
   "type": "module",
   "scripts": {
     "test": "bun test",
-    "test:postgres": "bun -e \"const url=Bun.env.TEST_DATABASE_URL; if (!url) { console.error('TEST_DATABASE_URL is required and must target tk_mg_test_*'); process.exit(1) } if (!new URL(url).pathname.slice(1).startsWith('tk_mg_test_')) { console.error('TEST_DATABASE_URL must target tk_mg_test_*'); process.exit(1) }\" && bun test --timeout 120000 --max-concurrency 1 src/db/execution-tasks.postgres.test.ts src/modules/task-execution/postgres-repository.test.ts src/modules/settings/postgres-integration.test.ts src/modules/members/postgres-integration.test.ts src/modules/devices/postgres-integration.test.ts src/modules/device-commands/postgres-repository.test.ts src/modules/device-commands/postgres-integration.test.ts",
+    "test:ip-lookup-network": "bun src/modules/proxies/ip-lookup.network.ts",
+    "test:proxy-network": "bun -e \"if (!Bun.env.PROXY_PROBE_TEST_BINARY) { console.error('PROXY_PROBE_TEST_BINARY is required'); process.exit(1) }\" && bun test --timeout 120000 src/modules/proxies/transport.network.test.ts",
+    "test:postgres": "bun -e \"const url=Bun.env.TEST_DATABASE_URL; if (!url) { console.error('TEST_DATABASE_URL is required and must target tk_mg_test_*'); process.exit(1) } if (!new URL(url).pathname.slice(1).startsWith('tk_mg_test_')) { console.error('TEST_DATABASE_URL must target tk_mg_test_*'); process.exit(1) }\" && bun test --timeout 120000 --max-concurrency 1 src",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@tk-mg/device-adapter": "workspace:*",
-    "@tk-mg/task-execution": "workspace:*",
     "@tk-mg/storage-adapter": "workspace:*",
+    "@tk-mg/task-execution": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.10.6",
+    "i18n-iso-countries": "7.14.0",
     "ioredis": "^6.0.0",
+    "ipaddr.js": "2.2.0",
     "postgres": "^3.4.9",
     "zod": "^4.3.5"
   },

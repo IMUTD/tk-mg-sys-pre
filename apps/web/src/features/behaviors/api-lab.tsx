@@ -1,22 +1,69 @@
 import { Button, Card, Form, Input, Select, Space } from "antd"
-import { type ReactNode, useEffect, useMemo, useState, type MutableRefObject } from "react"
+import { type MutableRefObject, type ReactNode, useEffect, useState } from "react"
 
 import { apiByCode, createStep, type SkillSpec, skillCatalog } from "./rpa-api"
 import { applyScreenToParams, type DevicePoint } from "./screen-map"
 
 const KEY_GROUP: Record<string, string> = {
-  "3": "系统", "4": "系统", "5": "系统", "6": "系统", "26": "系统", "27": "系统",
-  "82": "系统", "83": "系统", "84": "系统", "187": "系统", "219": "系统",
-  "19": "导航", "20": "导航", "21": "导航", "22": "导航", "23": "导航", "61": "导航",
-  "92": "导航", "93": "导航", "111": "导航", "122": "导航", "123": "导航",
-  "24": "音量/媒体", "25": "音量/媒体", "91": "音量/媒体", "164": "音量/媒体",
-  "85": "音量/媒体", "86": "音量/媒体", "87": "音量/媒体", "88": "音量/媒体",
-  "89": "音量/媒体", "90": "音量/媒体", "126": "音量/媒体", "127": "音量/媒体",
-  "28": "编辑", "62": "编辑", "66": "编辑", "67": "编辑", "112": "编辑", "124": "编辑",
-  "17": "符号", "18": "符号", "55": "符号", "56": "符号", "68": "符号", "69": "符号",
-  "70": "符号", "71": "符号", "72": "符号", "73": "符号", "74": "符号", "75": "符号",
-  "76": "符号", "77": "符号", "81": "符号",
-  "57": "修饰", "58": "修饰", "59": "修饰", "60": "修饰",
+  "3": "系统",
+  "4": "系统",
+  "5": "系统",
+  "6": "系统",
+  "26": "系统",
+  "27": "系统",
+  "82": "系统",
+  "83": "系统",
+  "84": "系统",
+  "187": "系统",
+  "219": "系统",
+  "19": "导航",
+  "20": "导航",
+  "21": "导航",
+  "22": "导航",
+  "23": "导航",
+  "61": "导航",
+  "92": "导航",
+  "93": "导航",
+  "111": "导航",
+  "122": "导航",
+  "123": "导航",
+  "24": "音量/媒体",
+  "25": "音量/媒体",
+  "91": "音量/媒体",
+  "164": "音量/媒体",
+  "85": "音量/媒体",
+  "86": "音量/媒体",
+  "87": "音量/媒体",
+  "88": "音量/媒体",
+  "89": "音量/媒体",
+  "90": "音量/媒体",
+  "126": "音量/媒体",
+  "127": "音量/媒体",
+  "28": "编辑",
+  "62": "编辑",
+  "66": "编辑",
+  "67": "编辑",
+  "112": "编辑",
+  "124": "编辑",
+  "17": "符号",
+  "18": "符号",
+  "55": "符号",
+  "56": "符号",
+  "68": "符号",
+  "69": "符号",
+  "70": "符号",
+  "71": "符号",
+  "72": "符号",
+  "73": "符号",
+  "74": "符号",
+  "75": "符号",
+  "76": "符号",
+  "77": "符号",
+  "81": "符号",
+  "57": "修饰",
+  "58": "修饰",
+  "59": "修饰",
+  "60": "修饰",
 }
 
 const PKG_OPTIONS = [
@@ -51,12 +98,17 @@ const groupedChoices = (
     if (bucket === undefined) groups.push({ label: name, options: [choice] })
     else bucket.options.push(choice)
   }
-  return groups.length === 1 && groups[0]?.label === "其他" ? options.map((item) => ({ label: item.label, value: item.value })) : groups
+  return groups.length === 1 && groups[0]?.label === "其他"
+    ? options.map((item) => ({ label: item.label, value: item.value }))
+    : groups
 }
 
 type ApiLabProps = {
   readonly applyScreen: MutableRefObject<(start: DevicePoint, end: DevicePoint) => string | null>
-  readonly onEnqueue: (name: string, steps: readonly ReturnType<typeof createStep>[]) => Promise<string | null>
+  readonly onEnqueue: (
+    name: string,
+    steps: readonly ReturnType<typeof createStep>[],
+  ) => Promise<string | null>
   readonly pending: boolean
   readonly skills: readonly SkillSpec[]
 }
@@ -64,7 +116,7 @@ type ApiLabProps = {
 export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps): ReactNode => {
   const list = skills.length > 0 ? skills : skillCatalog()
   const [code, setCode] = useState("TouchClick")
-  const spec = useMemo(() => apiByCode(code), [code, list])
+  const spec = apiByCode(code)
   const [params, setParams] = useState<Record<string, string>>({
     ...createStep("TouchClick", 1).params,
   })
@@ -97,10 +149,22 @@ export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps)
     if (spec === undefined) return null
     if (key === "code" && spec.options !== undefined && spec.options.length > 0) {
       return (
-        <Select
+        <Select<
+          string,
+          { label: string; value?: string; options?: Array<{ label: string; value: string }> }
+        >
           aria-label={key}
           onChange={(value) => setParams((current) => ({ ...current, [key]: value }))}
-          options={groupedChoices(spec.options, (value) => KEY_GROUP[value] ?? ((Number(value) >= 7 && Number(value) <= 16) ? "数字" : (Number(value) >= 29 && Number(value) <= 54) ? "字母" : "其他"))}
+          options={groupedChoices(
+            spec.options,
+            (value) =>
+              KEY_GROUP[value] ??
+              (Number(value) >= 7 && Number(value) <= 16
+                ? "数字"
+                : Number(value) >= 29 && Number(value) <= 54
+                  ? "字母"
+                  : "其他"),
+          )}
           showSearch
           value={params[key] ?? ""}
           virtual={false}
@@ -109,9 +173,10 @@ export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps)
     }
     if (key === "pkg") {
       const current = params[key] ?? ""
-      const options = PKG_OPTIONS.some((item) => item.value === current) || current === ""
-        ? PKG_OPTIONS
-        : [{ label: current, value: current }, ...PKG_OPTIONS]
+      const options =
+        PKG_OPTIONS.some((item) => item.value === current) || current === ""
+          ? PKG_OPTIONS
+          : [{ label: current, value: current }, ...PKG_OPTIONS]
       return (
         <Select
           aria-label={key}
@@ -190,7 +255,7 @@ export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps)
             <Button
               loading={pending}
               onClick={() => {
-                void onEnqueue(code, [{ api: code, id: 1, params }])
+                void onEnqueue(code, [{ ...createStep(code, 1), params }])
               }}
               type="primary"
             >

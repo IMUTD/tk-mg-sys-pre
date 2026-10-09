@@ -62,6 +62,7 @@ const accountService: AccountService = {
     return ids.length
   },
   restore: async () => 0,
+  reveal: async () => [],
   update: async () => account,
   updateTags: async () => 0,
 }

@@ -176,10 +176,12 @@ const AccountsPage = (): ReactNode => {
 
 const AccountPoolPage = (): ReactNode => {
   const { session } = useAuth()
+  const [searchParams] = useSearchParams()
   return session.kind === "authenticated" ? (
     <AccountPoolListPage
       canDelete={pageFlags(session.user, PageKey.AccountPool).canDelete}
       canWrite={pageFlags(session.user, PageKey.AccountPool).canWrite}
+      groupId={deviceGroupId(session.user.scope.groupIds, searchParams.get("groupId"))}
     />
   ) : null
 }
@@ -198,6 +200,7 @@ const ProxiesPage = (): ReactNode => {
   const { session } = useAuth()
   return session.kind === "authenticated" ? (
     <ProxiesListPage
+      groupIds={session.user.scope.groupIds}
       canDelete={pageFlags(session.user, PageKey.Proxies).canDelete}
       canWrite={pageFlags(session.user, PageKey.Proxies).canWrite}
     />
@@ -291,7 +294,10 @@ const AuthenticatedRoutes = (): ReactNode => (
       />
       <Route path="/operations/resources" element={<Navigate replace to="/studio/text-pool" />} />
       <Route path="/operations/devices" element={guarded(PageKey.Devices, <DevicesPage />)} />
-      <Route path="/operations/devices/:deviceId/control" element={guarded(PageKey.Devices, <DeviceControlPage />)} />
+      <Route
+        path="/operations/devices/:deviceId/control"
+        element={guarded(PageKey.Devices, <DeviceControlPage />)}
+      />
       <Route
         path="/operations/devices/new"
         element={guarded(PageKey.Devices, <DeviceCreateRoute />)}

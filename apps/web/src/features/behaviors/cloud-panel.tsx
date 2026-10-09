@@ -2,7 +2,7 @@ import { Card, Form, Select, Tag } from "antd"
 import { type ReactNode, useEffect, useRef, useState } from "react"
 
 import type { CloudBox, CloudDevice } from "./rpa-api"
-import { devicePointFromEvent, type DevicePoint } from "./screen-map"
+import { type DevicePoint, devicePointFromEvent } from "./screen-map"
 
 type CloudPanelProps = {
   readonly boxId: number
@@ -92,7 +92,7 @@ export const CloudPanel = ({
                 label: `${item.host}${item.online ? "" : "（离线）"}`,
                 value: item.id,
               }))}
-              value={boxId || undefined}
+              {...(boxId ? { value: boxId } : {})}
               virtual={false}
             />
           </Form.Item>

@@ -1,0 +1,38 @@
+.classification-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+.classification-title {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.classification-row.tone-remark .classification-title {
+  color: #0958d9;
+}
+.classification-row.tone-group .classification-title {
+  color: #d46b08;
+}
+.classification-row .ant-tag {
+  cursor: pointer;
+  max-width: 100%;
+  margin-inline-end: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.classification-selected {
+  box-shadow: 0 0 0 2px currentColor;
+}
+.classification-plus {
+  flex: 0 0 24px;
+  width: 24px;
+}
+.classification-row [role="button"]:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 2px;
+}

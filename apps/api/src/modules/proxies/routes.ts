@@ -1,4 +1,4 @@
-import type { Hono } from "hono"
+import type { Context, Hono } from "hono"
 import { z } from "zod"
 
 import { Permission } from "../../lib/authorization"
@@ -11,12 +11,18 @@ import {
   authorizeOperationRequest,
   hasOperationAuthorizationFailure,
 } from "../resources/route-authorization"
-import { ProxyIdSchema, ProxyStatusSchema } from "./repository"
+import {
+  DetectOptionsSchema,
+  ProxyConfigurationError,
+  ProxyConfigurationSchema,
+} from "./configuration"
+import { ProxyConflictError, ProxyIdSchema, ProxyStatusSchema } from "./repository"
 import type { ProxyService } from "./service"
 
 const TagsSchema = z.array(z.string().trim().min(1).max(64)).max(20).default([])
 const CreateSchema = z.object({
-  credentials: z.string().min(1).max(20_000),
+  credentials: z.string().max(20_000).default(""),
+  configuration: ProxyConfigurationSchema.optional(),
   endpoint: z.string().trim().min(3).max(320),
   name: z.string().trim().min(1).max(160),
   note: z.string().max(2000).default(""),
@@ -24,7 +30,9 @@ const CreateSchema = z.object({
   tags: TagsSchema,
 })
 const UpdateSchema = z.object({
-  credentials: z.string().min(1).max(20_000).optional(),
+  expectedRevision: z.number().int().positive().optional(),
+  credentials: z.string().max(20_000).optional(),
+  configuration: ProxyConfigurationSchema.optional(),
   endpoint: z.string().trim().min(3).max(320).optional(),
   name: z.string().trim().min(1).max(160).optional(),
   note: z.string().max(2000).optional(),
@@ -45,6 +53,25 @@ const parseJson = async <T>(request: Request, schema: z.ZodType<T>): Promise<T |
     return parsed.success ? parsed.data : null
   } catch (error) {
     if (error instanceof SyntaxError) return null
+    throw error
+  }
+}
+const proxyResponse = async (context: Context, run: () => Promise<Response>): Promise<Response> => {
+  try {
+    return await run()
+  } catch (error) {
+    if (error instanceof ProxyConfigurationError || error instanceof SyntaxError)
+      return context.json(
+        {
+          error:
+            error instanceof ProxyConfigurationError ? error.code : "invalid_proxy_credentials",
+        },
+        400,
+      )
+    if (error instanceof ProxyConflictError)
+      return context.json({ error: error.code }, error.code === "proxy_probe_busy" ? 429 : 409)
+    if (error instanceof OperationDeleteConflictError)
+      return context.json({ error: "operation_entity_active" }, 409)
     throw error
   }
 }
@@ -82,9 +109,11 @@ export const registerProxyRoutes = (
     const input = await parseJson(context.req.raw, CreateSchema)
     return input === null
       ? context.json({ error: "invalid_proxy_request" }, 400)
-      : context.json(
-          await service.create(authorization.principal.userId, authorization.groupId, input),
-          201,
+      : proxyResponse(context, async () =>
+          context.json(
+            await service.create(authorization.principal.userId, authorization.groupId, input),
+            201,
+          ),
         )
   })
   app.patch("/api/groups/:groupId/operations/proxies/:proxyId", async (context) => {
@@ -101,13 +130,15 @@ export const registerProxyRoutes = (
     if (!proxyId.success) return context.json({ error: "invalid_proxy_id" }, 400)
     const input = await parseJson(context.req.raw, UpdateSchema)
     if (input === null) return context.json({ error: "invalid_proxy_request" }, 400)
-    const proxy = await service.update(
-      authorization.principal.userId,
-      authorization.groupId,
-      proxyId.data,
-      input,
-    )
-    return proxy === null ? context.json({ error: "not_found" }, 404) : context.json(proxy)
+    return proxyResponse(context, async () => {
+      const proxy = await service.update(
+        authorization.principal.userId,
+        authorization.groupId,
+        proxyId.data,
+        input,
+      )
+      return proxy === null ? context.json({ error: "not_found" }, 404) : context.json(proxy)
+    })
   })
   app.post("/api/groups/:groupId/operations/proxies/batch/delete", async (context) => {
     const authorization = await authorizeOperationRequest(
@@ -130,7 +161,7 @@ export const registerProxyRoutes = (
     if (denied !== null) return denied
     const input = await parseJson(context.req.raw, BatchSchema)
     if (input === null) return context.json({ error: "invalid_batch_request" }, 400)
-    try {
+    return proxyResponse(context, async () => {
       return context.json({
         affected: await service.delete(
           authorization.principal.userId,
@@ -138,10 +169,41 @@ export const registerProxyRoutes = (
           input.ids,
         ),
       })
-    } catch (error) {
-      if (error instanceof OperationDeleteConflictError)
-        return context.json({ error: "operation_entity_active" }, 409)
-      throw error
-    }
+    })
   })
+  for (const action of ["credentials", "detect"] as const) {
+    app.post(`/api/groups/:groupId/operations/proxies/:proxyId/${action}`, async (context) => {
+      const authorization = await authorizeOperationRequest(
+        context,
+        authService,
+        auditRepository,
+        `proxy.${action}`,
+        Permission.OperationsWrite,
+        PageKey.Proxies,
+      )
+      if (hasOperationAuthorizationFailure(authorization)) return authorization.response
+      const id = ProxyIdSchema.safeParse(context.req.param("proxyId"))
+      if (!id.success) return context.json({ error: "invalid_proxy_id" }, 400)
+      context.header("Cache-Control", "no-store")
+      return proxyResponse(context, async () => {
+        if (action === "credentials") {
+          const secret = await service.credentials?.(
+            authorization.principal.userId,
+            authorization.groupId,
+            id.data,
+          )
+          return secret == null ? context.json({ error: "not_found" }, 404) : context.json(secret)
+        }
+        const options = await parseJson(context.req.raw, DetectOptionsSchema)
+        if (options === null) return context.json({ error: "invalid_probe_request" }, 400)
+        const result = await service.detect?.(
+          authorization.principal.userId,
+          authorization.groupId,
+          id.data,
+          options,
+        )
+        return result == null ? context.json({ error: "not_found" }, 404) : context.json(result)
+      })
+    })
+  }
 }

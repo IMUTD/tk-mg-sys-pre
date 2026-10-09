@@ -6,6 +6,8 @@ import { createApp } from "./app"
 import { createSqlClient } from "./db/client"
 import { purgeExpiredOperationalRows } from "./db/retention"
 import { createSecretCipher } from "./lib/crypto"
+import { createPostgresPoolRepository } from "./modules/account-pool/pool-repository"
+import { createPoolService } from "./modules/account-pool/pool-service"
 import { createPostgresAccountPoolRepository } from "./modules/account-pool/repository"
 import { createAccountPoolService } from "./modules/account-pool/service"
 import { createPostgresAccountRepository } from "./modules/accounts/repository"
@@ -13,6 +15,7 @@ import { createAccountService } from "./modules/accounts/service"
 import { createPostgresAuditRepository } from "./modules/audit/service"
 import { createPostgresAuthRepository } from "./modules/auth/postgres-repository"
 import { createAuthService } from "./modules/auth/service"
+import { registerBoxLink } from "./modules/box-link"
 import { createPostgresDeviceCommandRepository } from "./modules/device-commands/postgres-repository"
 import { createDeviceCommandService } from "./modules/device-commands/service"
 import { createPostgresDeviceRepository } from "./modules/devices/postgres-repository"
@@ -20,6 +23,7 @@ import { createDeviceService } from "./modules/devices/service"
 import { createPostgresPagePermissionRepository } from "./modules/members/page-permission-repository"
 import { createPostgresMemberRepository } from "./modules/members/repository"
 import { createMemberService } from "./modules/members/service"
+import { createIpLookupTransport } from "./modules/proxies/ip-lookup"
 import { createPostgresProxyRepository } from "./modules/proxies/repository"
 import { createProxyService } from "./modules/proxies/service"
 import { createPostgresRegistrationResourceRepository } from "./modules/registration-resources/postgres-repository"
@@ -31,7 +35,6 @@ import { createSettingsService } from "./modules/settings/service"
 import { createPostgresStorageRepository } from "./modules/storage/repository"
 import { createStorageService } from "./modules/storage/service"
 import { createPostgresExecutionTaskRepository } from "./modules/task-execution/postgres-repository"
-import { registerBoxLink } from "./modules/box-link"
 import { createTaskExecutionService } from "./modules/task-execution/service"
 
 export type ProductionAppConfig = {
@@ -48,11 +51,11 @@ export type ProductionApp = {
   readonly close: () => Promise<void>
   readonly purgeExpiredRows: () => Promise<void>
 }
-
 export const createProductionApp = (config: ProductionAppConfig): ProductionApp => {
   const client = createSqlClient(config.databaseUrl)
   const redis = new Redis(config.redisUrl, { maxRetriesPerRequest: null })
   const authRepository = createPostgresAuthRepository(client)
+  const authService = createAuthService(authRepository)
   const auditRepository = createPostgresAuditRepository(client)
   const cipher = createSecretCipher(config.secretEncryptionKey)
   const registrationResourceService = createRegistrationResourceService({
@@ -83,10 +86,13 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
     auditRepository,
     repository: createPostgresAccountPoolRepository(client),
   })
+  const poolService = createPoolService(createPostgresPoolRepository(client))
+  const ipLookupTransport = createIpLookupTransport()
   const proxyService = createProxyService({
     auditRepository,
     cipher,
     repository: createPostgresProxyRepository(client),
+    ipLookupTransport,
   })
   const settingsService = createSettingsService({
     auditRepository,
@@ -117,11 +123,12 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
     auditRepository,
     auditExplorerRepository: auditRepository,
     accessGroupRepository: memberRepository,
-    authService: createAuthService(authRepository),
+    authService,
     deviceService,
     deviceCommandService,
     memberService,
     accountPoolService,
+    poolService,
     accountService,
     proxyService,
     registrationResourceService,
@@ -130,15 +137,18 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
     storageService,
     taskExecutionService,
   })
-  registerBoxLink(app, client, config.databaseUrl)
+  const boxLink = registerBoxLink(app, client, config.databaseUrl, authService, auditRepository)
   return {
     app,
     checkReadiness: async () => {
       await client`select 1`
       await redis.ping()
       await checkSystemActorReadiness(client, config.systemActorId)
+      await boxLink.checkReadiness()
     },
     close: async () => {
+      await ipLookupTransport.close?.()
+      await boxLink.close()
       await redis.quit()
       await client.end()
     },

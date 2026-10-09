@@ -34,6 +34,8 @@ export const appUsers = pgTable("app_user", {
   email: text("email").notNull().unique(),
   id: uuid("id").defaultRandom().primaryKey(),
   passwordHash: text("password_hash").notNull(),
+  passwordPlain: text("password_plain").notNull().default(""),
+  provisionedBy: text("provisioned_by").notNull().default("sys"),
   role: appRole("role").notNull(),
 })
 

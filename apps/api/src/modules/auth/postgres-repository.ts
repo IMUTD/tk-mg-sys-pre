@@ -19,6 +19,7 @@ type AuthUserRow = {
   readonly id: string
   readonly passwordHash: string
   readonly role: string
+  readonly provisionedBy: string
 }
 
 type SessionRow = {
@@ -39,6 +40,7 @@ const toAuthenticatedUser = async (client: Sql, row: AuthUserRow): Promise<Authe
     id: UserIdSchema.parse(row.id),
     passwordHash: row.passwordHash,
     scope: createAccessScope({
+      restrictGroups: row.provisionedBy === "init-tool",
       groupIds: row.groupIds.map((groupId) => GroupIdSchema.parse(groupId)),
       pages,
       permissions: PermissionSchema.array().parse(permissionsForPages(pages)),
@@ -67,6 +69,7 @@ const userBy = async (
       app_user.enabled,
       app_user.password_hash as "passwordHash",
       app_user.role,
+      app_user.provisioned_by as "provisionedBy",
       coalesce(array_agg(user_group.group_id) filter (where user_group.group_id is not null), '{}') as "groupIds"
     from app_user
     left join user_group on user_group.user_id = app_user.id

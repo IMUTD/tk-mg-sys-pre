@@ -1,7 +1,8 @@
 import { Alert, Button, Input, Modal, Select, Space, Table } from "antd"
 import type { Key } from "react"
 import { type ReactNode, useMemo, useState } from "react"
-
+import { PageKey } from "../../lib/pages"
+import { BusinessLabelFilter } from "../labels/filter-row"
 import {
   type AccountQuery,
   APP_OPTIONS,
@@ -33,15 +34,21 @@ export const RecycleDialog = ({
 
   return (
     <Modal footer={null} onCancel={onCancel} open title="账号回收站" width="85%">
+      <BusinessLabelFilter
+        page={PageKey.Accounts}
+        title="回收站分组"
+        options={[...new Set(accounts.filter((item) => item.deleted).map((item) => item.tag))]
+          .filter(Boolean)
+          .map((tag) => ({ value: tag, label: tag }))}
+        value={draft.tag}
+        onChange={(tag) => {
+          const next = { ...draft, tag }
+          setDraft(next)
+          setQuery(next)
+          setSelectedIds([])
+        }}
+      />
       <Space className="recycle-filter" wrap>
-        <Input
-          allowClear
-          aria-label="回收站分组"
-          onChange={(event) => setDraft({ ...draft, tag: event.target.value })}
-          placeholder="分组"
-          style={{ width: 140 }}
-          value={draft.tag}
-        />
         <Input
           allowClear
           aria-label="回收站用户名"

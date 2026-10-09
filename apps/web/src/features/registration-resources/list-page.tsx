@@ -6,10 +6,11 @@ import {
   ThunderboltOutlined,
   UploadOutlined,
 } from "@ant-design/icons"
-import { App, AutoComplete, Button, Card, Input, Modal, Select, Space, Table, Tag } from "antd"
+import { App, Button, Card, Input, Modal, Select, Space, Table, Tag } from "antd"
 import type { Key } from "react"
 import { type ReactNode, useMemo, useState } from "react"
-
+import { PageKey } from "../../lib/pages"
+import { BusinessLabelFilter } from "../labels/filter-row"
 import { ResourceFormDialog } from "./resource-form-dialog"
 import "./registration-resources.css"
 import { SmartImportDialog } from "./smart-import-dialog"
@@ -193,6 +194,16 @@ export const RegistrationResourceListPage = ({
   return (
     <section className="module-page registration-resources-page">
       <Card className="filter-bar" size="small">
+        <BusinessLabelFilter
+          page={PageKey.StudioRegistration}
+          title="标签"
+          options={tagOptions}
+          value={draft.tag}
+          onChange={(tag) => changeSelectQuery({ tag })}
+          canWrite={canWrite}
+          canDelete={allowDelete}
+          validateName={(name) => (name.includes("+") ? "分组名称不能包含 + 符号" : null)}
+        />
         <Space className="resource-filter-row" wrap>
           <span className="filter-label">搜索</span>
           <Input
@@ -213,16 +224,6 @@ export const RegistrationResourceListPage = ({
             placeholder="备注"
             style={{ width: 185 }}
             value={draft.remark}
-          />
-          <span className="filter-label">标签</span>
-          <AutoComplete
-            allowClear
-            aria-label="标签"
-            onChange={(value: string) => changeSelectQuery({ tag: value ?? "" })}
-            options={tagOptions}
-            placeholder="请选择"
-            style={{ width: 185 }}
-            value={draft.tag}
           />
           <span className="filter-label">状态</span>
           <Select

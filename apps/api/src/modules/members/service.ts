@@ -11,6 +11,7 @@ import {
   type Member,
   MemberConflictError,
   type MemberId,
+  MemberIdSchema,
   type MemberRepository,
   type MemberUpdateInput,
 } from "./repository"
@@ -30,7 +31,8 @@ const groupsForUpdate = (
     throw new MemberConflictError("administrator_only_in_init_tool")
   }
   if (actor !== null && actor.role !== Role.Administrator) {
-    if (role === Role.Administrator) throw new MemberConflictError("administrator_only_in_init_tool")
+    if (role === Role.Administrator)
+      throw new MemberConflictError("administrator_only_in_init_tool")
     if (!sharesGroup(actor.groupIds, existing.groupIds)) return null
     return actor.groupIds
   }
@@ -166,7 +168,7 @@ const memberAuditInputs = (
 
 export const createMemberService = (dependencies: Dependencies): MemberService => ({
   create: async (actorId, input) => {
-    const actor = await dependencies.repository.get(actorId)
+    const actor = await dependencies.repository.get(MemberIdSchema.parse(actorId))
     const requestedGroups = uniqueGroupIds(input.groupIds)
     let groupIds =
       requestedGroups.length > 0
@@ -224,7 +226,7 @@ export const createMemberService = (dependencies: Dependencies): MemberService =
     return member
   },
   createGroup: async (actorId, input) => {
-    const actor = await dependencies.repository.get(actorId)
+    const actor = await dependencies.repository.get(MemberIdSchema.parse(actorId))
     if (actor !== null && actor.role !== Role.Administrator) {
       throw new MemberConflictError("administrator_only_in_init_tool")
     }
@@ -248,7 +250,7 @@ export const createMemberService = (dependencies: Dependencies): MemberService =
         await workflow.lockAdministratorRoster()
         const existing = await workflow.get(memberId)
         if (existing === null) return "not_found"
-        const actor = await workflow.get(actorId)
+        const actor = await workflow.get(MemberIdSchema.parse(actorId))
         if (
           actor !== null &&
           actor.role !== Role.Administrator &&
@@ -270,7 +272,7 @@ export const createMemberService = (dependencies: Dependencies): MemberService =
     }
     const existing = await dependencies.repository.get(memberId)
     if (existing === null) return "not_found"
-    const actor = await dependencies.repository.get(actorId)
+    const actor = await dependencies.repository.get(MemberIdSchema.parse(actorId))
     if (
       actor !== null &&
       actor.role !== Role.Administrator &&
@@ -350,7 +352,7 @@ export const createMemberService = (dependencies: Dependencies): MemberService =
         await workflow.lockAdministratorRoster()
         const existing = await workflow.get(memberId)
         if (existing === null) return null
-        const actor = await workflow.get(actorId)
+        const actor = await workflow.get(MemberIdSchema.parse(actorId))
         const groupIds = groupsForUpdate(actor, existing, input.groupIds, input.role)
         if (groupIds === null) return null
         await assertNotLastAdministrator(workflow.countEnabledAdministrators, existing, input)
@@ -379,7 +381,7 @@ export const createMemberService = (dependencies: Dependencies): MemberService =
     }
     const existing = await dependencies.repository.get(memberId)
     if (existing === null) return null
-    const actor = await dependencies.repository.get(actorId)
+    const actor = await dependencies.repository.get(MemberIdSchema.parse(actorId))
     const groupIds = groupsForUpdate(actor, existing, input.groupIds, input.role)
     if (groupIds === null) return null
     const updateInput: MemberUpdateInput = {

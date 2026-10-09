@@ -1,7 +1,8 @@
 import { Alert, Button, Input, Modal, Space, Table, Tag } from "antd"
 import type { Key } from "react"
 import { type ReactNode, useMemo, useState } from "react"
-
+import { PageKey } from "../../lib/pages"
+import { BusinessLabelFilter } from "../labels/filter-row"
 import { hideMiddle, type TransferStatistic } from "./myt-account"
 
 type TransferDialogProps = {
@@ -66,15 +67,13 @@ export const TransferDialog = ({
           style={{ width: 260 }}
           value={keyFilter}
         />
-        <Input
-          allowClear
-          aria-label="筛选包含分组"
-          onChange={(event) => setTagFilter(event.target.value)}
-          placeholder="筛选包含分组"
-          style={{ width: 220 }}
-          value={tagFilter}
-        />
       </Space>
+      <BusinessLabelFilter
+        page={PageKey.Accounts}
+        title="筛选包含分组"
+        value={tagFilter}
+        onChange={setTagFilter}
+      />
       <Table
         columns={[
           {

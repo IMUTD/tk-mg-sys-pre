@@ -8,7 +8,7 @@ import {
   hasAdministratorAuthorizationFailure,
 } from "../access/administrator-authorization"
 import type { AuditRepository } from "../audit/service"
-import type { AuthService } from "../auth/service"
+import type { AuthService, SessionPrincipal } from "../auth/service"
 import { MemberIdSchema } from "./repository"
 import {
   AccessGroupCreateSchema,
@@ -40,6 +40,15 @@ export const registerMemberRoutes = (
   auditRepository: AuditRepository,
   service: MemberService,
 ): void => {
+  const visibleMember = async (principal: SessionPrincipal, memberId: string): Promise<boolean> => {
+    if (!principal.scope.restrictGroups) return true
+    const member = (await service.list()).find((item) => item.id === memberId)
+    return (
+      member !== undefined &&
+      (member.id === principal.userId ||
+        member.groupIds.some((groupId) => principal.scope.groupIds.includes(groupId)))
+    )
+  }
   app.get("/api/members/pages", async (context) => {
     const authorization = await authorizeAdministratorRequest(
       context,
@@ -78,6 +87,8 @@ export const registerMemberRoutes = (
     if (hasAdministratorAuthorizationFailure(authorization)) return authorization.response
     const memberId = MemberIdSchema.safeParse(context.req.param("memberId"))
     if (!memberId.success) return context.json({ error: "invalid_member_id" }, 400)
+    if (!(await visibleMember(authorization.principal, memberId.data)))
+      return context.json({ error: "not_found" }, 404)
     const items = await service.listMemberPermissions(memberId.data)
     return items === null ? context.json({ error: "not_found" }, 404) : context.json({ items })
   })
@@ -92,6 +103,8 @@ export const registerMemberRoutes = (
     if (hasAdministratorAuthorizationFailure(authorization)) return authorization.response
     const memberId = MemberIdSchema.safeParse(context.req.param("memberId"))
     if (!memberId.success) return context.json({ error: "invalid_member_id" }, 400)
+    if (!(await visibleMember(authorization.principal, memberId.data)))
+      return context.json({ error: "not_found" }, 404)
     const input = await parseJson(context.req.raw, MemberPermissionUpdateSchema)
     if (input === null) return context.json({ error: "invalid_member_permissions" }, 400)
     try {
@@ -190,8 +203,15 @@ export const registerMemberRoutes = (
     if (hasAdministratorAuthorizationFailure(authorization)) return authorization.response
     const memberId = MemberIdSchema.safeParse(context.req.param("memberId"))
     if (!memberId.success) return context.json({ error: "invalid_member_id" }, 400)
+    if (!(await visibleMember(authorization.principal, memberId.data)))
+      return context.json({ error: "not_found" }, 404)
     const input = await parseJson(context.req.raw, MemberUpdateSchema)
     if (input === null) return context.json({ error: "invalid_member_request" }, 400)
+    if (
+      authorization.principal.scope.restrictGroups &&
+      input.groupIds?.some((groupId) => !authorization.principal.scope.groupIds.includes(groupId))
+    )
+      return context.json({ error: "not_found" }, 404)
     try {
       const member = await service.update(authorization.principal.userId, memberId.data, input)
       return member === null ? context.json({ error: "not_found" }, 404) : context.json(member)
@@ -212,6 +232,8 @@ export const registerMemberRoutes = (
     if (hasAdministratorAuthorizationFailure(authorization)) return authorization.response
     const memberId = MemberIdSchema.safeParse(context.req.param("memberId"))
     if (!memberId.success) return context.json({ error: "invalid_member_id" }, 400)
+    if (!(await visibleMember(authorization.principal, memberId.data)))
+      return context.json({ error: "not_found" }, 404)
     try {
       const result = await service.delete(authorization.principal.userId, memberId.data)
       return result === "not_found"

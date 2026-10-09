@@ -68,6 +68,7 @@ describe("configuration, members, and audit PostgreSQL integration", () => {
         insert into app_user (id, email, password_hash, role, enabled)
         values (${auditActorId}, ${"auditor@example.com"}, ${"unused"}, ${"operator"}, true)
       `
+      await client`insert into user_group (user_id, group_id) values (${administratorId}, ${groupId})`
       const auditRepository = createPostgresAuditRepository(client)
       const authService = createAuthService(createPostgresAuthRepository(client))
       const settingsService = createSettingsService({
@@ -145,7 +146,7 @@ describe("configuration, members, and audit PostgreSQL integration", () => {
         method: "POST",
       })
       const roleChanged = await app.request(`/api/members/${member.id}`, {
-        body: JSON.stringify({ enabled: true, groupIds: [groupId], role: "administrator" }),
+        body: JSON.stringify({ enabled: true, groupIds: [groupId], role: "engineering_director" }),
         headers: { "Content-Type": "application/json", Cookie: cookie },
         method: "PATCH",
       })
@@ -158,7 +159,7 @@ describe("configuration, members, and audit PostgreSQL integration", () => {
         method: "POST",
       })
       const groupsChanged = await app.request(`/api/members/${member.id}`, {
-        body: JSON.stringify({ enabled: true, groupIds: [], role: "administrator" }),
+        body: JSON.stringify({ enabled: true, groupIds: [], role: "engineering_director" }),
         headers: { "Content-Type": "application/json", Cookie: cookie },
         method: "PATCH",
       })

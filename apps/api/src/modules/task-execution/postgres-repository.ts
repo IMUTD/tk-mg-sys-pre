@@ -218,7 +218,8 @@ export const createPostgresExecutionTaskRepository = (
   get: async (groupId, taskId) => {
     const rows = await db<
       TaskRow[]
-    >`select ${taskColumns(db)} from execution_task where id = ${taskId} and group_id = ${groupId}`
+    >`select ${taskColumns(db)} from execution_task where id = ${taskId} and group_id = ${groupId}
+      and executor_key <> 'box-agent'`
     const row = rows[0]
     return row === undefined
       ? null
@@ -227,9 +228,9 @@ export const createPostgresExecutionTaskRepository = (
   list: async (groupId, page, pageSize) => {
     const offset = (page - 1) * pageSize
     const rows = await db<TaskRow[]>`select ${taskColumns(db)} from execution_task
-      where group_id = ${groupId} order by created_at desc, id desc limit ${pageSize} offset ${offset}`
+      where group_id = ${groupId} and executor_key <> 'box-agent' order by created_at desc, id desc limit ${pageSize} offset ${offset}`
     const counts = await db<{ readonly total: number }[]>`select count(*)::integer as total
-      from execution_task where group_id = ${groupId}`
+      from execution_task where group_id = ${groupId} and executor_key <> 'box-agent'`
     return {
       items: await Promise.all(
         rows.map((row) =>
@@ -248,7 +249,7 @@ export const createPostgresExecutionTaskRepository = (
   claimTask: async (owner, now, leaseMs) =>
     db.begin(async (tx) => {
       const rows = await tx<TaskRow[]>`select ${taskColumns(tx)} from execution_task
-       where status = 'queued' or (status = 'retry_waiting' and next_retry_at <= ${new Date(now)})
+       where executor_key <> 'box-agent' and (status = 'queued' or (status = 'retry_waiting' and next_retry_at <= ${new Date(now)}))
       order by created_at, id for update skip locked limit 1`
       const row = rows[0]
       if (row === undefined) return null
@@ -556,7 +557,9 @@ export const createPostgresExecutionTaskRepository = (
           readonly claimExpiresAt: Date
           readonly heartbeatAt: Date
         }[]
-      >`update execution_task_run set status = 'recovered', recovery_reason = 'lease_expired', finished_at = ${new Date(now)} where id in (select id from execution_task_run where status in ('claimed','running') and claim_expires_at <= ${new Date(now)} order by claim_expires_at for update skip locked limit ${limit}) returning id, task_id as "taskId", step_id as "stepId", worker_id as "workerId", claim_expires_at as "claimExpiresAt", heartbeat_at as "heartbeatAt"`
+      >`update execution_task_run set status = 'recovered', recovery_reason = 'lease_expired', finished_at = ${new Date(now)} where id in (select id from execution_task_run where status in ('claimed','running') and claim_expires_at <= ${new Date(now)}
+        and task_id in (select id from execution_task where executor_key <> 'box-agent')
+        order by claim_expires_at for update skip locked limit ${limit}) returning id, task_id as "taskId", step_id as "stepId", worker_id as "workerId", claim_expires_at as "claimExpiresAt", heartbeat_at as "heartbeatAt"`
       for (const row of rows) {
         const tasks = await tx<
           {

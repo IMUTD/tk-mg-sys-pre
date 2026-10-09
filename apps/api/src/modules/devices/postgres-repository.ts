@@ -139,7 +139,7 @@ const findPostgresDevice = async (
   deviceId: DeviceId,
 ): Promise<Device | null> => {
   const rows = await client<DeviceRow[]>`
-    select ${deviceColumns(client)} from device where id = ${deviceId} and (
+    select ${deviceColumns(client)} from device where id = ${deviceId} and not assignment_pending and (
       group_id = ${groupId}
       or assignee_user_id in (select user_id from user_group where group_id = ${groupId})
     )
@@ -362,8 +362,8 @@ export const createPostgresDeviceRepository = (client: Sql): DeviceRepository =>
   list: async (groupId) => {
     const rows = await client<DeviceRow[]>`
       select ${deviceColumns(client)} from device
-      where group_id = ${groupId}
-        or assignee_user_id in (select user_id from user_group where group_id = ${groupId})
+      where not assignment_pending and (group_id = ${groupId}
+        or assignee_user_id in (select user_id from user_group where group_id = ${groupId}))
       order by created_at desc, id desc
     `
     return withInstances(client, rows)

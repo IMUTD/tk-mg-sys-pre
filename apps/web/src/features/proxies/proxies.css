@@ -64,6 +64,12 @@
   color: #909399;
 }
 
+.proxy-check-details .ant-descriptions-item-content,
+.proxy-result-summary > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .proxy-mode-tag.is-off {
   color: #c0c4cc;
 }

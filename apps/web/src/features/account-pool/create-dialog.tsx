@@ -1,5 +1,6 @@
 import type { TableColumnsType } from "antd"
 import {
+  Alert,
   App,
   Button,
   Form,
@@ -13,56 +14,57 @@ import {
   Tag,
 } from "antd"
 import type { Key } from "react"
-import { type ReactNode, useMemo, useState } from "react"
-
-import { type AccountDevice, type MytAccount, STATUS_OPTIONS } from "../accounts/myt-account"
+import { type ReactNode, useEffect, useMemo, useState } from "react"
+import { PageKey } from "../../lib/pages"
+import { type MytAccount, STATUS_OPTIONS } from "../accounts/myt-account"
+import { BusinessLabelFilter } from "../labels/filter-row"
+import { type AccountPoolsApi, type PoolWrite, poolRequestError } from "./api"
 import {
   CREATE_BACK_TYPE_OPTIONS,
   type CreatePoolQuery,
   canJoinPool,
-  createPoolFromAccounts,
   DEVICE_SEQ_OPTIONS,
   emptyCreatePoolQuery,
-  filterSourceAccounts,
-  type MytTaskRes,
   needsDevice,
   needsSeq,
-  nowText,
   shortDate,
   statusLabel,
-  uniqueSourceTags,
   uniqueTagBuckets,
 } from "./myt-task-res"
+import { type PoolDeskDevice, sourceFilter, usePoolSources } from "./wiring"
 
 type CreatePoolDialogProps = {
-  readonly devices: readonly AccountDevice[]
-  readonly nextId: number
+  readonly devices: readonly PoolDeskDevice[]
+  readonly api: AccountPoolsApi
+  readonly groupId: string
   readonly onCancel: () => void
-  readonly onSubmit: (pool: MytTaskRes) => void
-  readonly sourceAccounts: readonly MytAccount[]
+  readonly onSubmit: (pool: PoolWrite) => Promise<void>
 }
 
 const CREATE_LIMIT = 3000
 
 export const CreatePoolDialog = ({
   devices,
-  nextId,
+  api,
+  groupId,
   onCancel,
   onSubmit,
-  sourceAccounts,
 }: CreatePoolDialogProps): ReactNode => {
   const { message } = App.useApp()
   const [query, setQuery] = useState<CreatePoolQuery>(emptyCreatePoolQuery)
   const [remark, setRemark] = useState("")
   const [times, setTimes] = useState(1)
-  const [selectedIds, setSelectedIds] = useState<readonly number[]>([])
-  const tagOptions = useMemo(() => uniqueSourceTags(sourceAccounts, query), [query, sourceAccounts])
-  const bucketOptions = useMemo(() => uniqueTagBuckets(sourceAccounts), [sourceAccounts])
-  const matched = useMemo(
-    () => filterSourceAccounts(sourceAccounts, query),
-    [query, sourceAccounts],
-  )
-  const selected = matched.filter((item) => selectedIds.includes(item.id))
+  const [selectedIds, setSelectedIds] = useState<readonly string[]>([])
+  const [saving, setSaving] = useState(false)
+  const [pageSize, setPageSize] = useState(10)
+  const source = usePoolSources(groupId, api, query, devices, pageSize)
+  const tagOptions = source.groups
+  const bucketOptions = useMemo(() => uniqueTagBuckets(source.items), [source.items])
+  const queryKey = JSON.stringify(query)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A changed filter invalidates the selected account UUIDs.
+  useEffect(() => {
+    setSelectedIds([])
+  }, [queryKey])
 
   const changeBackType = (value: string): void => {
     setQuery({
@@ -77,39 +79,40 @@ export const CreatePoolDialog = ({
       message.error("请选择设备")
       return
     }
-    message.success("刷新成功")
+    source.refresh()
   }
 
-  const create = (type: 1 | 2): void => {
+  const create = async (type: 1 | 2): Promise<void> => {
+    if (saving) return
     if (needsDevice(query.backType) && query.deviceId === null) {
       message.error("请选择设备")
       return
     }
-    const candidates = type === 1 ? matched.slice(0, CREATE_LIMIT) : selected
-    if (type === 1 && candidates.length === 0) {
+    if (type === 1 && source.total === 0) {
       message.warning("没有可新建的账号")
       return
     }
-    if (type === 2 && candidates.length === 0) {
+    if (type === 2 && selectedIds.length === 0) {
       message.warning("请选择要新建的账号")
       return
     }
-    onSubmit(
-      createPoolFromAccounts(
-        candidates,
-        {
-          backType: query.backType,
-          deviceId: query.deviceId,
-          deviceSeq: needsSeq(query.backType) ? query.deviceSeq : null,
-          key: remark.trim().length === 0 ? `池-${nextId}` : remark.trim(),
-          remark,
-          tag: query.tag,
-          times,
-        },
-        nextId,
-        nowText(),
-      ),
-    )
+    setSaving(true)
+    try {
+      await onSubmit({
+        filter: sourceFilter(
+          { ...query, deviceSeq: needsSeq(query.backType) ? query.deviceSeq : null },
+          devices,
+        ),
+        mode: type === 1 ? "all" : "selected",
+        ...(type === 2 ? { accountIds: selectedIds } : {}),
+        remark,
+        times,
+      })
+    } catch (error) {
+      message.error(await poolRequestError(error))
+    } finally {
+      setSaving(false)
+    }
   }
 
   const columns: TableColumnsType<MytAccount> = [
@@ -163,11 +166,20 @@ export const CreatePoolDialog = ({
     <Modal
       footer={
         <div className="dialog-footer">
-          <Button onClick={() => create(1)}>
-            新建所有({matched.length > CREATE_LIMIT ? "最多3000" : matched.length})
+          <Button
+            disabled={source.loading || source.error}
+            loading={saving}
+            onClick={() => void create(1)}
+          >
+            新建所有({source.total > CREATE_LIMIT ? "最多3000" : source.total})
           </Button>
-          <Button onClick={() => create(2)} type="primary">
-            新建选中({selected.length})
+          <Button
+            disabled={source.loading || source.error}
+            loading={saving}
+            onClick={() => void create(2)}
+            type="primary"
+          >
+            新建选中({selectedIds.length})
           </Button>
         </div>
       }
@@ -227,10 +239,11 @@ export const CreatePoolDialog = ({
           ) : null}
           <Form.Item label="账号分组">
             <Space wrap>
-              <Select
-                aria-label="创建账号分组"
-                mode="multiple"
-                onChange={(value: string[]) => {
+              <BusinessLabelFilter
+                page={PageKey.AccountPool}
+                title="创建账号分组"
+                multiple
+                onChange={(value) => {
                   setQuery({ ...query, tag: value })
                   setSelectedIds([])
                 }}
@@ -238,10 +251,7 @@ export const CreatePoolDialog = ({
                   label: `${item.tag}(${item.total})`,
                   value: item.tag,
                 }))}
-                placeholder="请选择"
-                style={{ width: 180 }}
                 value={[...query.tag]}
-                virtual={false}
               />
               <Button onClick={refreshTags} type="primary">
                 刷新
@@ -250,27 +260,23 @@ export const CreatePoolDialog = ({
           </Form.Item>
           <Form.Item label="标签组合">
             <Space direction="vertical" size={8}>
-              <Select
-                allowClear
-                aria-label="包含标签"
-                mode="multiple"
-                onChange={(value: string[]) => setQuery({ ...query, tagInclude: value })}
+              <BusinessLabelFilter
+                page={PageKey.AccountPool}
+                title="包含标签"
+                scope="account-tag"
+                multiple
+                onChange={(value) => setQuery({ ...query, tagInclude: value })}
                 options={bucketOptions.map((item) => ({ label: item, value: item }))}
-                placeholder="包含标签"
-                style={{ width: 220 }}
                 value={[...query.tagInclude]}
-                virtual={false}
               />
-              <Select
-                allowClear
-                aria-label="排除标签"
-                mode="multiple"
-                onChange={(value: string[]) => setQuery({ ...query, tagExclude: value })}
+              <BusinessLabelFilter
+                page={PageKey.AccountPool}
+                title="排除标签"
+                scope="account-tag"
+                multiple
+                onChange={(value) => setQuery({ ...query, tagExclude: value })}
                 options={bucketOptions.map((item) => ({ label: item, value: item }))}
-                placeholder="排除标签"
-                style={{ width: 220 }}
                 value={[...query.tagExclude]}
-                virtual={false}
               />
               <Radio.Group
                 onChange={(event) => setQuery({ ...query, tagQueryMode: event.target.value })}
@@ -329,21 +335,32 @@ export const CreatePoolDialog = ({
           </Form.Item>
         </Form>
         <div className="pool-create-table">
+          {source.error ? <Alert type="error" showIcon message="候选账号加载失败" /> : null}
           <Table
             columns={columns}
-            dataSource={matched}
+            dataSource={[...source.items]}
+            loading={source.loading}
             pagination={{
-              pageSize: 10,
+              current: source.page,
+              pageSize,
+              total: source.total,
               pageSizeOptions: [10, 50, 100, 200, 300, 400],
               showSizeChanger: true,
               showTotal: (total) => `共 ${total} 条`,
+              onChange: (page, size) => {
+                setPageSize(size)
+                source.setPage(size === pageSize ? page : 1)
+              },
             }}
-            rowKey="id"
+            rowKey={(item) => item.recordId ?? String(item.id)}
             rowSelection={{
               getCheckboxProps: (item: MytAccount) => ({
                 "aria-label": `选择账号 ${item.uid}`,
+                disabled: !canJoinPool(item),
               }),
-              onChange: (keys: readonly Key[]) => setSelectedIds(keys.map((key) => Number(key))),
+              preserveSelectedRowKeys: true,
+              onChange: (keys: readonly Key[]) =>
+                setSelectedIds(keys.map(String).slice(0, CREATE_LIMIT)),
               selectedRowKeys: [...selectedIds],
             }}
             scroll={{ x: "max-content", y: 500 }}

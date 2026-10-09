@@ -44,6 +44,7 @@ const CreateSchema = z.object({
   platformUid: z.string().trim().max(64).optional(),
   proxyId: OptionalUuid,
   region: z.string().trim().max(64).default(""),
+  resourceSecrets: z.record(z.string(), z.string().max(20_000)).optional(),
   secret: z.string().max(20_000).default(""),
   status: OperationAccountStatusSchema.default("ready"),
   tags: TagsSchema,

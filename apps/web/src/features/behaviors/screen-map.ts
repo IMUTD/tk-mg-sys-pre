@@ -67,7 +67,10 @@ export const applyScreenToParams = (
             y1: String(end.y),
           }
         : swipeFromStart(params, start)
-    return { message: `滑动 ${next.x0},${next.y0} → ${next.x1},${next.y1}`, params: next }
+    return {
+      message: `滑动 ${next["x0"]},${next["y0"]} → ${next["x1"]},${next["y1"]}`,
+      params: next,
+    }
   }
   if ("x" in params && "y" in params) {
     return {

@@ -10,6 +10,11 @@ coverage
 **/coverage
 .env
 **/.env
+**/.env.*
+**/.integration-fixtures.json
+**/.tls.integration
+**/test-results
+**/playwright-report
 infra/.env
 apps/api(2)
 apps/api(4)

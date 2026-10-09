@@ -11,9 +11,22 @@ import {
   StarOutlined,
   UploadOutlined,
 } from "@ant-design/icons"
-import { App, Button, Card, Checkbox, Dropdown, Input, Select, Space, Table, Tag } from "antd"
+import {
+  Alert,
+  App,
+  Button,
+  Card,
+  Checkbox,
+  Dropdown,
+  Input,
+  Select,
+  Space,
+  Table,
+  Tag,
+} from "antd"
 import type { Key } from "react"
-import { type ReactNode, useMemo, useState } from "react"
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
+import { createProxiesApi, type ProxiesApi, proxyRequestError } from "./api"
 
 import {
   ProxyBatchTagDialog,
@@ -25,12 +38,12 @@ import {
   ProxyFaqDialog,
   ProxyRunDialog,
 } from "./batch-dialogs"
+import { defaultIpLookupOptions, detectProxyBatch } from "./detection"
 import { ProxyFormDialog } from "./form-dialog"
 import { ProxyImportDialog } from "./import-dialog"
 import {
-  applyCheckResult,
   batchUpdateByTags,
-  createSeedProxies,
+  checkMessage,
   createSeedProxyDevices,
   ENABLE_OPTIONS,
   editSelectedTag,
@@ -57,17 +70,24 @@ import {
   SEED_DYNAMIC_TRAFFIC,
   shortDate,
   staticProxyCount,
-  toggleFavorite,
   turboNodeLabel,
   turboNodeProxies,
   uniqueTagOptions,
 } from "./myt-proxy"
 import "./proxies.css"
+import { PageKey } from "../../lib/pages"
+import { BusinessLabelFilter } from "../labels/filter-row"
 
 type ProxiesListPageProps = {
+  readonly groupIds?: readonly string[]
+  readonly api?: ProxiesApi
   readonly canDelete?: boolean
   readonly canWrite: boolean
 }
+
+// PostgreSQL label names cannot contain NUL, so this filter cannot collide with a catalog name.
+const unassignedFilter = "\0unassigned"
+const noGroups: readonly string[] = []
 
 const downloadCsv = (csv: string, filename: string): void => {
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
@@ -91,12 +111,83 @@ const copyText = async (value: string, onSuccess: () => void): Promise<void> => 
 const rowLabel = (proxy: MytProxy): string =>
   proxy.remark.length > 0 ? proxy.remark : endpointText(proxy)
 
-export const ProxiesListPage = ({ canDelete, canWrite }: ProxiesListPageProps): ReactNode => {
+export const ProxiesListPage = ({
+  canDelete,
+  canWrite,
+  groupIds = noGroups,
+  api: providedApi,
+}: ProxiesListPageProps): ReactNode => {
   const allowDelete = canDelete === true
   const { message, modal } = App.useApp()
   const [draft, setDraft] = useState<ProxyQuery>(emptyProxyQuery)
   const [query, setQuery] = useState<ProxyQuery>(emptyProxyQuery)
-  const [proxies, setProxies] = useState<MytProxy[]>(() => createSeedProxies())
+  const api = useMemo(() => providedApi ?? createProxiesApi(), [providedApi])
+  const [proxies, setProxies] = useState<MytProxy[]>([])
+  const [creationGroup, setCreationGroup] = useState(groupIds[0] ?? "")
+  const [busy, setBusy] = useState(false)
+  const operationActive = useRef(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const scopeKey = groupIds.join(",")
+  useEffect(() => {
+    let cancelled = false
+    setProxies([])
+    setSelectedIds([])
+    setEditRecord(null)
+    setCreationGroup(scopeKey.split(",")[0] ?? "")
+    void api.list(scopeKey.length === 0 ? [] : scopeKey.split(",")).then(
+      (items) => {
+        if (!cancelled) {
+          setProxies(items)
+          setLoadError(null)
+        }
+      },
+      (error: unknown) => {
+        void proxyRequestError(error).then((text) => {
+          if (!cancelled) setLoadError(text)
+        })
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [api, scopeKey])
+  const reload = async (): Promise<void> => {
+    setProxies(await api.list(groupIds))
+    setLoadError(null)
+  }
+  const perform = async (action: () => Promise<void>): Promise<void> => {
+    if (operationActive.current) return
+    operationActive.current = true
+    setBusy(true)
+    try {
+      await action()
+    } catch (error) {
+      message.error(await proxyRequestError(error))
+    } finally {
+      try {
+        await reload()
+      } catch (error) {
+        setLoadError(await proxyRequestError(error))
+      }
+      operationActive.current = false
+      setBusy(false)
+    }
+  }
+  const persistBatch = async (items: readonly MytProxy[]): Promise<void> => {
+    let saved = 0
+    const errors: string[] = []
+    for (const item of items) {
+      try {
+        await api.save(item, proxies, false)
+        saved++
+      } catch (error) {
+        errors.push(await proxyRequestError(error))
+      }
+    }
+    if (errors.length > 0)
+      throw new Error(`已保存 ${saved} 条，失败 ${errors.length} 条：${errors[0]}`)
+    message.success(`已保存 ${saved} 条`)
+  }
   const [devices] = useState(() => createSeedProxyDevices())
   const [selectedIds, setSelectedIds] = useState<readonly number[]>([])
   const [editRecord, setEditRecord] = useState<MytProxy | null>(null)
@@ -122,6 +213,24 @@ export const ProxiesListPage = ({ canDelete, canWrite }: ProxiesListPageProps): 
   }))
   const nextId = Math.max(0, ...proxies.map((item) => item.id)) + 1
   const staticCount = staticProxyCount(proxies)
+  const updateDetection = (
+    item: MytProxy,
+    result: NonNullable<ReturnType<typeof parseCheckResult>>,
+  ) => {
+    const updated = { ...item, result: JSON.stringify(result) }
+    setProxies((current) =>
+      current.some((row) => row.uuid === item.uuid && row.groupId === item.groupId)
+        ? current.map((row) =>
+            row.uuid === item.uuid && row.groupId === item.groupId ? updated : row,
+          )
+        : [...current, updated],
+    )
+  }
+  const detectCreated = async (items: readonly MytProxy[]): Promise<void> => {
+    if (items.length === 0) return
+    const result = await detectProxyBatch(api, items, defaultIpLookupOptions, updateDetection)
+    message.info(`IP 查询完成，成功 ${result.succeeded} 个，失败 ${result.failed} 个`)
+  }
 
   const applyQuery = (next = draft): void => {
     setDraft(next)
@@ -148,10 +257,10 @@ export const ProxiesListPage = ({ canDelete, canWrite }: ProxiesListPageProps): 
     action()
   }
 
-  const deleteIds = (ids: readonly number[]): void => {
-    const idSet = new Set(ids)
-    setProxies((current) => current.filter((item) => !idSet.has(item.id)))
-    setSelectedIds((current) => current.filter((id) => !idSet.has(id)))
+  const deleteIds = async (ids: readonly number[]): Promise<void> => {
+    await api.delete(proxies.filter((item) => ids.includes(item.id)))
+    setSelectedIds((current) => current.filter((id) => !ids.includes(id)))
+    message.success("删除成功")
   }
 
   const deleteSelected = (): void => {
@@ -160,10 +269,7 @@ export const ProxiesListPage = ({ canDelete, canWrite }: ProxiesListPageProps): 
       cancelText: "取消",
       content: `确认删除选中的 ${selected.length} 条代理吗？`,
       okText: "确定",
-      onOk: () => {
-        deleteIds(selectedIds)
-        message.success("删除成功")
-      },
+      onOk: () => perform(() => deleteIds(selectedIds)),
       title: "提示",
     })
   }
@@ -173,10 +279,7 @@ export const ProxiesListPage = ({ canDelete, canWrite }: ProxiesListPageProps): 
       cancelText: "取消",
       content: "确定删除吗？",
       okText: "确定",
-      onOk: () => {
-        deleteIds([item.id])
-        message.success("删除成功")
-      },
+      onOk: () => perform(() => deleteIds([item.id])),
       title: "提示",
     })
   }
@@ -185,7 +288,7 @@ export const ProxiesListPage = ({ canDelete, canWrite }: ProxiesListPageProps): 
     if (selected.length !== 1) return
     const record = selected[0]
     if (record === undefined) return
-    setEditRecord(record)
+    void perform(async () => setEditRecord(await api.credentials(record)))
   }
 
   const exportSelected = (): void => {
@@ -197,8 +300,32 @@ export const ProxiesListPage = ({ canDelete, canWrite }: ProxiesListPageProps): 
 
   return (
     <section className="module-page proxies-page">
+      {loadError === null ? null : <Alert message={loadError} showIcon type="error" />}
       <Card className="filter-bar" size="small">
+        <BusinessLabelFilter
+          page={PageKey.Proxies}
+          options={[{ value: unassignedFilter, label: "未分组" }, ...tagOptions]}
+          value={draft.noTag ? unassignedFilter : draft.tag}
+          onChange={(tag) =>
+            changeSelectQuery({
+              tag: tag === unassignedFilter ? "" : tag,
+              noTag: tag === unassignedFilter,
+            })
+          }
+          canWrite={canWrite}
+          canDelete={allowDelete}
+        />
         <Space className="resource-filter-row" wrap>
+          {groupIds.length > 1 ? (
+            <Select
+              aria-label="代理权限组"
+              value={creationGroup}
+              options={groupIds.map((id) => ({ label: id, value: id }))}
+              onChange={setCreationGroup}
+              style={{ width: 180 }}
+              virtual={false}
+            />
+          ) : null}
           <span className="filter-label">ID</span>
           <Input
             allowClear
@@ -214,20 +341,9 @@ export const ProxiesListPage = ({ canDelete, canWrite }: ProxiesListPageProps): 
             aria-label="搜索"
             onChange={(event) => setDraft({ ...draft, search: event.target.value })}
             onPressEnter={() => applyQuery()}
-            placeholder="IP/端口/用户名/密码/备注/分组"
+            placeholder="IP/端口/备注/分组"
             style={{ width: 185 }}
             value={draft.search}
-          />
-          <span className="filter-label">分组</span>
-          <Select
-            allowClear
-            aria-label="分组"
-            onChange={(value: string | null) => changeSelectQuery({ tag: value ?? "" })}
-            options={tagOptions}
-            placeholder="分组"
-            style={{ width: 150 }}
-            value={draft.tag.length === 0 ? null : draft.tag}
-            virtual={false}
           />
           <span className="filter-label">类型</span>
           <Select
@@ -288,12 +404,6 @@ export const ProxiesListPage = ({ canDelete, canWrite }: ProxiesListPageProps): 
             virtual={false}
           />
           <Checkbox
-            checked={draft.noTag}
-            onChange={(event) => changeSelectQuery({ noTag: event.target.checked })}
-          >
-            未分组
-          </Checkbox>
-          <Checkbox
             checked={draft.favorite}
             onChange={(event) => changeSelectQuery({ favorite: event.target.checked })}
           >
@@ -311,7 +421,10 @@ export const ProxiesListPage = ({ canDelete, canWrite }: ProxiesListPageProps): 
             <>
               <Button
                 icon={<PlusOutlined aria-hidden />}
-                onClick={() => setEditRecord(emptyProxy(0, nowText()))}
+                disabled={busy || creationGroup.length === 0}
+                onClick={() =>
+                  setEditRecord({ ...emptyProxy(0, nowText()), groupId: creationGroup })
+                }
                 type="primary"
               >
                 新增
@@ -434,8 +547,8 @@ export const ProxiesListPage = ({ canDelete, canWrite }: ProxiesListPageProps): 
             render: (_value: unknown, item: MytProxy) => (
               <div className="proxy-endpoint">
                 <span className="proxy-endpoint-text">{endpointText(item)}</span>
-                {item.type === "0" && item.extra.length > 0 ? (
-                  <Tag>{extraModeLabel(item.extra)}</Tag>
+                {item.type === "0" ? (
+                  <Tag>{item.v2Protocol?.toUpperCase() ?? extraModeLabel(item.extra)}</Tag>
                 ) : null}
                 {item.type !== "0" && item.type !== "3" ? (
                   <Tag color={item.proxyType === "dynamic" ? "warning" : "success"}>
@@ -455,7 +568,12 @@ export const ProxiesListPage = ({ canDelete, canWrite }: ProxiesListPageProps): 
               return (
                 <div className="proxy-result-cell">
                   <div className="proxy-result-toolbar">
-                    <Button onClick={() => setDetectIds([item.id])} size="small" type="link">
+                    <Button
+                      disabled={!canWrite || busy}
+                      onClick={() => setDetectIds([item.id])}
+                      size="small"
+                      type="link"
+                    >
                       检测
                     </Button>
                     {parsed !== null ? (
@@ -469,9 +587,7 @@ export const ProxiesListPage = ({ canDelete, canWrite }: ProxiesListPageProps): 
                     ) : null}
                     {parsed !== null ? (
                       <Tag color={parsed.ok ? "success" : "error"}>
-                        {primary !== null
-                          ? getResultStatusLabel(primary.ok)
-                          : getResultStatusLabel(parsed.ok)}
+                        {getResultStatusLabel(parsed.ok)}
                       </Tag>
                     ) : null}
                   </div>
@@ -479,11 +595,15 @@ export const ProxiesListPage = ({ canDelete, canWrite }: ProxiesListPageProps): 
                     <div className="proxy-result-summary">
                       <Tag>{getResultIp(primary)}</Tag>
                       <Tag>{getResultCountry(primary)}</Tag>
+                      {primary.response_body?.city ? (
+                        <span>{primary.response_body.city}</span>
+                      ) : null}
+                      {primary.response_body?.isp ? <span>{primary.response_body.isp}</span> : null}
                     </div>
                   ) : (
                     <div className="proxy-result-summary proxy-result-summary-empty">
                       <span className="proxy-result-empty">
-                        {parsed !== null ? "已有历史结果" : "未检测"}
+                        {parsed !== null ? checkMessage(parsed.message) : "未检测"}
                       </span>
                     </div>
                   )}
@@ -554,9 +674,12 @@ export const ProxiesListPage = ({ canDelete, canWrite }: ProxiesListPageProps): 
                           item.favorite ? <StarFilled aria-hidden /> : <StarOutlined aria-hidden />
                         }
                         onClick={() => {
-                          setProxies((current) => toggleFavorite(current, item.id, nowText()))
-                          message.success(item.favorite ? "已取消收藏" : "已收藏")
+                          void perform(async () => {
+                            await api.save({ ...item, favorite: !item.favorite }, proxies, false)
+                            message.success(item.favorite ? "已取消收藏" : "已收藏")
+                          })
                         }}
+                        disabled={busy}
                         size="small"
                         type="link"
                       />
@@ -572,14 +695,18 @@ export const ProxiesListPage = ({ canDelete, canWrite }: ProxiesListPageProps): 
                         disabled={item.type === "3"}
                         icon={<CopyOutlined aria-hidden />}
                         onClick={() =>
-                          setEditRecord({
-                            ...item,
-                            bindNumber: 0,
-                            createTime: nowText(),
-                            favorite: false,
-                            id: 0,
-                            result: null,
-                            updateTime: nowText(),
+                          void perform(async () => {
+                            const source = await api.credentials(item)
+                            const { uuid: _uuid, revision: _revision, ...copy } = source
+                            setEditRecord({
+                              ...copy,
+                              bindNumber: 0,
+                              createTime: nowText(),
+                              favorite: false,
+                              id: 0,
+                              result: null,
+                              updateTime: nowText(),
+                            })
                           })
                         }
                         size="small"
@@ -589,7 +716,10 @@ export const ProxiesListPage = ({ canDelete, canWrite }: ProxiesListPageProps): 
                       </Button>
                       <Button
                         icon={<EditOutlined aria-hidden />}
-                        onClick={() => setEditRecord(item)}
+                        disabled={busy}
+                        onClick={() =>
+                          void perform(async () => setEditRecord(await api.credentials(item)))
+                        }
                         size="small"
                         type="link"
                       >
@@ -641,23 +771,16 @@ export const ProxiesListPage = ({ canDelete, canWrite }: ProxiesListPageProps): 
       />
       {editRecord === null ? null : (
         <ProxyFormDialog
+          busy={busy}
           onCancel={() => setEditRecord(null)}
-          onSubmit={(item) => {
-            const stamp = nowText()
-            if (item.id === 0) {
-              setProxies((current) => [
-                { ...item, id: nextId, createTime: stamp, updateTime: stamp },
-                ...current,
-              ])
-              message.success("新增成功")
-            } else {
-              setProxies((current) =>
-                current.map((row) => (row.id === item.id ? { ...item, updateTime: stamp } : row)),
-              )
-              message.success("修改成功")
-            }
-            setEditRecord(null)
-          }}
+          onSubmit={(item) =>
+            void perform(async () => {
+              const saved = await api.save(item, proxies, true)
+              message.success(item.id === 0 ? "新增成功" : "修改成功")
+              setEditRecord(null)
+              if (item.uuid === undefined && saved) await detectCreated([saved])
+            })
+          }
           proxies={proxies}
           record={editRecord}
         />
@@ -667,56 +790,89 @@ export const ProxiesListPage = ({ canDelete, canWrite }: ProxiesListPageProps): 
           nextId={nextId}
           now={nowText()}
           onCancel={() => setImportOpen(false)}
-          onImported={(imported) => {
-            setProxies((current) => [...imported, ...current])
-            message.success(`导入成功！共导入 ${imported.length} 条代理`)
-            setImportOpen(false)
-          }}
+          onImported={(imported) =>
+            perform(async () => {
+              if (imported.length > 500) throw new Error("单次最多导入 500 条代理")
+              let saved = 0
+              const pending: MytProxy[] = []
+              const failures: string[] = []
+              for (const [index, item] of imported.entries()) {
+                try {
+                  const created = await api.save({ ...item, groupId: creationGroup }, proxies, true)
+                  saved++
+                  if (created) pending.push(created)
+                } catch (error) {
+                  failures.push(`第 ${index + 1} 行：${await proxyRequestError(error)}`)
+                }
+                if (pending.length >= 2 || index + 1 === imported.length) {
+                  await detectCreated(pending.splice(0))
+                }
+              }
+              if (failures.length > 0)
+                throw new Error(
+                  `已导入 ${saved} 条，失败 ${failures.length} 条。${failures.slice(0, 3).join("；")}`,
+                )
+              message.success(`导入成功！共导入 ${saved} 条代理`)
+              setImportOpen(false)
+            })
+          }
         />
       ) : null}
       {batchTagOpen ? (
         <ProxyBatchTagDialog
           onCancel={() => setBatchTagOpen(false)}
-          onSubmit={(tag) => {
-            setProxies((current) => editSelectedTag(current, selectedIds, tag, nowText()))
-            message.success("修改成功")
-            setBatchTagOpen(false)
-          }}
+          onSubmit={(tag) =>
+            void perform(async () => {
+              await persistBatch(editSelectedTag(selected, selectedIds, tag, nowText()))
+              setBatchTagOpen(false)
+            })
+          }
         />
       ) : null}
       {batchTurboOpen ? (
         <ProxyBatchTurboDialog
           onCancel={() => setBatchTurboOpen(false)}
-          onSubmit={(turboNode) => {
-            setProxies((current) =>
-              editSelectedTurboNode(current, selectedIds, turboNode, nowText()),
-            )
-            message.success("修改成功")
-            setBatchTurboOpen(false)
-          }}
-          proxies={proxies}
+          onSubmit={(turboNode) =>
+            void perform(async () => {
+              await persistBatch(editSelectedTurboNode(selected, selectedIds, turboNode, nowText()))
+              setBatchTurboOpen(false)
+            })
+          }
+          proxies={proxies.filter(
+            (item) =>
+              !selectedIds.includes(item.id) &&
+              selected.every((row) => row.groupId === item.groupId),
+          )}
         />
       ) : null}
       {batchUpdateOpen ? (
         <ProxyBatchUpdateDialog
           onCancel={() => setBatchUpdateOpen(false)}
-          onSubmit={(patch) => {
-            setProxies((current) => batchUpdateByTags(current, selectedIds, patch, nowText()))
-            message.success("修改成功")
-            setBatchUpdateOpen(false)
-          }}
+          onSubmit={(patch) =>
+            void perform(async () => {
+              await persistBatch(batchUpdateByTags(selected, selectedIds, patch, nowText()))
+              setBatchUpdateOpen(false)
+            })
+          }
         />
       ) : null}
       {detectIds === null ? null : (
         <ProxyDetectDialog
+          busy={busy}
           count={detectIds.length}
           onCancel={() => setDetectIds(null)}
-          onSubmit={(options) => {
-            const outcome = applyCheckResult(proxies, detectIds, options, nowText())
-            setProxies(outcome.proxies)
-            message.success(`检测完成，成功 ${outcome.succeeded} 个，失败 ${outcome.failed} 个`)
-            setDetectIds(null)
-          }}
+          onSubmit={(options) =>
+            void perform(async () => {
+              const { succeeded, failed } = await detectProxyBatch(
+                api,
+                proxies.filter((row) => detectIds.includes(row.id)),
+                options,
+                updateDetection,
+              )
+              message.info(`检测完成，成功 ${succeeded} 个，失败 ${failed} 个`)
+              setDetectIds(null)
+            })
+          }
         />
       )}
       {runProxy === null ? null : (

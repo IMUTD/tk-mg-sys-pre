@@ -1,7 +1,8 @@
-import { Button, Input, Modal, Progress, Space, Table, Tag } from "antd"
+import { Button, Modal, Progress, Space, Table, Tag } from "antd"
 import type { Key } from "react"
 import { type ReactNode, useMemo, useState } from "react"
-
+import { PageKey } from "../../lib/pages"
+import { BusinessLabelFilter } from "../labels/filter-row"
 import { type AccountTagStatistic, bannedRate } from "./myt-account"
 
 type StatisticsDialogProps = {
@@ -44,6 +45,13 @@ export const AccountStatisticsDialog = ({
 
   return (
     <Modal footer={null} onCancel={onCancel} open title="统计" width="80%">
+      <BusinessLabelFilter
+        page={PageKey.Accounts}
+        title="过滤分组"
+        options={rows.map((row) => ({ value: row.tag, label: row.tag }))}
+        value={keyword}
+        onChange={setKeyword}
+      />
       <Space className="statistic-toolbar" wrap>
         {canWrite ? (
           <Button
@@ -66,19 +74,7 @@ export const AccountStatisticsDialog = ({
                 {tag}
               </Tag>
             ),
-            title: (
-              <Space>
-                <span>过滤分组</span>
-                <Input
-                  allowClear
-                  aria-label="过滤分组"
-                  onChange={(event) => setKeyword(event.target.value)}
-                  size="small"
-                  style={{ width: 100 }}
-                  value={keyword}
-                />
-              </Space>
-            ),
+            title: "分组",
             width: 220,
           },
           {

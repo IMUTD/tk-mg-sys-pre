@@ -8,7 +8,7 @@ import {
   StopOutlined,
 } from "@ant-design/icons"
 import type { TableColumnsType } from "antd"
-import { App, Button, Card, Cascader, Input, Progress, Select, Space, Table, Tag } from "antd"
+import { App, Button, Card, Input, Progress, Select, Space, Table, Tag } from "antd"
 import type { Key } from "react"
 import { type ReactNode, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "react-router-dom"
@@ -47,6 +47,8 @@ import {
 } from "./myt-task"
 import { RunningTaskDialog } from "./running-dialog"
 import "./tasks.css"
+import { PageKey } from "../../lib/pages"
+import { BusinessLabelFilter } from "../labels/filter-row"
 
 type TaskListPageProps = {
   readonly canDelete?: boolean
@@ -96,15 +98,18 @@ export const TaskListPage = ({ canDelete, canWrite }: TaskListPageProps): ReactN
   )
   const [logTask, setLogTask] = useState<MytTask | null>(null)
   const [runningOpen, setRunningOpen] = useState(false)
+  const [deviceGroup, setDeviceGroup] = useState("")
 
-  const filtered = useMemo(() => filterTasks(tasks, query), [query, tasks])
+  const filtered = useMemo(
+    () =>
+      filterTasks(tasks, query).filter(
+        (task) => deviceGroup === "" || deviceById(devices, task.deviceId)?.tag === deviceGroup,
+      ),
+    [query, tasks, devices, deviceGroup],
+  )
   const running = runningTasks(tasks)
   const nextId = Math.max(0, ...tasks.map((item) => item.id)) + 1
-  const cascaderOptions = groupedDeviceOptions(devices).map((group) => ({
-    children: group.options.map((item) => ({ label: item.label, value: String(item.value) })),
-    label: group.label,
-    value: group.label,
-  }))
+  const deviceGroups = groupedDeviceOptions(devices)
 
   useEffect(() => {
     if (searchParams.get("scriptId") === null && searchParams.get("deviceId") === null) return
@@ -122,6 +127,7 @@ export const TaskListPage = ({ canDelete, canWrite }: TaskListPageProps): ReactN
   }
 
   const resetQuery = (): void => {
+    setDeviceGroup("")
     const empty = emptyTaskQuery()
     setDraft(empty)
     setQuery(empty)
@@ -327,6 +333,18 @@ export const TaskListPage = ({ canDelete, canWrite }: TaskListPageProps): ReactN
   return (
     <section className="module-page tasks-page">
       <Card className="filter-bar" size="small">
+        <BusinessLabelFilter
+          page={PageKey.Tasks}
+          title="设备分组"
+          options={deviceGroups
+            .filter((group) => group.label !== "未分组")
+            .map((group) => ({ value: group.label, label: group.label }))}
+          value={deviceGroup}
+          onChange={(group) => {
+            setDeviceGroup(group)
+            changeSelectQuery({ deviceId: "" })
+          }}
+        />
         <Space className="resource-filter-row" wrap>
           <span className="filter-label">任务ID</span>
           <Input
@@ -358,26 +376,16 @@ export const TaskListPage = ({ canDelete, canWrite }: TaskListPageProps): ReactN
             value={draft.scriptName}
           />
           <span className="filter-label">设备</span>
-          <Cascader
+          <Select
             allowClear
             aria-label="设备"
-            onChange={(value) => {
-              const last = Array.isArray(value) ? value.at(-1) : undefined
-              changeSelectQuery({
-                deviceId: last === undefined || last === null ? "" : String(last),
-              })
-            }}
-            options={cascaderOptions}
-            placeholder="设备分组/设备"
+            onChange={(value: string | undefined) => changeSelectQuery({ deviceId: value ?? "" })}
+            options={devices
+              .filter((device) => deviceGroup === "" || device.tag === deviceGroup)
+              .map((device) => ({ value: String(device.id), label: deviceLabel(device, null) }))}
+            placeholder="设备"
             style={{ width: 220 }}
-            value={
-              draft.deviceId.length === 0
-                ? []
-                : [
-                    devices.find((item) => String(item.id) === draft.deviceId)?.tag || "未分组",
-                    draft.deviceId,
-                  ]
-            }
+            value={draft.deviceId || undefined}
           />
           <span className="filter-label">机位</span>
           <Select

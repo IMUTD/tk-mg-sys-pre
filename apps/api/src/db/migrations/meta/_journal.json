@@ -239,6 +239,48 @@
       "when": 1793961600000,
       "tag": "0033_file_browser_url",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1794048000000,
+      "tag": "0034_initializer_bridge",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1794134400000,
+      "tag": "0035_agent_token_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794220800000,
+      "tag": "0036_shared_business_labels",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794307200000,
+      "tag": "0037_proxy_configuration_detection",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794393600000,
+      "tag": "0038_business_label_scopes",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1794480000000,
+      "tag": "0039_account_pool_catalog",
+      "breakpoints": true
     }
   ]
 }

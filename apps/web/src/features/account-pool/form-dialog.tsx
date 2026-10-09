@@ -1,34 +1,33 @@
-import { App, Button, Form, Input, InputNumber, Modal, Select } from "antd"
-import { type ReactNode, useMemo, useState } from "react"
-
-import type { AccountDevice, MytAccount } from "../accounts/myt-account"
+import { Alert, App, Button, Form, Input, InputNumber, Modal, Select } from "antd"
+import { type ReactNode, useState } from "react"
+import { type AccountPoolsApi, type PoolWrite, poolRequestError } from "./api"
 import {
-  countMatchingAccounts,
-  createPoolFromAccounts,
+  CREATE_BACK_TYPE_OPTIONS,
   DEVICE_SEQ_OPTIONS,
   type MytTaskRes,
   needsDevice,
   needsSeq,
-  nowText,
   POOL_BACK_TYPE_OPTIONS,
-  uniqueSourceTags,
   validatePoolKey,
 } from "./myt-task-res"
+import { type PoolDeskDevice, poolFormQuery, sourceFilter, usePoolSources } from "./wiring"
 
 type TaskResFormDialogProps = {
-  readonly devices: readonly AccountDevice[]
+  readonly devices: readonly PoolDeskDevice[]
+  readonly api: AccountPoolsApi
+  readonly groupId: string
   readonly onCancel: () => void
-  readonly onSubmit: (pool: MytTaskRes) => void
+  readonly onSubmit: (pool: PoolWrite) => Promise<void>
   readonly record: MytTaskRes
-  readonly sourceAccounts: readonly MytAccount[]
 }
 
 export const TaskResFormDialog = ({
   devices,
+  api,
+  groupId,
   onCancel,
   onSubmit,
   record,
-  sourceAccounts,
 }: TaskResFormDialogProps): ReactNode => {
   const { message } = App.useApp()
   const [backType, setBackType] = useState(record.backType)
@@ -38,29 +37,25 @@ export const TaskResFormDialog = ({
   const [remark, setRemark] = useState(record.remark)
   const [tag, setTag] = useState<readonly string[]>(record.tag)
   const [times, setTimes] = useState(record.times)
+  const [savedQuery, setSavedQuery] = useState(() => poolFormQuery(record))
+  const [saving, setSaving] = useState(false)
   const tagQuery = {
+    ...savedQuery,
     backType,
     deviceId,
     deviceSeq,
-    online: null as boolean | null,
-    status: "",
-    tag: [] as readonly string[],
-    tagExclude: [] as readonly string[],
-    tagInclude: [] as readonly string[],
-    tagQueryMode: "AND" as const,
+    tag,
   }
-  const [tagOptions, setTagOptions] = useState(() => uniqueSourceTags(sourceAccounts, tagQuery))
-  const count = useMemo(
-    () => countMatchingAccounts(sourceAccounts, tag, backType, deviceId),
-    [backType, deviceId, sourceAccounts, tag],
-  )
+  const source = usePoolSources(groupId, api, tagQuery, devices)
+  const tagOptions = source.groups
+  const count = source.total
 
   const changeBackType = (value: string): void => {
     setBackType(value)
     setDeviceId(null)
     setDeviceSeq(null)
     setTag([])
-    setTagOptions([])
+    setSavedQuery(poolFormQuery({ ...record, filterCondition: "" }))
   }
 
   const refreshTags = (): void => {
@@ -68,18 +63,11 @@ export const TaskResFormDialog = ({
       message.error("请选择设备")
       return
     }
-    setTagOptions(
-      uniqueSourceTags(sourceAccounts, {
-        ...tagQuery,
-        backType,
-        deviceId,
-        deviceSeq,
-      }),
-    )
-    message.success("刷新成功")
+    source.refresh()
   }
 
-  const submit = (): void => {
+  const submit = async (): Promise<void> => {
+    if (saving || source.loading || source.error) return
     const keyError = validatePoolKey(key)
     if (keyError !== null) {
       message.error(keyError)
@@ -89,7 +77,7 @@ export const TaskResFormDialog = ({
       message.error("请选择设备")
       return
     }
-    if (tag.length === 0) {
+    if (tag.length === 0 && record.filterCondition.length === 0) {
       message.error("标签不能为空")
       return
     }
@@ -97,31 +85,23 @@ export const TaskResFormDialog = ({
       message.error("总数必须大于0")
       return
     }
-    const members = sourceAccounts.filter((account) => {
-      if (account.deleted) return false
-      if (needsDevice(backType) && account.deviceId !== deviceId) return false
-      return tag.includes(account.tag)
-    })
-    onSubmit({
-      ...createPoolFromAccounts(
-        members,
-        {
-          backType,
-          deviceId,
-          deviceSeq: needsSeq(backType) ? deviceSeq : null,
-          key: key.trim(),
-          remark,
-          tag,
-          times,
-        },
-        record.id,
-        nowText(),
-      ),
-      createTime: record.id === 0 ? nowText() : record.createTime,
-      enable: record.enable,
-      filterCondition: record.filterCondition,
-      userId: record.userId,
-    })
+    setSaving(true)
+    try {
+      await onSubmit({
+        filter: sourceFilter(
+          { ...tagQuery, deviceSeq: needsSeq(backType) ? deviceSeq : null },
+          devices,
+        ),
+        key: key.trim(),
+        mode: "all",
+        remark,
+        times,
+      })
+    } catch (error) {
+      message.error(await poolRequestError(error))
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -131,7 +111,12 @@ export const TaskResFormDialog = ({
           <Button onClick={onCancel} type="text">
             取消
           </Button>
-          <Button onClick={submit} type="primary">
+          <Button
+            disabled={source.loading || source.error}
+            loading={saving}
+            onClick={() => void submit()}
+            type="primary"
+          >
             确认
           </Button>
         </div>
@@ -141,6 +126,7 @@ export const TaskResFormDialog = ({
       title="新增账号池"
       width={520}
     >
+      {source.error ? <Alert type="error" showIcon message="候选账号加载失败" /> : null}
       <Form labelCol={{ style: { width: 90 } }} layout="horizontal" size="small">
         <Form.Item label="账号池名" required>
           <Input
@@ -163,7 +149,14 @@ export const TaskResFormDialog = ({
           <Select
             aria-label="备份类型"
             onChange={changeBackType}
-            options={[...POOL_BACK_TYPE_OPTIONS]}
+            options={[
+              ...POOL_BACK_TYPE_OPTIONS,
+              ...CREATE_BACK_TYPE_OPTIONS.filter(
+                (item) =>
+                  !POOL_BACK_TYPE_OPTIONS.some((option) => String(option.value) === item.value) &&
+                  item.value === backType,
+              ),
+            ]}
             style={{ width: 280 }}
             value={backType}
             virtual={false}
@@ -175,13 +168,8 @@ export const TaskResFormDialog = ({
               allowClear
               aria-label="设备"
               onChange={(value: number | null) => {
-                setDeviceId(value)
+                setDeviceId(value ?? null)
                 setTag([])
-                if (value !== null) {
-                  setTagOptions(
-                    uniqueSourceTags(sourceAccounts, { ...tagQuery, backType, deviceId: value }),
-                  )
-                }
               }}
               options={devices.map((item) => ({
                 label: `${item.ip}-${item.name}`,
@@ -199,7 +187,7 @@ export const TaskResFormDialog = ({
             <Select
               allowClear
               aria-label="序号"
-              onChange={(value: number | null) => setDeviceSeq(value)}
+              onChange={(value: number | null) => setDeviceSeq(value ?? null)}
               options={DEVICE_SEQ_OPTIONS.map((item) => ({ label: String(item), value: item }))}
               placeholder="请选择"
               style={{ width: 160 }}

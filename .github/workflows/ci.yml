@@ -39,7 +39,7 @@ jobs:
         run: pnpm lint
 
       - name: Test API and adapters
-        run: pnpm --filter @tk-mg/api --filter @tk-mg/storage-adapter --filter @tk-mg/device-adapter --recursive run test
+        run: pnpm --filter @tk-mg/api --filter @tk-mg/storage-adapter --filter @tk-mg/device-adapter --filter @tk-mg/task-execution --filter @tk-mg/worker --recursive run test
 
       - name: Build Web
         run: pnpm build:web
@@ -148,3 +148,62 @@ jobs:
 
       - name: Run auth and API-mock device UI smoke tests
         run: pnpm test:e2e:smoke
+
+  real-integration:
+    name: Real API, PostgreSQL, Redis and browser integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - name: Install dependencies and Chromium
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @tk-mg/web exec playwright install --with-deps chromium
+      - name: Start disposable isolated dependencies
+        run: |
+          bun infra/scripts/generate-integration-env.ts
+          mkdir -p infra/.tls.integration
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout infra/.tls.integration/key.pem -out infra/.tls.integration/cert.pem -days 2 -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+          chmod 600 infra/.tls.integration/key.pem
+          docker compose --project-name tk-mg-integration --env-file infra/.env.integration -f infra/docker-compose.yml -f infra/docker-compose.integration.yml up -d --wait postgres redis initializer-postgres
+      - name: Prepare hashed identities and a read-only initializer role
+        run: |
+          set -a
+          . infra/.env.integration
+          set +a
+          export DATABASE_URL="postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@127.0.0.1:55432/$POSTGRES_DB"
+          export INIT_FIXTURE_WRITER_URL="postgres://tk_mg_init:$POSTGRES_PASSWORD@127.0.0.1:55433/tk_mg_test_initializer"
+          export REDIS_URL="redis://:$REDIS_PASSWORD@127.0.0.1:16379/0"
+          bun apps/api/src/integration-fixtures.ts
+          bun infra/scripts/deploy-integration.ts
+      - name: Verify read-only source access and live software chain
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18081/api/auth/session >/dev/null; then break; fi
+            if [ "$(docker inspect -f '{{.State.Health.Status}}' tk-mg-integration-api-1)" = healthy ]; then break; fi
+            sleep 2
+          done
+          bun infra/scripts/with-integration-env.ts infra/.integration-fixtures.json bun test --timeout 120000 apps/api/src/modules/initializer-sync/source.test.ts
+          bun infra/scripts/with-integration-env.ts infra/.integration-fixtures.json pnpm --filter @tk-mg/web test:e2e:integration
+      - name: Verify real proxy protocols and public IP transport
+        run: |
+          docker cp tk-mg-integration-api-1:/usr/local/bin/sing-box "$RUNNER_TEMP/tk-mg-sing-box"
+          chmod 700 "$RUNNER_TEMP/tk-mg-sing-box"
+          PROXY_PROBE_TEST_BINARY="$RUNNER_TEMP/tk-mg-sing-box" pnpm --filter @tk-mg/api test:proxy-network
+      - name: Stop disposable services
+        if: always()
+        run: docker compose --project-name tk-mg-integration --env-file infra/.env.integration -f infra/docker-compose.yml -f infra/docker-compose.integration.yml --profile initializer down

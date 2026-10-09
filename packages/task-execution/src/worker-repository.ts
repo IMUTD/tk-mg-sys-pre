@@ -263,6 +263,7 @@ export const createPostgresWorkerRepository = (
         status, retry_count as "retryCount", max_attempts as "maxAttempts", created_at as "createdAt",
         updated_at as "updatedAt" from execution_task
         where (${requestedTaskId ?? null}::uuid is null or id = ${requestedTaskId ?? null})
+           and executor_key <> 'box-agent'
            and (status = 'queued' or (status = 'retry_waiting' and next_retry_at <= ${new Date(now)}))
         order by created_at, id for update skip locked limit 1`
       const task = rows[0]
@@ -642,6 +643,7 @@ export const createPostgresWorkerRepository = (
       where id in (
         select id from execution_task_run
         where status in ('claimed', 'running') and claim_expires_at <= ${new Date(now)}
+          and task_id in (select id from execution_task where executor_key <> 'box-agent')
         order by claim_expires_at for update skip locked limit ${limit}
       )
       returning id, task_id as "taskId", step_id as "stepId", worker_id as "workerId",

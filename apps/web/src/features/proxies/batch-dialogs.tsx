@@ -1,8 +1,9 @@
-import { Alert, Button, Collapse, Form, Input, Modal, Radio, Select, Switch } from "antd"
+import { Alert, Button, Collapse, Descriptions, Form, Input, Modal, Radio, Select } from "antd"
 import { type ReactNode, useMemo, useState } from "react"
 
 import {
   BATCH_SWITCH_OPTIONS,
+  checkMessage,
   DETECT_CHANNEL_OPTIONS,
   DETECT_MODE_OPTIONS,
   type DetectChannel,
@@ -242,19 +243,24 @@ export const ProxyDetectDialog = ({
   count,
   onCancel,
   onSubmit,
+  busy = false,
 }: Cancelable & {
   readonly count: number
   readonly onSubmit: (options: DetectOptions) => void
+  readonly busy?: boolean
 }): ReactNode => {
-  const [channel, setChannel] = useState<DetectChannel>("us")
+  const [channel, setChannel] = useState<DetectChannel>("cn")
   const [mode, setMode] = useState<DetectMode>("quick")
-  const [useTurbo, setUseTurbo] = useState(false)
   return (
     <Modal
       footer={
         <div className="dialog-footer">
           <Button onClick={onCancel}>取消</Button>
-          <Button onClick={() => onSubmit({ channel, mode, useTurbo })} type="primary">
+          <Button
+            loading={busy}
+            onClick={() => onSubmit({ channel, mode, useTurbo: false })}
+            type="primary"
+          >
             确认
           </Button>
         </div>
@@ -264,12 +270,6 @@ export const ProxyDetectDialog = ({
       title={count > 1 ? `批量检测（${count}）` : "检测选项"}
       width={520}
     >
-      <Alert
-        className="proxy-detect-alert"
-        message="检测在浏览器本地模拟连通结果，不会向真实代理地址发起请求。"
-        showIcon
-        type="info"
-      />
       <Form labelCol={{ style: { width: 90 } }} layout="horizontal" size="small">
         <Form.Item label="模式">
           <Radio.Group
@@ -284,9 +284,6 @@ export const ProxyDetectDialog = ({
             options={[...DETECT_CHANNEL_OPTIONS]}
             value={channel}
           />
-        </Form.Item>
-        <Form.Item label="带中转检测">
-          <Switch checked={useTurbo} onChange={setUseTurbo} />
         </Form.Item>
       </Form>
     </Modal>
@@ -318,6 +315,39 @@ export const ProxyCheckResultDialog = ({
         <span>{getResultIp(primary)}</span>
         <span>{getResultCountry(primary)}</span>
       </div>
+      <Descriptions
+        className="proxy-check-details"
+        column={2}
+        size="small"
+        items={[
+          {
+            key: "type",
+            label: "检测类型",
+            children: result.detection_type === "ip_lookup" ? "IP 信息查询" : "历史连通检测",
+          },
+          {
+            key: "connectivity",
+            label: "代理连通性",
+            children: result.detection_type === "ip_lookup" ? "未检测" : "历史结果",
+          },
+          { key: "country", label: "国家", children: primary?.response_body?.countryName || "-" },
+          { key: "region", label: "地区", children: primary?.response_body?.region || "-" },
+          { key: "city", label: "城市", children: primary?.response_body?.city || "-" },
+          { key: "isp", label: "运营商", children: primary?.response_body?.isp || "-" },
+          { key: "asn", label: "ASN", children: primary?.response_body?.asn || "-" },
+          {
+            key: "delay",
+            label: result.detection_type === "ip_lookup" ? "查询耗时" : "耗时",
+            children: primary === null ? "-" : `${primary.delay} ms`,
+          },
+          {
+            key: "time",
+            label: "检测时间",
+            children: new Date(result.check_time).toLocaleString(),
+          },
+          { key: "message", label: "结果", children: checkMessage(result.message) },
+        ]}
+      />
       <pre className="proxy-result-json">{JSON.stringify(result, null, 2)}</pre>
     </Modal>
   )

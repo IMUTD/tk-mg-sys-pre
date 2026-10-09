@@ -8,7 +8,7 @@ import { createInMemoryAuditRepository } from "../audit/service"
 import { createAuthService, createInMemoryAuthRepository } from "../auth/service"
 import { MEMBER_DISPLAY_NAMES } from "./display-names"
 import { createInMemoryPagePermissionRepository } from "./page-permission-repository"
-import { createInMemoryMemberRepository } from "./repository"
+import { createInMemoryMemberRepository, MemberIdSchema } from "./repository"
 import { createMemberService } from "./service"
 
 const administratorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -24,7 +24,7 @@ const PageItemsSchema = z.object({
   items: z.array(z.object({ canDelete: z.boolean(), canView: z.boolean(), key: z.string() })),
 })
 
-const createAuthenticatedApp = () => {
+const createAuthenticatedApp = (repository = createInMemoryMemberRepository()) => {
   const auditRepository = createInMemoryAuditRepository()
   const authService = createAuthService(
     createInMemoryAuthRepository([
@@ -42,7 +42,7 @@ const createAuthenticatedApp = () => {
   const memberService = createMemberService({
     auditRepository,
     pagePermissions: createInMemoryPagePermissionRepository(),
-    repository: createInMemoryMemberRepository(),
+    repository,
   })
   return createApp({ auditRepository, authService, memberService })
 }
@@ -108,15 +108,25 @@ describe("member routes", () => {
       canView: false,
       key: PageKey.Members,
     })
-    const updated = await app.request(`/api/members/${member.id}`, {
+    const rejectedPromotion = await app.request(`/api/members/${member.id}`, {
       body: JSON.stringify({ enabled: false, role: "administrator" }),
       headers: { "Content-Type": "application/json", Cookie: cookie },
       method: "PATCH",
     })
+    expect(rejectedPromotion.status).toBe(409)
+    await expect(rejectedPromotion.json()).resolves.toEqual({
+      error: "administrator_only_in_init_tool",
+    })
+    const updated = await app.request(`/api/members/${member.id}`, {
+      body: JSON.stringify({ enabled: false, role: "operator" }),
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      method: "PATCH",
+    })
+    expect(updated.status).toBe(200)
     await expect(updated.json()).resolves.toMatchObject({
       email: "new.operator@example.com",
       enabled: false,
-      role: "administrator",
+      role: "operator",
     })
     const list = await app.request("/api/members", { headers: { Cookie: cookie } })
     expect(list.status).toBe(200)
@@ -181,7 +191,16 @@ describe("member routes", () => {
   })
 
   it("rejects fine-tuning an administrator's page permissions", async () => {
-    const app = createAuthenticatedApp()
+    const repository = createInMemoryMemberRepository()
+    const member = await repository.create({
+      displayName: "Existing administrator",
+      email: "second.admin@example.com",
+      groupIds: [],
+      passwordHash: "unused",
+      role: Role.Administrator,
+    })
+    expect(MemberIdSchema.safeParse(member.id).success).toBe(true)
+    const app = createAuthenticatedApp(repository)
     const cookie = await login(app)
     const created = await app.request("/api/members", {
       body: JSON.stringify({
@@ -192,7 +211,8 @@ describe("member routes", () => {
       headers: { "Content-Type": "application/json", Cookie: cookie },
       method: "POST",
     })
-    const member = CreatedMemberSchema.parse(await created.json())
+    expect(created.status).toBe(409)
+    await expect(created.json()).resolves.toEqual({ error: "administrator_only_in_init_tool" })
     const updated = await app.request(`/api/members/${member.id}/permissions`, {
       body: JSON.stringify({
         pages: [{ canDelete: false, canView: false, key: PageKey.Devices }],
