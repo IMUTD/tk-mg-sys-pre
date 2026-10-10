@@ -1,0 +1,45 @@
+.mall-page,
+.jobs-page,
+.video-pool-page {
+  display: grid;
+  gap: 16px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.mall-kpi-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.redeem-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+
+.redeem-card-meta {
+  color: #909399;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.video-cover {
+  background: linear-gradient(135deg, #1677ff 0%, #69b1ff 100%);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 12px;
+  height: 64px;
+  line-height: 64px;
+  text-align: center;
+  width: 48px;
+}
+
+.video-caption {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
