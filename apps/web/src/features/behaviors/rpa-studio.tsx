@@ -5,9 +5,11 @@ import { saveChain } from "./chain-store"
 import {
   type ChainStep,
   chainFingerprint,
+  apiByCode,
   createStep,
   type GuardCode,
   normalizeDelay,
+  paramLabel,
   publishChainSteps,
   type SkillSpec,
   skillCatalog,
@@ -163,7 +165,7 @@ export const RpaStudio = ({ applyScreen, canWrite, onTest, skills }: RpaStudioPr
                 {Object.keys(item.params).map((key) => (
                   <div className="rpa-param" key={key}>
                     <Input
-                      addonBefore={key}
+                      addonBefore={paramLabel(apiByCode(item.api), key)}
                       aria-label={`${item.api}-${key}`}
                       onChange={(event) => patchStep(item.id, key, event.target.value)}
                       value={item.params[key]}

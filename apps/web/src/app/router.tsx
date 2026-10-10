@@ -21,7 +21,6 @@ import { createDevicesApi } from "../features/devices/api"
 import { DeviceControlPage } from "../features/devices/control-page"
 import { DeviceCreatePage } from "../features/devices/create-page"
 import { DeviceListPage } from "../features/devices/list-page"
-import { BackgroundJobsPage } from "../features/jobs/background-page"
 import { TaskRecordsPage } from "../features/jobs/records-page"
 import { MallInvoicesPage } from "../features/mall/invoices-page"
 import { MallOrdersPage } from "../features/mall/orders-page"
@@ -43,6 +42,8 @@ import { StoragePage } from "../features/storage/page"
 import { StudioPage } from "../features/studio/page"
 import { TaskListPage } from "../features/tasks/list-page"
 import { VideoPoolPage } from "../features/video-pool/page"
+import { BackupResourcesPage } from "../features/backup-resources/page"
+import { VideoResourcesPage } from "../features/video-resources/page"
 import type { SessionUser } from "../lib/api/auth-api"
 import { assertNever } from "../lib/assert-never"
 import { canDeletePage, canViewPage, PageKey } from "../lib/pages"
@@ -281,6 +282,14 @@ const AuthenticatedRoutes = (): ReactNode => (
         element={guarded(PageKey.StudioVideoPool, <VideoPoolRoute />)}
       />
       <Route
+        path="/studio/video-resources"
+        element={guarded(PageKey.StudioVideoResources, <VideoResourcesPage />)}
+      />
+      <Route
+        path="/studio/backup-resources"
+        element={guarded(PageKey.StudioBackupResources, <BackupResourcesPage />)}
+      />
+      <Route
         path="/studio/image-pool"
         element={guarded(PageKey.StudioImagePool, <StudioPage kind="image-pool" />)}
       />
@@ -316,10 +325,6 @@ const AuthenticatedRoutes = (): ReactNode => (
         element={guarded(PageKey.AccountPool, <AccountPoolPage />)}
       />
       <Route path="/operations/tasks" element={guarded(PageKey.Tasks, <TasksPage />)} />
-      <Route
-        path="/operations/background-tasks"
-        element={guarded(PageKey.BackgroundTasks, <BackgroundJobsPage />)}
-      />
       <Route
         path="/operations/task-records"
         element={guarded(PageKey.TaskRecords, <TaskRecordsPage />)}

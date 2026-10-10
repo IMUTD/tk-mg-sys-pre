@@ -27,6 +27,7 @@ import {
   registerBusinessLabels,
 } from "./business-labels"
 import { type GuardCode, guardCatalog, normalizeGuards, xmlHasText } from "./guards"
+import { registerShareFiles } from "./share-files"
 
 const guardLabel = (code: string): string =>
   code === "ad" || code === "transcode" ? guardCatalog[code].label : code
@@ -283,12 +284,35 @@ const readChainSteps = (
     for (const key of Object.keys(input)) {
       scopes[key] = rawScopes[key] === "external" ? "external" : "internal"
     }
+    if (skill === "JumpNodes" && !jumpNodesReady(input)) return null
     parameters.push({ input, skill })
     paramScopes.push(scopes)
     guards.push(stepGuards)
     delays.push(delayMs)
   }
   return { delays, guards, parameters, paramScopes }
+}
+
+const jumpStepCount = (raw: unknown): number | null => {
+  if (typeof raw !== "string" || !/^(0|[1-9]\d?)$/.test(raw)) return null
+  return Number(raw)
+}
+
+const jumpNodesReady = (input: Record<string, string> | null | undefined): boolean => {
+  if (jumpStepCount(input?.steps) === null) return false
+  return ["text", "contentDesc", "resourceId", "className", "pkg"].some(
+    (key) => (input?.[key] ?? "").trim() !== "",
+  )
+}
+
+const claimedSkillStep = (
+  kind: string,
+  parameters: Record<string, string> | null | undefined,
+): { readonly input: Record<string, string>; readonly skill: string } => {
+  if (kind !== "JumpNodes") return agentSkillStep(kind, parameters)
+  const input = { ...(parameters ?? {}) }
+  delete input.steps
+  return { input, skill: "JumpNodes" }
 }
 
 const ownedDevice = async (sql: Query, userId: string, deviceId: string) => {
@@ -402,6 +426,17 @@ const claimOnce = async (sql: Sql, device: AgentDevice): Promise<ClaimRow | null
             where l.device_id = t.device_id
               and l.released_at is null
               and (l.instance_id is null or s.instance_id is null or l.instance_id = s.instance_id)
+              and not (
+                s.kind in ('ScanShare', 'MoveShare') and l.instance_id is not null
+              )
+              and not (
+                s.instance_id is not null
+                and exists (
+                  select 1 from execution_task_step box_step
+                  where box_step.task_id = l.task_id
+                    and box_step.kind in ('ScanShare', 'MoveShare')
+                )
+              )
           )
         order by t.created_at
         for update of t skip locked
@@ -467,7 +502,7 @@ const taskPointer = (row: ClaimRow) => ({
       {
         ...(row.afterMs > 0 ? { afterMs: row.afterMs } : {}),
         id: row.stepId,
-        ...agentSkillStep(row.kind, row.parameters),
+        ...claimedSkillStep(row.kind, row.parameters),
       },
     ],
     version: "1",
@@ -489,6 +524,7 @@ export const registerBoxLink = (
     waiters.delete(deviceId)
     for (const fn of list ?? []) fn()
   }
+  registerShareFiles(app, sql, wake)
   const listen = postgres(databaseUrl, { max: 1 })
   let stopping = false
   const listening = listen.listen("agent_task", wake)
@@ -762,13 +798,15 @@ export const registerBoxLink = (
         externalId: string
         groupId: string
         kind: string
+        parameters: Record<string, string> | null
         parentStepId: string | null
         role: string
+        sequence: number
         stepId: string
       }[]
     >`
       select d.id as "deviceId", d.external_id as "externalId", t.group_id as "groupId", s.kind, s.id as "stepId",
-        s.role, s.parent_step_id::text as "parentStepId"
+        s.sequence, s.parameters, s.role, s.parent_step_id::text as "parentStepId"
       from execution_task t
       join device d on d.id = t.device_id
       join device_agent a on a.device_id = d.id
@@ -905,6 +943,33 @@ export const registerBoxLink = (
           await tx`update execution_task set status = 'cancelled', finished_at = now(), updated_at = now(),
             terminal_reason = 'stopped_between_steps' where id = ${taskId}::uuid`
           return finish("cancelled")
+        }
+        if (status === "succeeded" && row.kind === "JumpNodes") {
+          const found = Number(outputs["count"] ?? "")
+          const steps = jumpStepCount(row.parameters?.steps)
+          const sequence = Number(row.sequence)
+          if (Number.isInteger(found) && found > 0 && steps !== null && steps > 0 && Number.isInteger(sequence)) {
+            const skipped = await tx`
+              update execution_task_step
+              set status = 'skipped', finished_at = now(), result = ${tx.json({ skippedBy: row.stepId })}
+              where id in (
+                select id from execution_task_step
+                where task_id = ${taskId}::uuid and status = 'pending' and sequence > ${sequence}
+                order by sequence
+                limit ${steps}
+              )
+              returning id
+            `
+            if (skipped.length > 0) {
+              await writeLog(
+                tx,
+                row.groupId,
+                row.deviceId,
+                "ok",
+                `${row.externalId} 节点跳跃命中，跳过 ${skipped.length} 步`,
+              )
+            }
+          }
         }
         const rest = await tx<{ n: number }[]>`
           select count(*)::int as n from execution_task_step
@@ -1506,6 +1571,9 @@ export const registerBoxLink = (
         )
       ) {
         return context.json({ error: "video_path_rejected" }, 400)
+      }
+      if (steps.some((step) => step.skill === "JumpNodes" && !jumpNodesReady(step.input))) {
+        return context.json({ error: "skill_rejected" }, 400)
       }
       const parameters = steps.map((step) => ({ input: step.input ?? {}, skill: step.skill ?? "" }))
       const indexNum = Number(body?.indexNum ?? 0)

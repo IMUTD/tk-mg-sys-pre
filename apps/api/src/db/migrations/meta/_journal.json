@@ -281,6 +281,27 @@
       "when": 1794480000000,
       "tag": "0039_account_pool_catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1794566400000,
+      "tag": "0040_box_share",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1794652800000,
+      "tag": "0041_drop_background_tasks_page",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1794739200000,
+      "tag": "0042_box_share_backup",
+      "breakpoints": true
     }
   ]
 }

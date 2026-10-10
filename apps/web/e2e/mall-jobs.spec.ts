@@ -34,10 +34,6 @@ test("renders points mall and operations job pages", async ({ page }) => {
   await page.goto("/mall/redeem")
   await expect(page.getByText("日本满季度白号100个")).toBeVisible()
 
-  await page.goto("/operations/background-tasks")
-  await expect(page.getByText("添加后台任务")).toBeVisible()
-  await expect(page.getByText("总任务数")).toBeVisible()
-
   await page.goto("/operations/task-records")
   await expect(page.getByText("发布作品完成")).toBeVisible()
 })

@@ -1391,8 +1391,8 @@ export const AccountsListPage = ({
                 : `${checkTask.tags.slice(0, 3).join("、")} 等 ${checkTask.tags.length} 个分组`
             message.success(
               checkTask.autoStart
-                ? `${label} 的检查任务已创建并自动启动，可到“运营中心-后台任务”中查看进度`
-                : `${label} 的检查任务已创建，可到“运营中心-后台任务”中查看进度`,
+                ? `${label} 的检查任务已创建并自动启动`
+                : `${label} 的检查任务已创建`,
             )
             setCheckTask(null)
             setStatisticsOpen(false)

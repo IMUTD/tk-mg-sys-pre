@@ -59,7 +59,6 @@ const fixture = (
   permissions: readonly Permission[] = [Permission.OperationsRead, Permission.OperationsWrite],
   pages: readonly PageAccess[] = [
     { key: PageKey.Tasks, canView: true, canDelete: true },
-    { key: PageKey.BackgroundTasks, canView: true, canDelete: true },
     { key: PageKey.TaskRecords, canView: true, canDelete: true },
   ],
   role: Role = Role.Operator,
@@ -196,8 +195,8 @@ const pageCases = [
     allowed: true,
   },
   {
-    name: "BackgroundTasks",
-    pages: [{ key: PageKey.BackgroundTasks, canView: true, canDelete: false }],
+    name: "Proxies",
+    pages: [{ key: PageKey.Proxies, canView: true, canDelete: false }],
     allowed: false,
   },
   {
@@ -206,10 +205,10 @@ const pageCases = [
     allowed: false,
   },
   {
-    name: "Tasks without view plus BackgroundTasks",
+    name: "Tasks without view plus Proxies",
     pages: [
       { key: PageKey.Tasks, canView: false, canDelete: false },
-      { key: PageKey.BackgroundTasks, canView: true, canDelete: false },
+      { key: PageKey.Proxies, canView: true, canDelete: false },
     ],
     allowed: false,
   },

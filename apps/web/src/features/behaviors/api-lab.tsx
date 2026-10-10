@@ -1,7 +1,7 @@
 import { Button, Card, Form, Input, Select, Space } from "antd"
 import { type MutableRefObject, type ReactNode, useEffect, useState } from "react"
 
-import { apiByCode, createStep, type SkillSpec, skillCatalog } from "./rpa-api"
+import { apiByCode, createStep, paramLabel, type SkillSpec, skillCatalog } from "./rpa-api"
 import { applyScreenToParams, type DevicePoint } from "./screen-map"
 
 const KEY_GROUP: Record<string, string> = {
@@ -246,7 +246,7 @@ export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps)
           <Form layout="vertical" size="small">
             {spec?.hint ? <p className="behaviors-meta">{spec.hint}</p> : null}
             {spec?.params.map((key) => (
-              <Form.Item key={key} label={key}>
+              <Form.Item key={key} label={paramLabel(spec, key)}>
                 {fieldControl(key)}
               </Form.Item>
             ))}

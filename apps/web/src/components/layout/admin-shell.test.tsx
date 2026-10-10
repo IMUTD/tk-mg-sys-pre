@@ -197,15 +197,6 @@ describe("WebApp route protection", () => {
     expect(await screen.findByText("注册GG")).toBeVisible()
   })
 
-  it("opens background tasks under Operations Center", async () => {
-    const api = createAuthenticatedApi(operator)
-    renderApplication(api, "/operations/background-tasks")
-    expect(await screen.findByRole("heading", { name: "后台任务" })).toBeVisible()
-    expect(screen.getByText("运营中心")).toBeVisible()
-    expect(screen.getByRole("link", { name: "任务记录" })).toBeVisible()
-    expect(await screen.findByText("添加后台任务")).toBeVisible()
-  })
-
   it("opens behavior center under Engineering Center", async () => {
     // Given
     const api = createAuthenticatedApi(engineer)

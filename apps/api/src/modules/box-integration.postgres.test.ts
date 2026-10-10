@@ -1129,4 +1129,129 @@ describe("initializer and box software integration", () => {
       ).toBe(204)
     },
   )
+
+  pgTest("skips later pending steps only when JumpNodes reports a match", async () => {
+    const { sql, post, claim, device } = await setup()
+    const rejected = await post(
+      "/api/tasks",
+      {
+        deviceId: device.id,
+        indexNum: 1,
+        steps: [{ skill: "JumpNodes", input: { text: "Home", steps: "100" } }],
+      },
+      false,
+      "jump-bad",
+    )
+    expect(rejected.status).toBe(400)
+    const created = await post(
+      "/api/tasks",
+      {
+        deviceId: device.id,
+        indexNum: 1,
+        steps: [
+          { skill: "JumpNodes", input: { text: "Home", contentDesc: "", steps: "1" } },
+          { skill: "CheckLive", input: {} },
+          { skill: "CheckLive", input: {} },
+        ],
+      },
+      false,
+      "jump-hit",
+    )
+    expect(created.status).toBe(201)
+    const pointer = z
+      .object({
+        task_id: z.string().uuid(),
+        checkpoint: z.object({ step_id: z.string().uuid() }),
+        templateDoc: z.object({
+          steps: z.array(z.object({ skill: z.string(), input: z.record(z.string()).optional() })),
+        }),
+      })
+      .parse(await (await claim()).json())
+    expect(pointer.templateDoc.steps[0]).toMatchObject({
+      skill: "JumpNodes",
+      input: { text: "Home", contentDesc: "" },
+    })
+    expect(pointer.templateDoc.steps[0]?.input?.steps).toBeUndefined()
+    expect(
+      (
+        await post(
+          `/agent/tasks/${pointer.task_id}/status`,
+          {
+            status: "succeeded",
+            checkpoint: { step_id: pointer.checkpoint.step_id, outputs: { count: "2" } },
+          },
+          true,
+        )
+      ).status,
+    ).toBe(200)
+    expect(
+      await sql`select sequence, kind, status from execution_task_step
+        where task_id = ${pointer.task_id}::uuid order by sequence`,
+    ).toMatchObject([
+      { sequence: 0, kind: "JumpNodes", status: "succeeded" },
+      { sequence: 1, kind: "CheckLive", status: "skipped" },
+      { sequence: 2, kind: "CheckLive", status: "pending" },
+    ])
+    const next = z
+      .object({
+        checkpoint: z.object({ step_id: z.string().uuid() }),
+        templateDoc: z.object({ steps: z.array(z.object({ skill: z.string() })) }),
+      })
+      .parse(await (await claim()).json())
+    expect(next.templateDoc.steps[0]?.skill).toBe("CheckLive")
+    expect(next.checkpoint.step_id).not.toBe(pointer.checkpoint.step_id)
+    expect(
+      (
+        await post(
+          `/agent/tasks/${pointer.task_id}/status`,
+          {
+            status: "succeeded",
+            checkpoint: { step_id: next.checkpoint.step_id, outputs: {} },
+          },
+          true,
+        )
+      ).status,
+    ).toBe(200)
+    const missed = await post(
+      "/api/tasks",
+      {
+        deviceId: device.id,
+        indexNum: 1,
+        steps: [
+          { skill: "JumpNodes", input: { text: "missing", steps: "1" } },
+          { skill: "CheckLive", input: {} },
+        ],
+      },
+      false,
+      "jump-miss",
+    )
+    expect(missed.status).toBe(201)
+    const missPointer = z
+      .object({
+        task_id: z.string().uuid(),
+        checkpoint: z.object({ step_id: z.string().uuid() }),
+        templateDoc: z.object({ steps: z.array(z.object({ skill: z.string() })) }),
+      })
+      .parse(await (await claim()).json())
+    expect(missPointer.templateDoc.steps[0]?.skill).toBe("JumpNodes")
+    expect(
+      (
+        await post(
+          `/agent/tasks/${missPointer.task_id}/status`,
+          {
+            status: "succeeded",
+            checkpoint: { step_id: missPointer.checkpoint.step_id, outputs: { count: "0" } },
+          },
+          true,
+        )
+      ).status,
+    ).toBe(200)
+    expect(
+      await sql`select sequence, status from execution_task_step
+        where task_id = ${missPointer.task_id}::uuid order by sequence`,
+    ).toMatchObject([
+      { sequence: 0, status: "succeeded" },
+      { sequence: 1, status: "pending" },
+    ])
+  })
 })

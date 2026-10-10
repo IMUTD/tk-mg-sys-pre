@@ -23,7 +23,6 @@ import {
   RiseOutlined,
   RobotOutlined,
   SafetyCertificateOutlined,
-  ScheduleOutlined,
   SettingOutlined,
   ShopOutlined,
   ShoppingOutlined,
@@ -90,11 +89,6 @@ const navigation: readonly NavigationItem[] = [
       { icon: <TeamOutlined aria-hidden />, label: "账号池", path: "/operations/account-pool" },
       { icon: <UnorderedListOutlined aria-hidden />, label: "任务列表", path: "/operations/tasks" },
       {
-        icon: <ScheduleOutlined aria-hidden />,
-        label: "后台任务",
-        path: "/operations/background-tasks",
-      },
-      {
         icon: <HistoryOutlined aria-hidden />,
         label: "任务记录",
         path: "/operations/task-records",
@@ -139,6 +133,8 @@ const navigation: readonly NavigationItem[] = [
       { icon: <FontSizeOutlined aria-hidden />, label: "文本制作", path: "/studio/text" },
       { icon: <InboxOutlined aria-hidden />, label: "文本池", path: "/studio/text-pool" },
       { icon: <PlaySquareOutlined aria-hidden />, label: "视频池", path: "/studio/video-pool" },
+      { icon: <FolderOpenOutlined aria-hidden />, label: "视频资源", path: "/studio/video-resources" },
+      { icon: <FileProtectOutlined aria-hidden />, label: "备份资源", path: "/studio/backup-resources" },
       { icon: <PictureOutlined aria-hidden />, label: "图片池", path: "/studio/image-pool" },
       { icon: <DatabaseOutlined aria-hidden />, label: "注册池", path: "/studio/registration" },
     ],

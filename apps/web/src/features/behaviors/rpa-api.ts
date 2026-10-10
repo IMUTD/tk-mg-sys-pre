@@ -107,8 +107,12 @@ export type SkillSpec = {
   hint?: string
   name: string
   options?: ReadonlyArray<{ group?: string; label: string; value: string }>
+  paramLabels?: Readonly<Record<string, string>>
   params: readonly string[]
 }
+
+export const paramLabel = (spec: SkillSpec | undefined, key: string): string =>
+  spec?.paramLabels?.[key] ?? key
 
 let catalog: SkillSpec[] = RPA_API_OPTIONS.map((item) => ({ ...item, params: item.params }))
 
@@ -120,6 +124,7 @@ export const setSkillCatalog = (next: readonly SkillSpec[]): void => {
     hint: item.hint ?? "",
     name: item.name,
     ...(item.options === undefined ? {} : { options: item.options }),
+    ...(item.paramLabels === undefined ? {} : { paramLabels: { ...item.paramLabels } }),
     params: item.params,
   }))
 }
@@ -207,7 +212,8 @@ export const apiLabel = (code: string): string => apiByCode(code)?.name ?? code
 
 export const stepText = (step: ChainStep): string => {
   const entries = Object.entries(step.params).filter(([, value]) => value.trim().length > 0)
-  const detail = entries.map(([key, value]) => `${key}=${value}`).join(" ")
+  const spec = apiByCode(step.api)
+  const detail = entries.map(([key, value]) => `${paramLabel(spec, key)}=${value}`).join(" ")
   return detail.length === 0
     ? `${apiLabel(step.api)}  ${step.api}`
     : `${apiLabel(step.api)}  ${detail}`
