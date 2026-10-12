@@ -3,12 +3,79 @@ import userEvent from "@testing-library/user-event"
 import { describe, expect, it } from "vitest"
 
 import { AntdApp } from "../../app/antd-app"
+import type { TextPoolApi } from "./api"
 import { ResourcesListPage } from "./list-page"
+import type { MytMaterial } from "./myt-material"
+
+const seed = (): MytMaterial[] => [
+  {
+    assignTime: null,
+    assignedCount: 1,
+    content: "这个视频太好看了，已关注",
+    createTime: "2026-09-17 12:00:00",
+    id: "11111111-1111-4111-8111-111111111111",
+    remark: "",
+    tag: "评论",
+  },
+  {
+    assignTime: null,
+    assignedCount: 0,
+    content: "感谢关注，合作请留言",
+    createTime: "2026-09-17 12:00:00",
+    id: "22222222-2222-4222-8222-222222222222",
+    remark: "",
+    tag: "评论",
+  },
+  {
+    assignTime: null,
+    assignedCount: 0,
+    content: "更新记得艾特我",
+    createTime: "2026-09-17 12:00:00",
+    id: "33333333-3333-4333-8333-333333333333",
+    remark: "",
+    tag: "评论",
+  },
+]
+
+const memoryApi = (): TextPoolApi => {
+  let rows = seed()
+  return {
+    deleteIds: async (ids) => {
+      const idSet = new Set(ids)
+      const before = rows.length
+      rows = rows.filter((item) => !idSet.has(item.id))
+      return before - rows.length
+    },
+    deleteScope: async (tag) => {
+      const before = rows.length
+      rows = tag === undefined ? [] : rows.filter((item) => item.tag !== tag)
+      return before - rows.length
+    },
+    importLines: async (tag, contents) => {
+      const created = contents.map((content, index) => ({
+        assignTime: null,
+        assignedCount: 0,
+        content,
+        createTime: "2026-09-17 12:00:00",
+        id: `imported-${rows.length + index}`,
+        remark: "",
+        tag,
+      }))
+      rows = [...created, ...rows]
+      return created.length
+    },
+    list: async () => rows,
+    update: async (material) => {
+      rows = rows.map((item) => (item.id === material.id ? material : item))
+      return material
+    },
+  }
+}
 
 const renderPage = (canWrite = true, canDelete = false): void => {
   render(
     <AntdApp>
-      <ResourcesListPage canDelete={canDelete} canWrite={canWrite} />
+      <ResourcesListPage api={memoryApi()} canDelete={canDelete} canWrite={canWrite} />
     </AntdApp>,
   )
 }

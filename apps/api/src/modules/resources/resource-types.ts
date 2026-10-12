@@ -23,6 +23,8 @@ export type OperationResource = {
   readonly id: OperationResourceId
   readonly name: string
   readonly note: string
+  readonly assignedCount?: number
+  readonly lastAssignedAt?: Date | null
   readonly status: OperationResourceStatus
   readonly tags: readonly string[]
   readonly updatedAt: Date
@@ -73,6 +75,12 @@ export interface ResourceRepository {
   ): Promise<ResourceAllocation | null>
   create(input: ResourceCreateInput): Promise<OperationResource>
   delete(groupId: GroupId, ids: readonly OperationResourceId[]): Promise<number>
+  deleteScope(groupId: GroupId, tag: string | null): Promise<number>
+  importTexts(input: {
+    readonly contents: readonly string[]
+    readonly groupId: GroupId
+    readonly tag: string
+  }): Promise<readonly OperationResource[]>
   find(groupId: GroupId, resourceId: OperationResourceId): Promise<OperationResource | null>
   history(groupId: GroupId, resourceId: OperationResourceId): Promise<readonly ResourceAllocation[]>
   list(filter: ResourceListFilter): Promise<ResourcePage>

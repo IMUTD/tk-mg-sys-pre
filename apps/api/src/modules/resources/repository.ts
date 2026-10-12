@@ -24,6 +24,8 @@ type ResourceRow = {
   readonly id: string
   readonly name: string
   readonly note: string
+  readonly assignedCount?: number
+  readonly lastAssignedAt?: Date | null
   readonly status: string
   readonly tags: readonly string[]
   readonly updatedAt: Date
@@ -43,6 +45,8 @@ const toResource = (row: ResourceRow): OperationResource => ({
   createdAt: row.createdAt,
   groupId: z.string().uuid().brand<"GroupId">().parse(row.groupId),
   id: OperationResourceIdSchema.parse(row.id),
+  assignedCount: row.assignedCount ?? 0,
+  lastAssignedAt: row.lastAssignedAt ?? null,
   name: row.name,
   note: row.note,
   status: OperationResourceStatusSchema.parse(row.status),
@@ -128,6 +132,46 @@ export const createPostgresResourceRepository = (client: Sql): ResourceRepositor
       return rows.length
     })
   },
+  deleteScope: async (groupId, tag) => {
+    const rows = await client<{ readonly id: string }[]>`
+      select id from operation_resource
+      where group_id = ${groupId}
+        and (${tag}::text is null or category = ${tag} or ${tag} = any(tags))
+    `
+    const ids = rows.flatMap((row) => {
+      const parsed = OperationResourceIdSchema.safeParse(row.id)
+      return parsed.success ? [parsed.data] : []
+    })
+    if (ids.length === 0) return 0
+    return client.begin(async (transaction) => {
+      const locked = await transaction<{ readonly id: string }[]>`
+        select id from operation_resource where group_id = ${groupId} and id = any(${ids}) for update
+      `
+      const entityIds = locked.map((row) => row.id)
+      await assertNoActiveTaskClaims(transaction, groupId, "resource", entityIds)
+      await assertNoActiveResourceAllocations(transaction, groupId, entityIds)
+      const removed = await transaction<{ readonly id: string }[]>`
+        delete from operation_resource where group_id = ${groupId} and id = any(${entityIds}) returning id
+      `
+      return removed.length
+    })
+  },
+  importTexts: async (input) =>
+    client.begin(async (transaction) => {
+      const created: OperationResource[] = []
+      for (const content of input.contents) {
+        const rows = await transaction<ResourceRow[]>`
+          insert into operation_resource (group_id, name, category, note, tags, status)
+          values (
+            ${input.groupId}, ${content}, ${input.tag}, '', ${[input.tag]}, ${OperationResourceStatus.Available}
+          )
+          returning ${resourceColumns(client)}
+        `
+        const row = rows[0]
+        if (row !== undefined) created.push(toResource(row))
+      }
+      return created
+    }),
   find: async (groupId, resourceId) => {
     const rows = await client<ResourceRow[]>`
       select ${resourceColumns(client)} from operation_resource where group_id = ${groupId} and id = ${resourceId}
@@ -149,7 +193,16 @@ export const createPostgresResourceRepository = (client: Sql): ResourceRepositor
   },
   list: async (filter) => {
     const rows = await client<ResourceRow[]>`
-      select ${resourceColumns(client)} from operation_resource where group_id = ${filter.groupId}
+      select ${resourceColumns(client)},
+        coalesce((
+          select count(*)::int from operation_resource_allocation allocation
+          where allocation.resource_id = operation_resource.id
+        ), 0) as "assignedCount",
+        (
+          select max(allocation.created_at) from operation_resource_allocation allocation
+          where allocation.resource_id = operation_resource.id
+        ) as "lastAssignedAt"
+      from operation_resource where group_id = ${filter.groupId}
       order by created_at desc, id desc
     `
     const all = rows.map(toResource).filter((resource) => matching(resource, filter))

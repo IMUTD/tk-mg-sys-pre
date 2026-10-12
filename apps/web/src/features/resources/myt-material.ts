@@ -3,7 +3,7 @@ export type MytMaterial = {
   assignedCount: number
   content: string
   createTime: string
-  id: number
+  id: string
   remark: string
   tag: string
 }
@@ -61,7 +61,7 @@ export const importMaterials = (
       assignedCount: 0,
       content,
       createTime,
-      id: startId + index,
+      id: String(startId + index),
       remark: "",
       tag,
     }))

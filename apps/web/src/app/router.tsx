@@ -155,10 +155,12 @@ const BehaviorsRoute = (): ReactNode => {
 
 const ResourcesPage = (): ReactNode => {
   const { session } = useAuth()
+  const [searchParams] = useSearchParams()
   return session.kind === "authenticated" ? (
     <ResourcesListPage
       canDelete={pageFlags(session.user, PageKey.StudioTextPool).canDelete}
       canWrite={pageFlags(session.user, PageKey.StudioTextPool).canWrite}
+      groupId={deviceGroupId(session.user.scope.groupIds, searchParams.get("groupId"))}
     />
   ) : null
 }

@@ -1,8 +1,9 @@
 import { DeleteOutlined, EditOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons"
 import { App, Button, Card, Space, Table } from "antd"
 import type { Key } from "react"
-import { type ReactNode, useMemo, useState } from "react"
+import { type ReactNode, useEffect, useMemo, useState } from "react"
 
+import { createTextPoolApi, type TextPoolApi } from "./api"
 import { BatchDeleteDialog } from "./batch-delete-dialog"
 import { MaterialFormDialog } from "./form-dialog"
 import { MaterialImportDialog } from "./import-dialog"
@@ -21,17 +22,26 @@ import { BusinessLabelFilter } from "../labels/filter-row"
 import { MaterialStatisticsDialog } from "./statistics-dialog"
 
 type ResourcesListPageProps = {
+  readonly api?: TextPoolApi
   readonly canDelete?: boolean
   readonly canWrite: boolean
+  readonly groupId?: string
 }
 
-export const ResourcesListPage = ({ canDelete, canWrite }: ResourcesListPageProps): ReactNode => {
+export const ResourcesListPage = ({
+  api,
+  canDelete,
+  canWrite,
+  groupId = "",
+}: ResourcesListPageProps): ReactNode => {
   const allowDelete = canDelete === true
   const { message, modal } = App.useApp()
+  const pool = useMemo(() => api ?? createTextPoolApi(groupId), [api, groupId])
   const [draft, setDraft] = useState<MaterialQuery>(emptyMaterialQuery)
   const [query, setQuery] = useState<MaterialQuery>(emptyMaterialQuery)
   const [materials, setMaterials] = useState<MytMaterial[]>(() => createSeedMaterials())
-  const [selectedIds, setSelectedIds] = useState<readonly number[]>([])
+  const [selectedIds, setSelectedIds] = useState<readonly string[]>([])
+  const [loading, setLoading] = useState(false)
   const [editRecord, setEditRecord] = useState<MytMaterial | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false)
@@ -42,7 +52,26 @@ export const ResourcesListPage = ({ canDelete, canWrite }: ResourcesListPageProp
   const tags = uniqueTags(materials)
   const tagOptions = tags.map((tag) => ({ label: tag, value: tag }))
   const statistics = materialStatistics(materials)
-  const nextId = Math.max(0, ...materials.map((item) => item.id)) + 1
+  const reload = async (): Promise<void> => {
+    if (api === undefined && groupId.length === 0) {
+      setMaterials([])
+      return
+    }
+    setLoading(true)
+    try {
+      setMaterials([...(await pool.list())])
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "保存失败")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void reload()
+    // Reload when the saved pool or group changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pool])
 
   const applyQuery = (next = draft): void => {
     setDraft(next)
@@ -57,10 +86,15 @@ export const ResourcesListPage = ({ canDelete, canWrite }: ResourcesListPageProp
     setSelectedIds([])
   }
 
-  const deleteIds = (ids: readonly number[]): void => {
-    const idSet = new Set(ids)
-    setMaterials((current) => current.filter((item) => !idSet.has(item.id)))
-    setSelectedIds((current) => current.filter((id) => !idSet.has(id)))
+  const remove = async (ids: readonly string[], success: string): Promise<void> => {
+    try {
+      await pool.deleteIds(ids)
+      setSelectedIds([])
+      await reload()
+      message.success(success)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "保存失败")
+    }
   }
 
   const deleteSelected = (): void => {
@@ -69,10 +103,7 @@ export const ResourcesListPage = ({ canDelete, canWrite }: ResourcesListPageProp
       cancelText: "取消",
       content: `确认删除选中的 ${selected.length} 条素材吗？`,
       okText: "确定",
-      onOk: () => {
-        deleteIds(selectedIds)
-        message.success("删除成功")
-      },
+      onOk: () => remove(selectedIds, "删除成功"),
       title: "提示",
     })
   }
@@ -82,10 +113,7 @@ export const ResourcesListPage = ({ canDelete, canWrite }: ResourcesListPageProp
       cancelText: "取消",
       content: "确定删除吗？",
       okText: "确定",
-      onOk: () => {
-        deleteIds([item.id])
-        message.success("删除成功")
-      },
+      onOk: () => remove([item.id], "删除成功"),
       title: "提示",
     })
   }
@@ -202,6 +230,7 @@ export const ResourcesListPage = ({ canDelete, canWrite }: ResourcesListPageProp
         ]}
         dataSource={filtered}
         locale={{ emptyText: "暂无数据" }}
+        loading={loading}
         pagination={{
           pageSize: 10,
           showSizeChanger: true,
@@ -212,7 +241,7 @@ export const ResourcesListPage = ({ canDelete, canWrite }: ResourcesListPageProp
           getCheckboxProps: (item: MytMaterial) => ({
             "aria-label": `选择 ${item.content}`,
           }),
-          onChange: (keys: readonly Key[]) => setSelectedIds(keys.map((key) => Number(key))),
+          onChange: (keys: readonly Key[]) => setSelectedIds(keys.map((key) => String(key))),
           selectedRowKeys: [...selectedIds],
         }}
         scroll={{ x: "max-content" }}
@@ -220,12 +249,24 @@ export const ResourcesListPage = ({ canDelete, canWrite }: ResourcesListPageProp
       />
       {importOpen ? (
         <MaterialImportDialog
-          nextId={nextId}
+          nextId={1}
           onCancel={() => setImportOpen(false)}
           onImported={(imported) => {
-            setMaterials((current) => [...imported, ...current])
-            message.success(`导入成功！共导入 ${imported.length} 条素材`)
-            setImportOpen(false)
+            const tag = imported[0]?.tag
+            if (tag === undefined) return
+            void pool
+              .importLines(
+                tag,
+                imported.map((item) => item.content),
+              )
+              .then(async (count) => {
+                await reload()
+                message.success(`导入成功！共导入 ${count} 条素材`)
+                setImportOpen(false)
+              })
+              .catch((error: unknown) => {
+                message.error(error instanceof Error ? error.message : "保存失败")
+              })
           }}
         />
       ) : null}
@@ -233,18 +274,30 @@ export const ResourcesListPage = ({ canDelete, canWrite }: ResourcesListPageProp
         <BatchDeleteDialog
           onCancel={() => setBatchDeleteOpen(false)}
           onDeleteAll={() => {
-            const count = materials.length
-            setMaterials([])
-            setSelectedIds([])
-            message.success(`删除成功！共删除 ${count} 条素材`)
-            setBatchDeleteOpen(false)
+            void pool
+              .deleteScope()
+              .then(async (count) => {
+                setSelectedIds([])
+                await reload()
+                message.success(`删除成功！共删除 ${count} 条素材`)
+                setBatchDeleteOpen(false)
+              })
+              .catch((error: unknown) => {
+                message.error(error instanceof Error ? error.message : "保存失败")
+              })
           }}
           onDeleteByTag={(tag) => {
-            const removed = materials.filter((item) => item.tag === tag).length
-            setMaterials((current) => current.filter((item) => item.tag !== tag))
-            setSelectedIds([])
-            message.success(`删除成功！共删除 ${removed} 条素材`)
-            setBatchDeleteOpen(false)
+            void pool
+              .deleteScope(tag)
+              .then(async (count) => {
+                setSelectedIds([])
+                await reload()
+                message.success(`删除成功！共删除 ${count} 条素材`)
+                setBatchDeleteOpen(false)
+              })
+              .catch((error: unknown) => {
+                message.error(error instanceof Error ? error.message : "保存失败")
+              })
           }}
           tags={tags}
         />
@@ -256,9 +309,16 @@ export const ResourcesListPage = ({ canDelete, canWrite }: ResourcesListPageProp
         <MaterialFormDialog
           onCancel={() => setEditRecord(null)}
           onSubmit={(item) => {
-            setMaterials((current) => current.map((row) => (row.id === item.id ? item : row)))
-            message.success("修改成功")
-            setEditRecord(null)
+            void pool
+              .update(item)
+              .then(async () => {
+                await reload()
+                message.success("修改成功")
+                setEditRecord(null)
+              })
+              .catch((error: unknown) => {
+                message.error(error instanceof Error ? error.message : "保存失败")
+              })
           }}
           record={editRecord}
         />

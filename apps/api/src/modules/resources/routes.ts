@@ -16,10 +16,10 @@ import {
 import { authorizeOperationRequest, hasOperationAuthorizationFailure } from "./route-authorization"
 import type { ResourceService } from "./service"
 
-const TagsSchema = z.array(z.string().trim().min(1).max(64)).max(20).default([])
+const TagsSchema = z.array(z.string().trim().min(1).max(80)).max(20).default([])
 const CreateSchema = z.object({
   category: z.string().trim().min(1).max(80),
-  name: z.string().trim().min(1).max(160),
+  name: z.string().trim().min(1).max(4000),
   note: z.string().max(2000).default(""),
   status: z
     .enum([OperationResourceStatus.Available, OperationResourceStatus.Inactive])
@@ -28,6 +28,13 @@ const CreateSchema = z.object({
 })
 const UpdateSchema = CreateSchema.partial()
 const BatchSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(500) })
+const ImportSchema = z.object({
+  contents: z.array(z.string().trim().min(1).max(4000)).min(1).max(1000),
+  tag: z.string().trim().min(1).max(80),
+})
+const DeleteScopeSchema = z.object({
+  tag: z.string().trim().min(1).max(80).optional(),
+})
 const AllocationSchema = z.object({ accountId: z.string().uuid() })
 const ListSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -140,6 +147,56 @@ export const registerResourceRoutes = (
           authorization.principal.userId,
           authorization.groupId,
           input.ids,
+        ),
+      })
+    } catch (error) {
+      if (error instanceof OperationDeleteConflictError)
+        return context.json({ error: "operation_entity_active" }, 409)
+      throw error
+    }
+  })
+  app.post("/api/groups/:groupId/operations/resources/import", async (context) => {
+    const authorization = await authorizeOperationRequest(
+      context,
+      authService,
+      auditRepository,
+      "resource.import",
+      Permission.OperationsWrite,
+      PageKey.StudioTextPool,
+    )
+    if (hasOperationAuthorizationFailure(authorization)) return authorization.response
+    const input = await parseJson(context.req.raw, ImportSchema)
+    if (input === null) return context.json({ error: "invalid_resource_request" }, 400)
+    const items = await service.importTexts(authorization.principal.userId, authorization.groupId, input)
+    return context.json({ imported: items.length, items }, 201)
+  })
+  app.post("/api/groups/:groupId/operations/resources/batch/delete-scope", async (context) => {
+    const authorization = await authorizeOperationRequest(
+      context,
+      authService,
+      auditRepository,
+      "resource.delete",
+      Permission.OperationsWrite,
+      PageKey.StudioTextPool,
+    )
+    if (hasOperationAuthorizationFailure(authorization)) return authorization.response
+    const denied = await rejectUnlessPageDelete(
+      context,
+      auditRepository,
+      authorization.principal,
+      "resource.delete",
+      `group:${authorization.groupId}`,
+      PageKey.StudioTextPool,
+    )
+    if (denied !== null) return denied
+    const input = await parseJson(context.req.raw, DeleteScopeSchema)
+    if (input === null) return context.json({ error: "invalid_batch_request" }, 400)
+    try {
+      return context.json({
+        affected: await service.deleteScope(
+          authorization.principal.userId,
+          authorization.groupId,
+          input.tag,
         ),
       })
     } catch (error) {

@@ -30,6 +30,12 @@ export interface ResourceService {
     input: Omit<ResourceCreateInput, "groupId">,
   ): Promise<OperationResource>
   delete(actorId: UserId, groupId: string, ids: readonly string[]): Promise<number>
+  deleteScope(actorId: UserId, groupId: string, tag?: string): Promise<number>
+  importTexts(
+    actorId: UserId,
+    groupId: string,
+    input: { readonly contents: readonly string[]; readonly tag: string },
+  ): Promise<readonly OperationResource[]>
   history(groupId: string, resourceId: string): Promise<readonly ResourceAllocation[]>
   list(
     filter: Omit<ResourceListFilter, "groupId"> & { readonly groupId: string },
@@ -86,6 +92,23 @@ export const createResourceService = (
     )
     await audit(dependencies.auditRepository, actorId, "resource.delete", `group:${rawGroupId}`)
     return count
+  },
+  deleteScope: async (actorId, rawGroupId, tag) => {
+    const count = await dependencies.repository.deleteScope(
+      GroupIdSchema.parse(rawGroupId),
+      tag ?? null,
+    )
+    await audit(dependencies.auditRepository, actorId, "resource.delete", `group:${rawGroupId}`)
+    return count
+  },
+  importTexts: async (actorId, rawGroupId, input) => {
+    const resources = await dependencies.repository.importTexts({
+      contents: input.contents,
+      groupId: GroupIdSchema.parse(rawGroupId),
+      tag: input.tag,
+    })
+    await audit(dependencies.auditRepository, actorId, "resource.import", `group:${rawGroupId}`)
+    return resources
   },
   history: async (rawGroupId, rawResourceId) =>
     dependencies.repository.history(
