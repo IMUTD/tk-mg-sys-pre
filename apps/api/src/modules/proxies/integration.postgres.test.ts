@@ -28,11 +28,17 @@ const setup = async () => {
   const service = createProxyService({
     repository,
     cipher,
-    ipLookupTransport: {
-      query: async (ip) => ({
-        delay: 23,
+    dialTransport: {
+      query: async () => ({
+        connectivity: {
+          ok: true,
+          delay: 12,
+          status: 204,
+          url: "https://www.gstatic.com/generate_204",
+        },
+        informationDelay: 23,
         information: {
-          ip,
+          ip: "1.1.1.1",
           country: "AU",
           city: "Sydney",
           isp: "Cloudflare",
@@ -82,10 +88,14 @@ describe("persistent proxy graph and probes", () => {
       })
       expect(result).toMatchObject({
         ok: true,
-        detection_type: "ip_lookup",
-        connectivity_checked: false,
-        target_ip: "8.8.8.8",
-        results: [{ response_body: { ip: "8.8.8.8", city: "Sydney", asn: "AS13335" } }],
+        detection_type: "proxy_connectivity",
+        connectivity_checked: true,
+        message: "proxy_online",
+        target_ip: "1.1.1.1",
+        results: [
+          { response_body: { ip: "1.1.1.1", city: "Sydney", asn: "AS13335" } },
+          { ok: true, url: "https://www.gstatic.com/generate_204" },
+        ],
       })
       const page = await service.list({ groupId, page: 1, pageSize: 100 })
       expect(page.items[0]?.displayId).toBe(proxy.displayId)

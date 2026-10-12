@@ -11,7 +11,8 @@ import {
   parseCredentials,
   proxyEndpoint,
 } from "./configuration"
-import { detectProxyIp, type IpLookupTransport } from "./ip-lookup"
+import { detectDial, type RelayProbeTransport } from "./mihomo-probe"
+import { ProxyProbeError } from "./probe"
 import {
   type OperationProxy,
   ProxyConflictError,
@@ -29,7 +30,7 @@ type Dependencies = {
   readonly auditRepository?: AuditRepository
   readonly cipher: SecretCipher
   readonly repository: ProxyRepository
-  readonly ipLookupTransport?: IpLookupTransport
+  readonly dialTransport?: RelayProbeTransport
 }
 export interface ProxyService {
   credentials?(actorId: UserId, groupId: string, proxyId: string): Promise<ProxySecret | null>
@@ -181,15 +182,17 @@ export const createProxyService = (dependencies: Dependencies): ProxyService => 
     const snapshot = await dependencies.repository.startProbe?.(
       groupId,
       ProxyIdSchema.parse(rawProxyId),
-      false,
+      true,
     )
     if (snapshot === undefined || snapshot === null) return null
-    const transport = dependencies.ipLookupTransport ?? {
+    const transport = dependencies.dialTransport ?? {
       query: async () => {
-        throw new Error("ip_lookup_unavailable")
+        throw new ProxyProbeError("probe_start_failed")
       },
     }
-    const result = await detectProxyIp(snapshot, options, transport)
+    const result = await detectDial(snapshot, options, transport, (proxy) =>
+      storedCredentials(dependencies.cipher, proxy),
+    )
     const persisted = await dependencies.repository.finishProbe?.(groupId, snapshot, result)
     await audit(dependencies.auditRepository, actorId, "proxy.detect", `proxy:${snapshot.proxy.id}`)
     if (!persisted) {

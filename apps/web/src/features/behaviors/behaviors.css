@@ -108,6 +108,16 @@
   gap: 8px;
 }
 
+.rpa-source {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.rpa-source-label {
+  white-space: nowrap;
+}
+
 .rpa-delay {
   flex-basis: 100%;
 }
@@ -133,11 +143,20 @@
   width: 168px;
 }
 
-.rpa-step-actions {
+.rpa-load-list {
   display: grid;
   gap: 8px;
-  grid-auto-flow: column;
-  justify-content: end;
+}
+
+.rpa-load-list .ant-btn {
+  justify-content: flex-start;
+}
+
+.rpa-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .rpa-step-actions .ant-btn {
@@ -191,6 +210,12 @@
   gap: 8px;
 }
 
+.api-lab-frequent {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .api-lab-layout {
   display: grid;
   gap: 16px;
@@ -201,18 +226,15 @@
   display: grid;
   align-content: start;
   gap: 8px;
+  grid-template-rows: auto minmax(0, 1fr);
   max-height: 640px;
-  overflow: auto;
 }
 
-.api-lab-group {
-  background: #fff;
-  color: #0958d9;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 8px 4px 0;
-  position: sticky;
-  top: 0;
+.api-lab-skills {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow: auto;
 }
 
 .api-lab-item {

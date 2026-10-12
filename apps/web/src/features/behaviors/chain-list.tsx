@@ -66,6 +66,9 @@ export const ChainList = ({ canDelete, onTest }: ChainListProps): ReactNode => {
               <Space wrap>
                 <Tag color={originColor(item.origin)}>{originLabel(item.origin)}</Tag>
                 <Tag>{item.steps.length} 步</Tag>
+                {item.anchor === null ? null : (
+                  <Tag>账号表 · {item.anchor.key === "identifier" ? "账号" : "编号"}</Tag>
+                )}
               </Space>
               <ol className="chain-steps">
                 {item.steps.slice(0, 4).map((step) => (

@@ -1895,6 +1895,19 @@ export const skillCatalog: readonly SkillSpec[] = [
   },
   {
     "batch": true,
+    "code": "EnsurePackage",
+    "defaults": {
+      "pkg": "com.zhiliaoapp.musically",
+      "url": "https://cnb.cool/huliorange/tkapk/-/releases/download/tkapk/com.zhiliaoapp.musically.apk"
+    },
+    "group": "安卓/应用",
+    "hint": "云机内已安装则跳过。没有则这台云机用 curl 下载 url，再 pm install。",
+    "name": "检测并安装应用",
+    "params": ["pkg", "url"],
+    "risk": "high"
+  },
+  {
+    "batch": true,
     "code": "Export",
     "defaults": { "pkg": "com.android.settings" },
     "group": "安卓/应用",

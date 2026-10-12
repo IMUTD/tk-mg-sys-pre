@@ -294,11 +294,31 @@ export const endpointText = (proxy: MytProxy): string => {
 }
 
 export const getModeTags = (proxy: MytProxy): readonly ProxyModeTag[] => [
-  { enabled: proxy.save, key: "save", label: "节流" },
   { enabled: proxy.tun, key: "tun", label: "TUN" },
   { enabled: proxy.turbo || proxy.turboNode !== null, key: "turbo", label: "加速" },
   { enabled: proxy.safe, key: "safe", label: "安全" },
 ]
+
+export const attributionText = (result: ProxyCheckResult): string => {
+  const body = getPrimaryCheckResult(result)?.response_body
+  if (body === undefined) return "-"
+  const place = [body.countryName || body.country, body.region, body.city, body.isp].filter(
+    (part) => part !== undefined && part.length > 0,
+  )
+  return place.length === 0 ? "-" : place.join(" ")
+}
+
+export const onlineText = (result: ProxyCheckResult): string => {
+  const item = result.results.find((entry) => entry.url.includes("generate_204"))
+  if (item !== undefined) return item.ok ? "可以上网" : "无法上网"
+  return result.connectivity_checked === true ? "无法上网" : "未检测"
+}
+
+export const verificationPageUrl = (result: ProxyCheckResult): string | null => {
+  const ip = result.target_ip ?? getPrimaryCheckResult(result)?.response_body?.ip
+  if (ip === undefined || ip.length === 0) return null
+  return `https://ipinfo.io/${encodeURIComponent(ip)}`
+}
 
 export const turboNodeLabel = (proxy: MytProxy): string => {
   const kind = proxy.type === "0" ? "[V2]" : proxy.type === "1" ? "[HTTP]" : "[SOCKS5]"
@@ -386,6 +406,8 @@ export const getResultStatusLabel = (ok: boolean): string => (ok ? "成功" : "�
 
 const checkMessages: Readonly<Record<string, string>> = {
   ip_information_found: "IP 信息查询成功",
+  proxy_online: "代理可以上网，已记录出口 IP",
+  proxy_online_ip_failed: "代理可以上网，出口 IP 查询失败",
   ip_information_failed: "IP 信息查询失败",
   ip_information_mismatch: "查询响应 IP 与目标不一致",
   ip_lookup_timeout: "IP 信息查询超时",

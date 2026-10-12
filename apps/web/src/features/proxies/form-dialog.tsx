@@ -27,21 +27,14 @@ export const ProxyFormDialog = ({
 }: ProxyFormDialogProps): ReactNode => {
   const { message } = App.useApp()
   const [extra, setExtra] = useState(record.extra)
-  const [expiredTime, setExpiredTime] = useState(record.expiredTime ?? "")
   const [ip, setIp] = useState(record.ip)
   const [password, setPassword] = useState(record.password)
   const [port, setPort] = useState(record.port)
   const [proxyType, setProxyType] = useState(record.proxyType)
-  const [refreshUrl, setRefreshUrl] = useState(record.refreshUrl)
-  const [region, setRegion] = useState(record.region)
   const [remark, setRemark] = useState(record.remark)
   const [safe, setSafe] = useState(record.safe)
-  const [save, setSave] = useState(record.save)
-  const [tag, setTag] = useState(record.tag)
   const [tun, setTun] = useState(record.tun)
-  const [turbo, setTurbo] = useState(record.turbo)
   const [turboNode, setTurboNode] = useState<number | null>(record.turboNode)
-  const [turboNodeList, setTurboNodeList] = useState<number[]>([...record.turboNodeList])
   const [type, setType] = useState(record.type)
   const [username, setUsername] = useState(record.username)
   const turboOptions = turboNodeProxies(proxies)
@@ -76,21 +69,15 @@ export const ProxyFormDialog = ({
     onSubmit({
       ...record,
       extra: extra.trim(),
-      expiredTime: expiredTime.trim().length === 0 ? null : expiredTime.trim(),
       ip: ip.trim(),
       password,
       port: port.trim(),
       proxyType: showProxyKind ? proxyType : "static",
-      refreshUrl: refreshUrl.trim(),
-      region: region.trim(),
       remark,
       safe,
-      save: showSaveTurbo ? save : false,
-      tag,
       tun,
-      turbo: isV2 || turbo,
+      turbo: isV2 || record.turbo,
       turboNode: showSaveTurbo ? turboNode : null,
-      turboNodeList: showSaveTurbo ? turboNodeList : [],
       type,
       username: username.trim(),
     })
@@ -211,38 +198,18 @@ export const ProxyFormDialog = ({
           </Form.Item>
         ) : null}
         {showSaveTurbo ? (
-          <>
-            <Form.Item label="节流">
-              <Switch checked={save} onChange={setSave} />
-              <span className="form-hint form-hint-warn">需要有加速节点或者在海外环境</span>
-            </Form.Item>
-            <Form.Item label="加速">
-              <Select
-                allowClear
-                aria-label="加速"
-                onChange={(value: number | null) => setTurboNode(value ?? null)}
-                options={turboOptions}
-                placeholder="请选择"
-                style={{ width: "100%", maxWidth: 370 }}
-                value={turboNode}
-                virtual={false}
-              />
-            </Form.Item>
-            <Form.Item label="加速列表">
-              <Select
-                allowClear
-                aria-label="加速列表"
-                maxCount={10}
-                mode="multiple"
-                onChange={(value: number[]) => setTurboNodeList(value)}
-                options={turboOptions}
-                placeholder="请选择多个加速节点（优先使用）"
-                style={{ width: "100%", maxWidth: 370 }}
-                value={turboNodeList}
-                virtual={false}
-              />
-            </Form.Item>
-          </>
+          <Form.Item label="加速">
+            <Select
+              allowClear
+              aria-label="加速"
+              onChange={(value: number | null) => setTurboNode(value ?? null)}
+              options={turboOptions}
+              placeholder="请选择"
+              style={{ width: "100%", maxWidth: 370 }}
+              value={turboNode}
+              virtual={false}
+            />
+          </Form.Item>
         ) : null}
         <Form.Item label="TUN模式">
           <Switch checked={tun} onChange={setTun} />
@@ -253,44 +220,6 @@ export const ProxyFormDialog = ({
           <span className="form-hint form-hint-danger">
             配合TUN模式打开,强隐私,使用前请联系客服确认
           </span>
-        </Form.Item>
-        {type === "2" || type === "1" ? (
-          <Form.Item label="加速节点">
-            <Switch aria-label="加速节点" checked={turbo} onChange={setTurbo} />
-          </Form.Item>
-        ) : null}
-        {showSaveTurbo ? (
-          <Form.Item label="地区检测">
-            <Input
-              aria-label="地区检测"
-              onChange={(event) => setRegion(event.target.value)}
-              style={{ width: 80 }}
-              value={region}
-            />
-            <span className="form-hint form-hint-warn">防止IP跳非目标地区,留空不检测,如:US,CA</span>
-          </Form.Item>
-        ) : null}
-        <Form.Item label="分组">
-          <Input aria-label="分组" onChange={(event) => setTag(event.target.value)} value={tag} />
-        </Form.Item>
-        {showHttpFields ? (
-          <Form.Item label="有效期">
-            <Input
-              aria-label="有效期"
-              onChange={(event) => setExpiredTime(event.target.value)}
-              placeholder="YYYY-MM-DD HH:mm:ss"
-              style={{ width: 190 }}
-              value={expiredTime}
-            />
-            <span className="form-hint">仅作为到期提醒</span>
-          </Form.Item>
-        ) : null}
-        <Form.Item label="刷新URL">
-          <Input
-            aria-label="刷新URL"
-            onChange={(event) => setRefreshUrl(event.target.value)}
-            value={refreshUrl}
-          />
         </Form.Item>
       </Form>
     </Modal>

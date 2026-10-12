@@ -34,7 +34,6 @@ import {
   ProxyBatchUpdateDialog,
   ProxyBuyDialog,
   ProxyCheckResultDialog,
-  ProxyDetectDialog,
   ProxyFaqDialog,
   ProxyRunDialog,
 } from "./batch-dialogs"
@@ -195,7 +194,6 @@ export const ProxiesListPage = ({
   const [batchTagOpen, setBatchTagOpen] = useState(false)
   const [batchTurboOpen, setBatchTurboOpen] = useState(false)
   const [batchUpdateOpen, setBatchUpdateOpen] = useState(false)
-  const [detectIds, setDetectIds] = useState<readonly number[] | null>(null)
   const [runProxy, setRunProxy] = useState<MytProxy | null>(null)
   const [faqOpen, setFaqOpen] = useState(false)
   const [buyOpen, setBuyOpen] = useState(false)
@@ -226,10 +224,29 @@ export const ProxiesListPage = ({
         : [...current, updated],
     )
   }
+  const runDetect = (ids: readonly number[]): void => {
+    void perform(async () => {
+      let opened = false
+      const { failed, requestFailures, succeeded } = await detectProxyBatch(
+        api,
+        proxies.filter((row) => ids.includes(row.id)),
+        defaultIpLookupOptions,
+        (row, result) => {
+          updateDetection(row, result)
+          if (ids.length === 1) {
+            opened = true
+            setResultView({ id: row.id, result })
+          }
+        },
+      )
+      if (ids.length !== 1) message.info(`检测完成，成功 ${succeeded} 个，失败 ${failed} 个`)
+      else if (!opened || requestFailures > 0) message.error("检测失败")
+    })
+  }
   const detectCreated = async (items: readonly MytProxy[]): Promise<void> => {
     if (items.length === 0) return
     const result = await detectProxyBatch(api, items, defaultIpLookupOptions, updateDetection)
-    message.info(`IP 查询完成，成功 ${result.succeeded} 个，失败 ${result.failed} 个`)
+    message.info(`检测完成，成功 ${result.succeeded} 个，失败 ${result.failed} 个`)
   }
 
   const applyQuery = (next = draft): void => {
@@ -479,7 +496,7 @@ export const ProxiesListPage = ({
                       requireSelection(() => setBatchTurboOpen(true))
                       return
                     }
-                    requireSelection(() => setDetectIds(selectedIds))
+                    requireSelection(() => runDetect(selectedIds))
                   },
                 }}
                 trigger={["click"]}
@@ -570,21 +587,12 @@ export const ProxiesListPage = ({
                   <div className="proxy-result-toolbar">
                     <Button
                       disabled={!canWrite || busy}
-                      onClick={() => setDetectIds([item.id])}
+                      onClick={() => runDetect([item.id])}
                       size="small"
                       type="link"
                     >
                       检测
                     </Button>
-                    {parsed !== null ? (
-                      <Button
-                        onClick={() => setResultView({ id: item.id, result: parsed })}
-                        size="small"
-                        type="link"
-                      >
-                        查看
-                      </Button>
-                    ) : null}
                     {parsed !== null ? (
                       <Tag color={parsed.ok ? "success" : "error"}>
                         {getResultStatusLabel(parsed.ok)}
@@ -856,25 +864,6 @@ export const ProxiesListPage = ({
           }
         />
       ) : null}
-      {detectIds === null ? null : (
-        <ProxyDetectDialog
-          busy={busy}
-          count={detectIds.length}
-          onCancel={() => setDetectIds(null)}
-          onSubmit={(options) =>
-            void perform(async () => {
-              const { succeeded, failed } = await detectProxyBatch(
-                api,
-                proxies.filter((row) => detectIds.includes(row.id)),
-                options,
-                updateDetection,
-              )
-              message.info(`检测完成，成功 ${succeeded} 个，失败 ${failed} 个`)
-              setDetectIds(null)
-            })
-          }
-        />
-      )}
       {runProxy === null ? null : (
         <ProxyRunDialog
           devices={devices}

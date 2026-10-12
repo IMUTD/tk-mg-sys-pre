@@ -2,23 +2,23 @@ import { Alert, Button, Collapse, Descriptions, Form, Input, Modal, Radio, Selec
 import { type ReactNode, useMemo, useState } from "react"
 
 import {
+  attributionText,
   BATCH_SWITCH_OPTIONS,
-  checkMessage,
   DETECT_CHANNEL_OPTIONS,
   DETECT_MODE_OPTIONS,
   type DetectChannel,
   type DetectMode,
   type DetectOptions,
   getPrimaryCheckResult,
-  getResultCountry,
   getResultIp,
-  getResultStatusLabel,
   type MytProxy,
+  onlineText,
   PROXY_FAQS,
   type ProxyCheckResult,
   type ProxyDevice,
   turboNodeLabel,
   turboNodeProxies,
+  verificationPageUrl,
 } from "./myt-proxy"
 
 type Cancelable = { readonly onCancel: () => void }
@@ -295,7 +295,7 @@ export const ProxyCheckResultDialog = ({
   proxyId,
   result,
 }: Cancelable & { readonly proxyId: number; readonly result: ProxyCheckResult }): ReactNode => {
-  const primary = getPrimaryCheckResult(result)
+  const link = verificationPageUrl(result)
   return (
     <Modal
       footer={
@@ -308,47 +308,30 @@ export const ProxyCheckResultDialog = ({
       onCancel={onCancel}
       open
       title={`检测结果[${proxyId}]`}
-      width={640}
+      width={520}
     >
-      <div className="proxy-result-summary">
-        <span>{getResultStatusLabel(result.ok)}</span>
-        <span>{getResultIp(primary)}</span>
-        <span>{getResultCountry(primary)}</span>
-      </div>
       <Descriptions
         className="proxy-check-details"
-        column={2}
+        column={1}
         size="small"
         items={[
+          { key: "ip", label: "IP", children: getResultIp(getPrimaryCheckResult(result)) },
+          { key: "place", label: "归属", children: attributionText(result) },
+          { key: "online", label: "能否联网", children: onlineText(result) },
           {
-            key: "type",
-            label: "检测类型",
-            children: result.detection_type === "ip_lookup" ? "IP 信息查询" : "历史连通检测",
+            key: "link",
+            label: "验证链接",
+            children:
+              link === null ? (
+                "-"
+              ) : (
+                <a href={link} rel="noreferrer" target="_blank">
+                  {link}
+                </a>
+              ),
           },
-          {
-            key: "connectivity",
-            label: "代理连通性",
-            children: result.detection_type === "ip_lookup" ? "未检测" : "历史结果",
-          },
-          { key: "country", label: "国家", children: primary?.response_body?.countryName || "-" },
-          { key: "region", label: "地区", children: primary?.response_body?.region || "-" },
-          { key: "city", label: "城市", children: primary?.response_body?.city || "-" },
-          { key: "isp", label: "运营商", children: primary?.response_body?.isp || "-" },
-          { key: "asn", label: "ASN", children: primary?.response_body?.asn || "-" },
-          {
-            key: "delay",
-            label: result.detection_type === "ip_lookup" ? "查询耗时" : "耗时",
-            children: primary === null ? "-" : `${primary.delay} ms`,
-          },
-          {
-            key: "time",
-            label: "检测时间",
-            children: new Date(result.check_time).toLocaleString(),
-          },
-          { key: "message", label: "结果", children: checkMessage(result.message) },
         ]}
       />
-      <pre className="proxy-result-json">{JSON.stringify(result, null, 2)}</pre>
     </Modal>
   )
 }

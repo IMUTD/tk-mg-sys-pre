@@ -168,6 +168,57 @@ export type ParamScope = "external" | "internal"
 
 export type GuardCode = "ad" | "transcode"
 
+export type AnchorField = {
+  label: string
+  source: string
+}
+
+export const fallbackAnchorFields: readonly AnchorField[] = [
+  { label: "账号", source: "account.identifier" },
+  { label: "密码", source: "account.secret" },
+  { label: "地区", source: "account.region" },
+  { label: "语言", source: "account.language" },
+  { label: "代理地址", source: "proxy.host" },
+  { label: "代理端口", source: "proxy.port" },
+  { label: "代理账号", source: "proxy.username" },
+  { label: "代理密码", source: "proxy.password" },
+  { label: "V2链接", source: "proxy.link" },
+  { label: "TUN模式", source: "proxy.tun" },
+  { label: "强力安全模式", source: "proxy.safe" },
+  { label: "盒子", source: "device.host" },
+  { label: "坑位", source: "instance.index" },
+  { label: "备份路径", source: "account.backup_key" },
+  { label: "备份盒子", source: "account.backup_device" },
+  { label: "文本池", source: "pool.text" },
+  { label: "视频池", source: "pool.video" },
+]
+
+let anchorFields: readonly AnchorField[] = fallbackAnchorFields
+
+export const setAnchorFields = (next: readonly AnchorField[]): void => {
+  anchorFields = next.map((item) => ({ label: item.label, source: item.source }))
+}
+
+export const anchorFieldList = (): readonly AnchorField[] => anchorFields
+
+export const anchorFieldLabel = (source: string | undefined): string =>
+  anchorFields.find((item) => item.source === source)?.label ?? ""
+
+export type AnchorKey = {
+  key: "id" | "identifier"
+  label: string
+}
+
+export const fallbackAnchorKeys: readonly AnchorKey[] = [
+  { key: "id", label: "编号" },
+  { key: "identifier", label: "账号" },
+]
+
+export type ChainAnchor = {
+  key: "id" | "identifier"
+  table: "operation_account"
+}
+
 export type ChainStep = {
   api: RpaApiCode
   delayMs: number
@@ -175,9 +226,11 @@ export type ChainStep = {
   id: number
   params: Record<string, string>
   scopes: Record<string, ParamScope>
+  sources: Record<string, string>
 }
 
 export type BehaviorChain = {
+  anchor: ChainAnchor | null
   id: string
   lastTestAt: string
   name: string
@@ -211,9 +264,18 @@ export const apiByCode = (code: string): SkillSpec | undefined =>
 export const apiLabel = (code: string): string => apiByCode(code)?.name ?? code
 
 export const stepText = (step: ChainStep): string => {
-  const entries = Object.entries(step.params).filter(([, value]) => value.trim().length > 0)
   const spec = apiByCode(step.api)
-  const detail = entries.map(([key, value]) => `${paramLabel(spec, key)}=${value}`).join(" ")
+  const detail = Object.keys(step.params)
+    .flatMap((key) => {
+      const label = paramLabel(spec, key)
+      if (step.scopes?.[key] === "external") {
+        const field = anchorFieldLabel(step.sources?.[key])
+        return field.length === 0 ? [] : [`${label}=${field}`]
+      }
+      const value = step.params[key] ?? ""
+      return value.trim().length === 0 ? [] : [`${label}=${value}`]
+    })
+    .join(" ")
   return detail.length === 0
     ? `${apiLabel(step.api)}  ${step.api}`
     : `${apiLabel(step.api)}  ${detail}`
@@ -244,6 +306,7 @@ export const createStep = (api: RpaApiCode, id: number): ChainStep => {
     id,
     params,
     scopes: Object.fromEntries(Object.keys(params).map((key) => [key, "internal"])),
+    sources: Object.fromEntries(Object.keys(params).map((key) => [key, "literal"])),
   }
 }
 
@@ -258,6 +321,12 @@ export const publishChainSteps = (steps: readonly ChainStep[]): ChainStep[] =>
       Object.entries(step.params).map(([key, value]) => [key, step.scopes?.[key] === "external" ? "" : value]),
     ),
     scopes: { ...(step.scopes ?? {}) },
+    sources: Object.fromEntries(
+      Object.keys(step.params).map((key) => [
+        key,
+        step.scopes?.[key] === "external" ? (step.sources?.[key] ?? "") : "literal",
+      ]),
+    ),
   }))
 
 export const createSeedDevices = (): CloudDevice[] => []

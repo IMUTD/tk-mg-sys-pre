@@ -23,7 +23,7 @@ import { createDeviceService } from "./modules/devices/service"
 import { createPostgresPagePermissionRepository } from "./modules/members/page-permission-repository"
 import { createPostgresMemberRepository } from "./modules/members/repository"
 import { createMemberService } from "./modules/members/service"
-import { createIpLookupTransport } from "./modules/proxies/ip-lookup"
+import { createMihomoProbeTransport } from "./modules/proxies/mihomo-probe"
 import { createPostgresProxyRepository } from "./modules/proxies/repository"
 import { createProxyService } from "./modules/proxies/service"
 import { createPostgresRegistrationResourceRepository } from "./modules/registration-resources/postgres-repository"
@@ -87,12 +87,14 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
     repository: createPostgresAccountPoolRepository(client),
   })
   const poolService = createPoolService(createPostgresPoolRepository(client))
-  const ipLookupTransport = createIpLookupTransport()
+  const dialTransport = createMihomoProbeTransport(
+    process.env["MIHOMO_BINARY"] ?? "/usr/local/bin/mihomo",
+  )
   const proxyService = createProxyService({
     auditRepository,
     cipher,
     repository: createPostgresProxyRepository(client),
-    ipLookupTransport,
+    dialTransport,
   })
   const settingsService = createSettingsService({
     auditRepository,
@@ -147,7 +149,7 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
       await boxLink.checkReadiness()
     },
     close: async () => {
-      await ipLookupTransport.close?.()
+      await dialTransport.close?.()
       await boxLink.close()
       await redis.quit()
       await client.end()

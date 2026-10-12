@@ -302,6 +302,20 @@
       "when": 1794739200000,
       "tag": "0042_box_share_backup",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1794825600000,
+      "tag": "0043_account_anchor",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1794912000000,
+      "tag": "0044_account_anchor_keys",
+      "breakpoints": true
     }
   ]
 }

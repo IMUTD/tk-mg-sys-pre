@@ -42,8 +42,8 @@ it("persists HTTP acceleration and displays server-supplied IP lookup details", 
   })
   const detect = vi.fn(async () => {
     const result = {
-      detection_type: "ip_lookup" as const,
-      connectivity_checked: false,
+      detection_type: "proxy_connectivity" as const,
+      connectivity_checked: true,
       target_ip: proxy.ip,
       channel: "us" as const,
       mode: "detailed" as const,
@@ -69,6 +69,12 @@ it("persists HTTP acceleration and displays server-supplied IP lookup details", 
             asn: "AS13335",
           },
         },
+        {
+          ok: true,
+          delay: 20,
+          status: 204,
+          url: "https://www.gstatic.com/generate_204",
+        },
       ],
     }
     proxy = { ...proxy, result: JSON.stringify(result) }
@@ -90,32 +96,33 @@ it("persists HTTP acceleration and displays server-supplied IP lookup details", 
   await user.click(screen.getByRole("button", { name: "编辑" }))
   const form = await screen.findByRole("dialog")
   await waitFor(() => expect(within(form).getByText("修改代理")).toBeVisible())
-  const switchControl = within(form)
-    .getByText("加速节点")
-    .closest(".ant-form-item")
-    ?.querySelector('[role="switch"]')
-  if (switchControl === null || switchControl === undefined)
-    throw new Error("HTTP acceleration switch missing")
-  await user.click(switchControl)
+  expect(within(form).queryByText("节流")).not.toBeInTheDocument()
+  expect(within(form).queryByText("加速列表")).not.toBeInTheDocument()
+  expect(within(form).queryByText("加速节点")).not.toBeInTheDocument()
+  expect(within(form).queryByText("地区检测")).not.toBeInTheDocument()
+  expect(within(form).queryByLabelText("分组")).not.toBeInTheDocument()
+  expect(within(form).queryByLabelText("有效期")).not.toBeInTheDocument()
+  expect(within(form).queryByLabelText("刷新URL")).not.toBeInTheDocument()
   await user.click(within(form).getByRole("button", { name: "确认" }))
   expect(save).toHaveBeenCalledWith(
-    expect.objectContaining({ type: "1", turbo: true }),
+    expect.objectContaining({ type: "1", turbo: false }),
     expect.any(Array),
     true,
   )
   await waitFor(() => expect(form).not.toBeVisible())
   await user.click(screen.getByRole("button", { name: "检测" }))
-  const dialog = await screen.findByRole("dialog")
-  await waitFor(() => expect(within(dialog).getByText("检测选项")).toBeVisible())
-  await user.click(within(dialog).getByRole("button", { name: "确认" }))
-  await screen.findByText("8.8.8.8")
-  expect(screen.getByText("Sydney")).toBeVisible()
-  expect(screen.getByText("Cloudflare")).toBeVisible()
-  expect(detect).toHaveBeenCalledTimes(1)
-  await user.click(screen.getByRole("button", { name: "查看" }))
   const resultDialog = await screen.findByRole("dialog")
-  await waitFor(() => expect(within(resultDialog).getByText("IP 信息查询")).toBeVisible())
-  expect(within(resultDialog).getByText("未检测")).toBeVisible()
+  await waitFor(() => expect(within(resultDialog).getByText("IP")).toBeVisible())
+  expect(within(resultDialog).getByText("归属")).toBeVisible()
+  expect(within(resultDialog).getByText("能否联网")).toBeVisible()
+  expect(within(resultDialog).getByText("可以上网")).toBeVisible()
+  expect(within(resultDialog).getByText("AU Sydney Cloudflare")).toBeVisible()
+  const link = within(resultDialog).getByRole("link", { name: "https://ipinfo.io/8.8.8.8" })
+  expect(link).toHaveAttribute("href", "https://ipinfo.io/8.8.8.8")
+  expect(link).toHaveAttribute("target", "_blank")
+  expect(screen.queryByRole("button", { name: "查看" })).not.toBeInTheDocument()
+  expect(screen.queryByText("检测选项")).not.toBeInTheDocument()
+  expect(detect).toHaveBeenCalledTimes(1)
 })
 it("looks up a newly created proxy immediately without repeating lookup on edits", async () => {
   const user = userEvent.setup()

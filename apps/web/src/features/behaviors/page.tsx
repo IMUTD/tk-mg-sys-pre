@@ -8,11 +8,16 @@ import { ChainList } from "./chain-list"
 import { loadChains, touchChainTest } from "./chain-store"
 import { CloudPanel } from "./cloud-panel"
 import {
+  type AnchorField,
+  type AnchorKey,
+  fallbackAnchorKeys,
   type ChainStep,
   type CloudBox,
   type CloudDevice,
   type CloudSlot,
+  fallbackAnchorFields,
   nowText,
+  setAnchorFields,
   setSkillCatalog,
   type SkillSpec,
   type TestResult,
@@ -54,6 +59,8 @@ const toSlot = (row: {
 export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): ReactNode => {
   const [tab, setTab] = useState<StudioTab>("chains")
   const [skills, setSkills] = useState<readonly SkillSpec[]>([])
+  const [anchorFields, setFields] = useState<readonly AnchorField[]>(fallbackAnchorFields)
+  const [anchorKeys, setKeys] = useState<readonly AnchorKey[]>(fallbackAnchorKeys)
   const [boxes, setBoxes] = useState<CloudBox[]>([])
   const [boxId, setBoxId] = useState(0)
   const [slotIndex, setSlotIndex] = useState(1)
@@ -89,6 +96,22 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
       if (!Array.isArray(rows) || rows.length === 0 || stop) return
       setSkillCatalog(rows)
       setSkills(rows)
+    })
+    void fetch("/api/behavior-anchors", { credentials: "same-origin" }).then(async (response) => {
+      if (!response.ok || stop) return
+      const body = (await response.json()) as {
+        anchors?: ReadonlyArray<{ fields?: AnchorField[]; keys?: AnchorKey[] }>
+      }
+      const fields = body.anchors?.[0]?.fields
+      const keys = body.anchors?.[0]?.keys?.filter(
+        (item) => (item.key === "id" || item.key === "identifier") && item.label.trim().length > 0,
+      )
+      if (stop) return
+      if (Array.isArray(fields) && fields.length > 0) {
+        setAnchorFields(fields)
+        setFields(fields)
+      }
+      if (keys !== undefined && keys.length > 0) setKeys(keys)
     })
     const load = async () => {
       const response = await fetch("/api/devices", { credentials: "same-origin" })
@@ -263,6 +286,8 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
           ) : null}
           {tab === "rpa" ? (
             <RpaStudio
+              anchorFields={anchorFields}
+              anchorKeys={anchorKeys}
               applyScreen={applyScreen}
               canWrite={canWrite}
               onTest={runTest}

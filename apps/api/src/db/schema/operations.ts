@@ -153,6 +153,9 @@ export const operationAccounts = pgTable(
       onDelete: "set null",
     }),
     encryptedSecret: text("encrypted_secret").notNull(),
+    language: text("language").notNull().default(""),
+    backupDeviceId: uuid("backup_device_id").references(() => devices.id, { onDelete: "set null" }),
+    backupSha256: text("backup_sha256").notNull().default(""),
     encryptedTotp: text("encrypted_totp").notNull().default(""),
     encryptedTransferKey: text("encrypted_transfer_key").notNull().default(""),
     extra: jsonb("extra").notNull().default({}),
@@ -183,7 +186,13 @@ export const operationAccounts = pgTable(
     index("operation_account_group_created_index").on(table.groupId, table.createdAt),
     index("operation_account_platform_uid_index").on(table.groupId, table.platformUid),
     index("operation_account_proxy_index").on(table.proxyId),
+    index("operation_account_backup_device_index").on(table.backupDeviceId),
     uniqueIndex("operation_account_group_identifier_unique").on(table.groupId, table.identifier),
+    foreignKey({
+      columns: [table.deviceInstanceId, table.deviceId],
+      foreignColumns: [deviceInstances.id, deviceInstances.deviceId],
+      name: "operation_account_device_instance_pair_fk",
+    }),
   ],
 )
 

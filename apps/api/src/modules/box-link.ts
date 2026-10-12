@@ -26,6 +26,7 @@ import {
   lockBusinessLabel,
   registerBusinessLabels,
 } from "./business-labels"
+import { accountAnchorCatalog, type ChainAnchor, readAnchor, readStepSources } from "./account-anchor"
 import { type GuardCode, guardCatalog, normalizeGuards, xmlHasText } from "./guards"
 import { registerShareFiles } from "./share-files"
 
@@ -133,6 +134,29 @@ type AgentDevice = {
   readonly host: string
 }
 
+const boxPitIndexes = async (host: string): Promise<number[] | null> => {
+  if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(host)) return null
+  try {
+    const response = await fetch(`http://${host}:8000/android`, { signal: AbortSignal.timeout(3000) })
+    if (!response.ok) return null
+    const body = (await response.json()) as {
+      code?: number
+      data?: { list?: ReadonlyArray<{ indexNum?: number }> | null }
+      list?: ReadonlyArray<{ indexNum?: number }> | null
+    }
+    if (body.code !== 0 && body.code !== 200) return null
+    const list = body.data?.list ?? body.list ?? []
+    const indexes: number[] = []
+    for (const item of list) {
+      const index = Number(item.indexNum ?? 0)
+      if (index >= 1 && index <= 5) indexes.push(index)
+    }
+    return indexes
+  } catch {
+    return null
+  }
+}
+
 const agentDevice = async (
   sql: Query,
   token: string,
@@ -198,8 +222,11 @@ const sharedGroup = async (
 
 type ChainParameter = { readonly input: Record<string, string>; readonly skill: string }
 type ChainScope = Record<string, "external" | "internal">
+type ChainSource = Record<string, string>
 
 type ChainRow = {
+  readonly anchorKey: string
+  readonly anchorTable: string
   readonly delays: number[]
   readonly guards: GuardCode[][]
   readonly id: string
@@ -208,24 +235,47 @@ type ChainRow = {
   readonly origin: string
   readonly parameters: ChainParameter[]
   readonly paramScopes: ChainScope[]
+  readonly paramSources: ChainSource[]
   readonly updatedAt: Date
 }
 
-const chainView = (row: ChainRow) => ({
+const chainColumns = `id::text as id, name, origin, parameters, param_scopes as "paramScopes",
+  param_sources as "paramSources", anchor_table as "anchorTable", anchor_key as "anchorKey",
+  guards, delays, last_tested_at as "lastTestedAt", updated_at as "updatedAt"`
+
+const chainView = (row: ChainRow) => {
+  const stored =
+    row.anchorTable === "" && row.anchorKey === ""
+      ? null
+      : readAnchor({ key: row.anchorKey, table: row.anchorTable })
+  return {
+  anchor: stored === "invalid" ? null : stored,
   id: row.id,
   lastTestedAt: row.lastTestedAt,
   name: row.name,
   origin: row.origin,
-  steps: (row.parameters ?? []).map((item, index) => ({
-    api: item.skill,
-    delayMs: row.delays?.[index] ?? 0,
-    id: index,
-    guards: row.guards?.[index] ?? [],
-    params: item.input ?? {},
-    scopes: row.paramScopes?.[index] ?? {},
-  })),
+  steps: (row.parameters ?? []).map((item, index) => {
+    const scopes = row.paramScopes?.[index] ?? {}
+    const stored = row.paramSources?.[index] ?? {}
+    const sources: ChainSource = {}
+    for (const key of Object.keys(item.input ?? {})) {
+      const value = stored[key]
+      sources[key] =
+        typeof value === "string" && value.length > 0 ? value : scopes[key] === "external" ? "" : "literal"
+    }
+    return {
+      api: item.skill,
+      delayMs: row.delays?.[index] ?? 0,
+      guards: row.guards?.[index] ?? [],
+      id: index,
+      params: item.input ?? {},
+      scopes,
+      sources,
+    }
+  }),
   updatedAt: row.updatedAt,
-})
+  }
+}
 
 const readDelay = (value: unknown): number | null => {
   if (value === undefined || value === null || value === "") return 0
@@ -241,15 +291,18 @@ const readDelay = (value: unknown): number | null => {
 
 const readChainSteps = (
   raw: unknown,
+  anchor: ChainAnchor | null,
 ): {
   delays: number[]
   guards: GuardCode[][]
   parameters: ChainParameter[]
   paramScopes: ChainScope[]
+  paramSources: ChainSource[]
 } | null => {
   if (!Array.isArray(raw) || raw.length === 0 || raw.length > 100) return null
   const parameters: ChainParameter[] = []
   const paramScopes: ChainScope[] = []
+  const paramSources: ChainSource[] = []
   const guards: GuardCode[][] = []
   const delays: number[] = []
   for (const item of raw) {
@@ -260,6 +313,7 @@ const readChainSteps = (
       guards?: unknown
       params?: unknown
       scopes?: unknown
+      sources?: unknown
     }
     const stepGuards = normalizeGuards(step.guards)
     const delayMs = readDelay(step.delayMs)
@@ -285,12 +339,15 @@ const readChainSteps = (
       scopes[key] = rawScopes[key] === "external" ? "external" : "internal"
     }
     if (skill === "JumpNodes" && !jumpNodesReady(input)) return null
+    const sources = readStepSources(input, scopes, step.sources, anchor, skill)
+    if (sources === null) return null
     parameters.push({ input, skill })
     paramScopes.push(scopes)
+    paramSources.push(sources)
     guards.push(stepGuards)
     delays.push(delayMs)
   }
-  return { delays, guards, parameters, paramScopes }
+  return { delays, guards, parameters, paramScopes, paramSources }
 }
 
 const jumpStepCount = (raw: unknown): number | null => {
@@ -554,7 +611,7 @@ export const registerBoxLink = (
   app.use("/api/*", async (context, next) => {
     const path = context.req.path
     let pages: readonly string[] = []
-    if (path === "/api/skills" || path.startsWith("/api/behavior-chains"))
+    if (path === "/api/skills" || path === "/api/behavior-anchors" || path.startsWith("/api/behavior-chains"))
       pages = [PageKey.Behaviors]
     else if (path.startsWith("/api/box-") || path === "/api/devices/labels")
       pages = [PageKey.Devices]
@@ -656,6 +713,7 @@ export const registerBoxLink = (
       boxId?: string
       fileBrowserUrl?: string
       slots?: ReadonlyArray<Record<string, unknown>>
+      slotsFresh?: boolean
     } | null
     const boxId = body?.boxId ?? ""
     const device = token === "" || boxId === "" ? null : await agentDevice(sql, token, boxId)
@@ -716,6 +774,34 @@ export const registerBoxLink = (
           width = case when excluded.width <> '' then excluded.width else device_instance.width end,
           height = case when excluded.height <> '' then excluded.height else device_instance.height end,
           updated_at = now()
+      `
+    }
+    const slots = body?.slots
+    const stale = Array.isArray(slots) && slots.some((slot) => slot["stale"] === true)
+    let reported: number[] = []
+    if (Array.isArray(slots)) {
+      for (const slot of slots) {
+        const index = Number(slot["indexNum"] ?? 0)
+        if (index >= 1 && index <= 5) reported.push(index)
+      }
+    }
+    let inventory = !stale && (body?.slotsFresh === true || (Array.isArray(slots) && slots.length > 0))
+    if (!inventory) {
+      const live = await boxPitIndexes(device.host)
+      if (live !== null) {
+        inventory = true
+        reported = live
+      }
+    }
+    if (inventory) {
+      await sql`
+        update device_instance
+        set label = '', status = 'unknown', container_id = '', api_port = 0, rpa_port = 0,
+          width = '', height = '', updated_at = now()
+        where device_id = ${device.deviceId}::uuid
+          and instance_index between 1 and 5
+          and not (instance_index = any(${reported}::int[]))
+          and not (label = '' and status = 'unknown' and container_id = '')
       `
     }
     await sql`delete from device_watch where expires_at < now()`
@@ -1476,6 +1562,7 @@ export const registerBoxLink = (
       join device d on d.id = di.device_id
       left join device_agent da on da.device_id = d.id
       where di.device_id = ${device.deviceId}::uuid
+        and not (di.label = '' and di.status = 'unknown' and di.container_id = '')
       order by di.instance_index
     `
     return context.json(rows)
@@ -1700,14 +1787,19 @@ export const registerBoxLink = (
     return context.json({ ...task, steps })
   })
 
+  app.get("/api/behavior-anchors", async (context) => {
+    const user = await userFromRequest(sql, context.req.raw)
+    if (user === null) return context.json({ error: "authentication_required" }, 401)
+    return context.json(accountAnchorCatalog)
+  })
+
   app.get("/api/behavior-chains", async (context) => {
     const user = await userFromRequest(sql, context.req.raw)
     if (user === null) return context.json({ error: "authentication_required" }, 401)
     const administratorId = await administratorFor(sql, user)
     if (administratorId === null) return context.json([])
     const rows = await sql<ChainRow[]>`
-      select id::text as id, name, origin, parameters, param_scopes as "paramScopes", guards, delays,
-        last_tested_at as "lastTestedAt", updated_at as "updatedAt"
+      select ${sql.unsafe(chainColumns)}
       from behavior_chain
       where administrator_id = ${administratorId}::uuid
       order by updated_at desc
@@ -1722,7 +1814,7 @@ export const registerBoxLink = (
     const groupId = administratorId === null ? null : await sharedGroup(sql, user, administratorId)
     if (administratorId === null || groupId === null)
       return context.json({ error: "not_found" }, 404)
-    let body: { name?: unknown; origin?: unknown; steps?: unknown }
+    let body: { anchor?: unknown; name?: unknown; origin?: unknown; steps?: unknown }
     try {
       body = await context.req.json()
     } catch {
@@ -1730,19 +1822,22 @@ export const registerBoxLink = (
     }
     const name = typeof body.name === "string" ? body.name.trim() : ""
     const origin = body.origin === "ai" ? "ai" : body.origin === "rpa" ? "rpa" : ""
-    const packed = readChainSteps(body.steps)
+    const anchor = readAnchor(body.anchor)
+    if (anchor === "invalid") return context.json({ error: "invalid_chain" }, 400)
+    const packed = readChainSteps(body.steps, anchor)
     if (name.length === 0 || name.length > 80 || origin === "" || packed === null) {
       return context.json({ error: "invalid_chain" }, 400)
     }
     const rows = await sql<ChainRow[]>`
       insert into behavior_chain (
-        group_id, administrator_id, created_by, name, origin, executor_key, parameters, param_scopes, guards, delays
+        group_id, administrator_id, created_by, name, origin, executor_key, parameters, param_scopes,
+        param_sources, anchor_table, anchor_key, guards, delays
       ) values (
         ${groupId}::uuid, ${administratorId}::uuid, ${user}::uuid, ${name}, ${origin}, 'box-agent',
-        ${sql.json(packed.parameters)}, ${sql.json(packed.paramScopes)}, ${sql.json(packed.guards)}, ${sql.json(packed.delays)}
+        ${sql.json(packed.parameters)}, ${sql.json(packed.paramScopes)}, ${sql.json(packed.paramSources)},
+        ${anchor?.table ?? ""}, ${anchor?.key ?? ""}, ${sql.json(packed.guards)}, ${sql.json(packed.delays)}
       )
-      returning id::text as id, name, origin, parameters, param_scopes as "paramScopes", guards, delays,
-        last_tested_at as "lastTestedAt", updated_at as "updatedAt"
+      returning ${sql.unsafe(chainColumns)}
     `
     const row = rows[0]
     if (row === undefined) return context.json({ error: "invalid_chain" }, 400)

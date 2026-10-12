@@ -62,37 +62,25 @@ test("new public IP record is queried automatically without connecting to its un
     const response = await lookedUp
     expect(response.status()).toBe(200)
     expect(await response.json()).toMatchObject({
-      ok: true,
-      target_ip: "8.8.8.8",
-      detection_type: "ip_lookup",
-      connectivity_checked: false,
+      ok: false,
+      detection_type: "proxy_connectivity",
+      connectivity_checked: true,
       use_turbo: false,
-      results: [{ response_body: { ip: "8.8.8.8" } }],
     })
     await expect(form).not.toBeVisible()
     await page.reload()
     const row = page.getByRole("row").filter({ hasText: note })
     await expect(row).toContainText("8.8.8.8:1")
-    await expect(row).toContainText("成功")
+    await expect(row).toContainText("失败")
+    await expect(row.getByRole("button", { name: "查看", exact: true })).toHaveCount(0)
     const listed = z
       .object({ items: z.array(ProxyRecord) })
       .parse(await (await page.request.get(`${path}?pageSize=100`)).json())
     expect(listed.items.find((item) => item.id === createdId)?.checkResult).toMatchObject({
-      ok: true,
-      detection_type: "ip_lookup",
-      connectivity_checked: false,
+      ok: false,
+      detection_type: "proxy_connectivity",
+      connectivity_checked: true,
     })
-    await row.getByRole("button", { name: "查看", exact: true }).click()
-    const details = page.getByRole("dialog").filter({ hasText: "检测结果[" })
-    await expect(details.getByText("IP 信息查询", { exact: true })).toBeVisible()
-    await expect(details.getByText("未检测", { exact: true })).toBeVisible()
-    await page.screenshot({
-      path: "test-results/integration/ip-lookup-desktop.png",
-      fullPage: true,
-    })
-    await page.setViewportSize({ width: 390, height: 844 })
-    expect((await details.boundingBox())?.width).toBeLessThanOrEqual(390)
-    await page.screenshot({ path: "test-results/integration/ip-lookup-mobile.png", fullPage: true })
   } finally {
     if (createdId !== undefined)
       expect(
@@ -124,7 +112,6 @@ test("real proxy form, database persistence, safe detection failure and administ
   if (groupId === undefined) throw new Error("Missing proxy group")
   const path = `/api/groups/${groupId}/operations/proxies`
   const note = `e2e-proxy-${Date.now()}`
-  const refreshUrl = "https://refresh.example.test/?token=e2e-private-refresh"
   let createdId: string | undefined
   try {
     await page.goto("/operations/proxies")
@@ -135,8 +122,6 @@ test("real proxy form, database persistence, safe detection failure and administ
     await form.getByLabel("IP", { exact: true }).fill("127.0.0.1")
     await form.getByLabel("端口", { exact: true }).fill("8080")
     await form.getByLabel("备注", { exact: true }).fill(note)
-    await form.getByLabel("刷新URL", { exact: true }).fill(refreshUrl)
-    await form.getByRole("switch", { name: "加速节点", exact: true }).check()
     await page.screenshot({ path: "test-results/integration/proxies-form-desktop.png" })
     const desktopViewport = page.viewportSize()
     await page.setViewportSize({ width: 390, height: 844 })
@@ -162,17 +147,16 @@ test("real proxy form, database persistence, safe detection failure and administ
     const savedResponse = await saved
     expect(savedResponse.status()).toBe(201)
     const savedBody = await savedResponse.json()
-    expect(JSON.stringify(savedBody)).not.toContain("e2e-private-refresh")
     const created = ProxyRecord.parse(savedBody)
     createdId = created.id
-    expect(created.configuration).toMatchObject({ protocol: "http", turbo: true })
+    expect(created.configuration).toMatchObject({ protocol: "http" })
     const autoResponse = await autoChecked
     expect(autoResponse.status()).toBe(200)
     expect(await autoResponse.json()).toMatchObject({
       ok: false,
       message: "proxy_address_not_public",
-      detection_type: "ip_lookup",
-      connectivity_checked: false,
+      detection_type: "proxy_connectivity",
+      connectivity_checked: true,
     })
     await expect(form).not.toBeVisible()
     await page.reload()
@@ -182,31 +166,32 @@ test("real proxy form, database persistence, safe detection failure and administ
     await row.getByRole("button", { name: "编辑", exact: true }).click()
     const editor = page.getByRole("dialog").filter({ hasText: "修改代理" })
     await expect(editor.getByLabel("IP", { exact: true })).toHaveValue("127.0.0.1")
-    await expect(editor.getByLabel("刷新URL", { exact: true })).toHaveValue(refreshUrl)
-    await expect(editor.getByRole("switch", { name: "加速节点", exact: true })).toBeChecked()
+    await expect(editor.getByLabel("刷新URL", { exact: true })).toHaveCount(0)
     await editor.getByRole("button", { name: "取消", exact: true }).click()
     // The existing ten-second cooldown applies to the automatic lookup too.
     await page.waitForTimeout(10500)
-    await row.getByRole("button", { name: "检测", exact: true }).click()
-    const detector = page.getByRole("dialog").filter({ hasText: "检测选项" })
     const checked = page.waitForResponse((response) =>
       response.url().endsWith(`/${created.id}/detect`),
     )
-    await detector.getByRole("button", { name: "确认", exact: true }).click()
+    await row.getByRole("button", { name: "检测", exact: true }).click()
     expect((await checked).ok()).toBe(true)
-    await expect(detector).not.toBeVisible()
+    const details = page.getByRole("dialog").filter({ hasText: "检测结果[" })
+    await expect(details.getByText("能否联网", { exact: true })).toBeVisible()
+    await expect(details.getByText("无法上网", { exact: true })).toBeVisible()
+    await page.setViewportSize({ width: 390, height: 844 })
+    expect((await details.boundingBox())?.width).toBeLessThanOrEqual(390)
+    await page.setViewportSize({ width: 1280, height: 720 })
     await expect(row).toContainText("失败")
     await page.reload()
     await expect(row).toContainText("失败")
     const listed = z
       .object({ items: z.array(ProxyRecord) })
       .parse(await (await page.request.get(path)).json())
-    expect(JSON.stringify(listed)).not.toContain("e2e-private-refresh")
     expect(listed.items.find((item) => item.id === created.id)?.checkResult).toMatchObject({
       ok: false,
       message: "proxy_address_not_public",
-      detection_type: "ip_lookup",
-      connectivity_checked: false,
+      detection_type: "proxy_connectivity",
+      connectivity_checked: true,
     })
     const favoriteSaved = page.waitForResponse(
       (response) =>
@@ -240,15 +225,8 @@ test("real proxy form, database persistence, safe detection failure and administ
     } finally {
       await other.close()
     }
+    await expect(row.getByRole("button", { name: "查看", exact: true })).toHaveCount(0)
     await page.screenshot({ path: "test-results/integration/proxies-desktop.png", fullPage: true })
-    await row.getByRole("button", { name: "查看", exact: true }).click()
-    const details = page.getByRole("dialog").filter({ hasText: "检测结果[" })
-    await expect(details).toBeVisible()
-    // The existing mobile shell clips table columns; this checks the dialog, not that shell.
-    await page.setViewportSize({ width: 390, height: 844 })
-    const bounds = await details.boundingBox()
-    expect(bounds?.width).toBeLessThanOrEqual(390)
-    await page.screenshot({ path: "test-results/integration/proxies-mobile.png", fullPage: true })
   } finally {
     if (createdId !== undefined) {
       expect(

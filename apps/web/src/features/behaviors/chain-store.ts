@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react"
 
 import {
   type BehaviorChain,
+  type ChainAnchor,
   type ChainOrigin,
   type ChainStep,
   type GuardCode,
@@ -26,6 +27,7 @@ const textTime = (value: string | null | undefined): string => {
 }
 
 type ChainPayload = {
+  anchor?: ChainAnchor | null
   id: string
   lastTestedAt: string | null
   name: string
@@ -35,23 +37,37 @@ type ChainPayload = {
 }
 
 const toChain = (row: ChainPayload): BehaviorChain => ({
+  anchor:
+    row.anchor?.table === "operation_account" &&
+    (row.anchor.key === "id" || row.anchor.key === "identifier")
+      ? { key: row.anchor.key, table: "operation_account" }
+      : null,
   id: row.id,
   lastTestAt: textTime(row.lastTestedAt),
   name: row.name,
   origin: row.origin,
-  steps: row.steps.map((step, index) => ({
-    api: step.api,
-    delayMs: normalizeDelay(step.delayMs),
-    guards: (step.guards ?? []).filter((code): code is GuardCode => code === "ad" || code === "transcode"),
-    id: index,
-    params: { ...step.params },
-    scopes: Object.fromEntries(
+  steps: row.steps.map((step, index) => {
+    const scopes = Object.fromEntries(
       Object.entries(step.scopes ?? {}).map(([key, value]) => [
         key,
         value === "external" ? "external" : "internal",
       ]),
-    ) as Record<string, ParamScope>,
-  })),
+    ) as Record<string, ParamScope>
+    return {
+      api: step.api,
+      delayMs: normalizeDelay(step.delayMs),
+      guards: (step.guards ?? []).filter((code): code is GuardCode => code === "ad" || code === "transcode"),
+      id: index,
+      params: { ...step.params },
+      scopes,
+      sources: Object.fromEntries(
+        Object.keys(step.params ?? {}).map((key) => [
+          key,
+          scopes[key] === "external" ? (step.sources?.[key] ?? "") : "literal",
+        ]),
+      ),
+    }
+  }),
   updateTime: textTime(row.updatedAt),
 })
 
@@ -79,9 +95,11 @@ export const saveChain = async (
   origin: ChainOrigin,
   name: string,
   steps: readonly ChainStep[],
+  anchor: ChainAnchor | null = null,
 ): Promise<BehaviorChain> => {
   const response = await fetch("/api/behavior-chains", {
     body: JSON.stringify({
+      anchor,
       name: name.trim(),
       origin,
       steps: steps.map((item) => ({
@@ -90,6 +108,7 @@ export const saveChain = async (
         guards: item.guards ?? [],
         params: item.params,
         scopes: item.scopes,
+        sources: item.sources,
       })),
     }),
     credentials: "same-origin",

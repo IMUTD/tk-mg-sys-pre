@@ -39,6 +39,7 @@ export const HeartbeatSchema = z.object({
       version: z.string().max(200).optional(),
     })
     .optional(),
+  slotsFresh: z.boolean().optional(),
   slots: z
     .array(
       z

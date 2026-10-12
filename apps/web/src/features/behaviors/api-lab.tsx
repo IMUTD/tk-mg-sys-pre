@@ -1,8 +1,51 @@
 import { Button, Card, Form, Input, Select, Space } from "antd"
 import { type MutableRefObject, type ReactNode, useEffect, useState } from "react"
 
+import { useAuth } from "../auth/auth-provider"
 import { apiByCode, createStep, paramLabel, type SkillSpec, skillCatalog } from "./rpa-api"
 import { applyScreenToParams, type DevicePoint } from "./screen-map"
+
+type LabUse = {
+  code: string
+  count: number
+  lastUsedAt: number
+}
+
+const labUseKey = (userId: string): string => `tk-mg.lab-frequent.${userId}`
+
+const byUse = (left: LabUse, right: LabUse): number =>
+  right.count - left.count || right.lastUsedAt - left.lastUsedAt
+
+const readLabUses = (userId: string): LabUse[] => {
+  if (userId.length === 0) return []
+  try {
+    const raw = localStorage.getItem(labUseKey(userId))
+    if (raw === null) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.flatMap((item) => {
+      if (item === null || typeof item !== "object") return []
+      const row = item as { code?: unknown; count?: unknown; lastUsedAt?: unknown }
+      if (typeof row.code !== "string" || row.code.length === 0) return []
+      if (typeof row.count !== "number" || !Number.isInteger(row.count) || row.count < 1) return []
+      if (typeof row.lastUsedAt !== "number" || !Number.isFinite(row.lastUsedAt)) return []
+      return [{ code: row.code, count: row.count, lastUsedAt: row.lastUsedAt }]
+    })
+  } catch {
+    return []
+  }
+}
+
+const rememberLabUse = (userId: string, code: string, known: ReadonlySet<string>): LabUse[] => {
+  const previous = readLabUses(userId).find((item) => item.code === code)
+  const next = readLabUses(userId)
+    .filter((item) => known.has(item.code) && item.code !== code)
+    .concat(known.has(code) ? [{ code, count: (previous?.count ?? 0) + 1, lastUsedAt: Date.now() }] : [])
+    .sort(byUse)
+    .slice(0, 5)
+  localStorage.setItem(labUseKey(userId), JSON.stringify(next))
+  return next
+}
 
 const KEY_GROUP: Record<string, string> = {
   "3": "系统",
@@ -114,9 +157,15 @@ type ApiLabProps = {
 }
 
 export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps): ReactNode => {
+  const { session } = useAuth()
+  const userId = session.kind === "authenticated" ? session.user.userId : ""
   const list = skills.length > 0 ? skills : skillCatalog()
   const [code, setCode] = useState("TouchClick")
+  const [groupName, setGroupName] = useState<string | null>(null)
+  const [frequent, setFrequent] = useState<LabUse[]>(() => readLabUses(userId))
   const spec = apiByCode(code)
+  const known = new Set(list.map((item) => item.code))
+  const shortcuts = frequent.filter((item) => known.has(item.code)).sort(byUse).slice(0, 5)
   const [params, setParams] = useState<Record<string, string>>({
     ...createStep("TouchClick", 1).params,
   })
@@ -124,7 +173,13 @@ export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps)
   const pick = (next: string): void => {
     setCode(next)
     setParams({ ...createStep(next, 1).params })
+    const group = list.find((item) => item.code === next)?.group
+    if (group !== undefined && group.length > 0) setGroupName(group)
   }
+
+  useEffect(() => {
+    setFrequent(readLabUses(userId))
+  }, [userId])
 
   useEffect(() => {
     applyScreen.current = (start, end) => {
@@ -143,6 +198,21 @@ export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps)
     const found = groups.find((group) => group.name === item.group)
     if (found === undefined) groups.push({ items: [item], name: item.group || "其他" })
     else found.items.push(item)
+  }
+  const selectedName =
+    (groupName !== null && groups.some((group) => group.name === groupName)
+      ? groupName
+      : groups.find((group) => group.items.some((item) => item.code === code))?.name) ??
+    groups[0]?.name ??
+    ""
+  const visible = groups.find((group) => group.name === selectedName)?.items ?? []
+
+  const chooseGroup = (name: string): void => {
+    setGroupName(name)
+    const group = groups.find((item) => item.name === name)
+    if (group === undefined || group.items.some((item) => item.code === code)) return
+    const first = group.items[0]
+    if (first !== undefined) pick(first.code)
   }
 
   const fieldControl = (key: string) => {
@@ -220,27 +290,51 @@ export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps)
 
   return (
     <div className="behaviors-pane api-lab">
+      {shortcuts.length === 0 ? null : (
+        <div aria-label="常用接口" className="api-lab-frequent">
+          {shortcuts.map((item) => {
+            const skill = list.find((specItem) => specItem.code === item.code)
+            if (skill === undefined) return null
+            return (
+              <button
+                className={item.code === code ? "api-lab-item active" : "api-lab-item"}
+                key={item.code}
+                onClick={() => pick(item.code)}
+                type="button"
+              >
+                <strong>{skill.name}</strong>
+                <span>{skill.code}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
       <p className="behaviors-meta">
         这里是行为链最底层的单元，对应魔云腾 RPA 接口。AI 制定和 RPA 编排都建立在这些接口上。
       </p>
       <div className="api-lab-layout">
         <div className="api-lab-list">
-          {groups.map((group) => (
-            <div key={group.name}>
-              <div className="api-lab-group">{group.name}</div>
-              {group.items.map((item) => (
-                <button
-                  className={item.code === code ? "api-lab-item active" : "api-lab-item"}
-                  key={item.code}
-                  onClick={() => pick(item.code)}
-                  type="button"
-                >
-                  <strong>{item.name}</strong>
-                  <span>{item.code}</span>
-                </button>
-              ))}
-            </div>
-          ))}
+          <Select
+            aria-label="分组"
+            onChange={chooseGroup}
+            options={groups.map((group) => ({ label: group.name, value: group.name }))}
+            showSearch
+            value={selectedName}
+            virtual={false}
+          />
+          <div className="api-lab-skills">
+            {visible.map((item) => (
+              <button
+                className={item.code === code ? "api-lab-item active" : "api-lab-item"}
+                key={item.code}
+                onClick={() => pick(item.code)}
+                type="button"
+              >
+                <strong>{item.name}</strong>
+                <span>{item.code}</span>
+              </button>
+            ))}
+          </div>
         </div>
         <Card size="small" title={spec === undefined ? "接口" : `${spec.name} · ${spec.code}`}>
           <Form layout="vertical" size="small">
@@ -255,6 +349,7 @@ export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps)
             <Button
               loading={pending}
               onClick={() => {
+                if (userId.length > 0) setFrequent(rememberLabUse(userId, code, known))
                 void onEnqueue(code, [{ ...createStep(code, 1), params }])
               }}
               type="primary"

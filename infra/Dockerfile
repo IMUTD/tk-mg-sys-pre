@@ -14,9 +14,18 @@ RUN bun install --frozen-lockfile
 
 FROM ghcr.io/sagernet/sing-box:v1.12.12@sha256:2b3c5449f5cae0268a28853193f40ed8a7d8943c241bc47d1f3218cc9be914c7 AS proxy-core
 
+FROM oven/bun:1.3.13 AS mihomo
+
+ARG TARGETARCH=amd64
+RUN arch=amd64; if [ "$TARGETARCH" = "arm64" ]; then arch=arm64; fi; \
+    export MIHOMO_URL="https://github.com/MetaCubeX/mihomo/releases/download/v1.19.19/mihomo-linux-${arch}-v1.19.19.gz"; \
+    bun -e 'const res = await fetch(process.env.MIHOMO_URL); if (!res.ok) throw new Error(String(res.status)); const packed = new Uint8Array(await res.arrayBuffer()); await Bun.write("/usr/local/bin/mihomo", Bun.gunzipSync(packed))' \
+ && chmod 755 /usr/local/bin/mihomo
+
 FROM dependencies AS api
 
 COPY --from=proxy-core /usr/local/bin/sing-box /usr/local/bin/sing-box
+COPY --from=mihomo /usr/local/bin/mihomo /usr/local/bin/mihomo
 
 COPY . .
 
