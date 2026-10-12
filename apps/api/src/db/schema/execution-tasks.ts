@@ -14,10 +14,12 @@ import {
 
 import { accessGroups, appUsers } from "./auth"
 import { deviceGroupHistory, deviceInstances } from "./devices"
+import { operationAccounts } from "./operations"
 
 export const executionTasks = pgTable(
   "execution_task",
   {
+    accountId: uuid("account_id").references(() => operationAccounts.id, { onDelete: "set null" }),
     cancelRequestedAt: timestamp("cancel_requested_at", { mode: "date", withTimezone: true }),
     createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).defaultNow().notNull(),
     deviceId: uuid("device_id").notNull(),

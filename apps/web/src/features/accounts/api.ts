@@ -75,7 +75,7 @@ export type OperationAccountApp = z.infer<typeof OperationAccountAppSchema>
 export type OperationAccountStatus = z.infer<typeof OperationAccountStatusSchema>
 export type OperationAccountBackupType = z.infer<typeof OperationAccountBackupTypeSchema>
 export type AccountPage = z.infer<typeof PageSchema>
-export type AccountTagBatchMode = "add" | "replace" | "clear"
+export type AccountTagBatchMode = "add" | "replace" | "clear" | "remove"
 
 export type AccountListInput = {
   readonly app?: OperationAccountApp | undefined

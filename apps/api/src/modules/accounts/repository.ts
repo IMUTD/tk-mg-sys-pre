@@ -169,7 +169,7 @@ export type AccountPage = {
   readonly total: number
 }
 
-export type AccountTagBatchMode = "add" | "replace" | "clear"
+export type AccountTagBatchMode = "add" | "replace" | "clear" | "remove"
 
 export interface AccountRepository {
   assignProxy(
@@ -633,22 +633,62 @@ export const createPostgresAccountRepository = (client: Sql): AccountRepository 
     updateTags: async (groupId, ids, mode, tags) => {
       if (ids.length === 0) return 0
       const nextTags = uniqueTags(tags)
-      const rows = await client<{ readonly id: string }[]>`
-      update operation_account
-      set tags = ${
+      if ((mode === "add" || mode === "remove") && nextTags.length === 0) return 0
+      const rows =
         mode === "clear"
-          ? client`'{}'::text[]`
+          ? await client<{ readonly id: string }[]>`
+              update operation_account
+              set tags = case when coalesce(cardinality(tags), 0) = 0 then '{}'::text[] else tags[1:1] end,
+                updated_at = now()
+              where group_id = ${groupId} and id = any(${ids}) and deleted = false
+              returning id`
           : mode === "replace"
-            ? client`${nextTags}`
-            : client`(
-                select coalesce(array_agg(distinct tag), '{}'::text[])
-                from unnest(coalesce(tags, '{}'::text[]) || ${nextTags}::text[]) as tag
-              )`
-      },
-      updated_at = now()
-      where group_id = ${groupId} and id = any(${ids}) and deleted = false
-      returning id
-    `
+            ? await client<{ readonly id: string }[]>`
+                update operation_account
+                set tags = ${nextTags}::text[], updated_at = now()
+                where group_id = ${groupId} and id = any(${ids}) and deleted = false
+                returning id`
+            : mode === "remove"
+              ? await client<{ readonly id: string }[]>`
+                  update operation_account
+                  set tags = (
+                    select coalesce(array_agg(item order by pos), '{}'::text[])
+                    from (
+                      select tags[1] as item, 1 as pos
+                      where coalesce(cardinality(tags), 0) > 0
+                      union all
+                      select tag, (ord + 1)::int
+                      from unnest(
+                        case when coalesce(cardinality(tags), 0) > 1
+                          then tags[2:cardinality(tags)] else '{}'::text[] end
+                      ) with ordinality as bucket(tag, ord)
+                      where not (tag = any(${nextTags}::text[]))
+                    ) kept
+                  ),
+                  updated_at = now()
+                  where group_id = ${groupId} and id = any(${ids}) and deleted = false
+                  returning id`
+              : await client<{ readonly id: string }[]>`
+                  update operation_account
+                  set tags = (
+                    select coalesce(array_agg(item order by pos), '{}'::text[])
+                    from (
+                      select coalesce(tags[1], '') as item, 1 as pos
+                      union all
+                      select tag, (ord + 1)::int
+                      from unnest(
+                        case when coalesce(cardinality(tags), 0) > 1
+                          then tags[2:cardinality(tags)] else '{}'::text[] end
+                      ) with ordinality as bucket(tag, ord)
+                      union all
+                      select tag, (100000 + ord)::int
+                      from unnest(${nextTags}::text[]) with ordinality as incoming(tag, ord)
+                      where not (tag = any(coalesce(tags, '{}'::text[])))
+                    ) merged
+                  ),
+                  updated_at = now()
+                  where group_id = ${groupId} and id = any(${ids}) and deleted = false
+                  returning id`
       return rows.length
     },
   }

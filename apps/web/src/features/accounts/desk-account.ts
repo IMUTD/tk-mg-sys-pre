@@ -94,9 +94,9 @@ export const accountWrite = (account: MytAccount) => {
     if (value.length > 0) resourceSecrets[key] = value
     delete resource[key]
   }
-  const tags = [account.tag, ...account.tagBucket]
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0)
+  const group = account.tag.trim()
+  const bucket = account.tagBucket.map((item) => item.trim()).filter((item) => item.length > 0)
+  const tags = group.length > 0 ? [group, ...bucket] : bucket.length > 0 ? ["", ...bucket] : []
   return {
     app: (account.app || "tiktok") as "tiktok",
     extra: {

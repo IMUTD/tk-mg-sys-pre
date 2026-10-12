@@ -21,7 +21,7 @@ import {
 } from "./repository"
 import type { AccountService } from "./service"
 
-const TagsSchema = z.array(z.string().trim().min(1).max(64)).max(20).default([])
+const TagsSchema = z.array(z.string().trim().max(64)).max(20).default([])
 const OptionalUuid = z.string().uuid().nullable().optional()
 const BooleanQuery = z
   .enum(["true", "false"])
@@ -75,7 +75,7 @@ const UpdateSchema = z.object({
 const BatchSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(500) })
 const TagBatchSchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(500),
-  mode: z.enum(["add", "replace", "clear"]),
+  mode: z.enum(["add", "replace", "clear", "remove"]),
   tags: z.array(z.string().trim().min(1).max(64)).max(20).default([]),
 })
 const ProxyBatchSchema = z.object({

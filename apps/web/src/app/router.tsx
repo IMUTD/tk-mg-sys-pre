@@ -22,6 +22,7 @@ import { DeviceControlPage } from "../features/devices/control-page"
 import { DeviceCreatePage } from "../features/devices/create-page"
 import { DeviceListPage } from "../features/devices/list-page"
 import { TaskRecordsPage } from "../features/jobs/records-page"
+import { DispatchListPage } from "../features/tasks/dispatch-page"
 import { MallInvoicesPage } from "../features/mall/invoices-page"
 import { MallOrdersPage } from "../features/mall/orders-page"
 import { MallRecordsPage } from "../features/mall/records-page"
@@ -40,7 +41,6 @@ import { RobotsPage } from "../features/robots/page"
 import { ConfigListPage } from "../features/settings/list-page"
 import { StoragePage } from "../features/storage/page"
 import { StudioPage } from "../features/studio/page"
-import { TaskListPage } from "../features/tasks/list-page"
 import { VideoPoolPage } from "../features/video-pool/page"
 import { BackupResourcesPage } from "../features/backup-resources/page"
 import { VideoResourcesPage } from "../features/video-resources/page"
@@ -191,10 +191,22 @@ const AccountPoolPage = (): ReactNode => {
 
 const TasksPage = (): ReactNode => {
   const { session } = useAuth()
+  const [searchParams] = useSearchParams()
   return session.kind === "authenticated" ? (
-    <TaskListPage
-      canDelete={pageFlags(session.user, PageKey.Tasks).canDelete}
+    <DispatchListPage
       canWrite={pageFlags(session.user, PageKey.Tasks).canWrite}
+      groupId={deviceGroupId(session.user.scope.groupIds, searchParams.get("groupId"))}
+    />
+  ) : null
+}
+
+const TaskRecordsRoute = (): ReactNode => {
+  const { session } = useAuth()
+  const [searchParams] = useSearchParams()
+  return session.kind === "authenticated" ? (
+    <TaskRecordsPage
+      canWrite={pageFlags(session.user, PageKey.TaskRecords).canWrite}
+      groupId={deviceGroupId(session.user.scope.groupIds, searchParams.get("groupId"))}
     />
   ) : null
 }
@@ -329,7 +341,7 @@ const AuthenticatedRoutes = (): ReactNode => (
       <Route path="/operations/tasks" element={guarded(PageKey.Tasks, <TasksPage />)} />
       <Route
         path="/operations/task-records"
-        element={guarded(PageKey.TaskRecords, <TaskRecordsPage />)}
+        element={guarded(PageKey.TaskRecords, <TaskRecordsRoute />)}
       />
       <Route path="/operations/proxies" element={guarded(PageKey.Proxies, <ProxiesPage />)} />
       <Route

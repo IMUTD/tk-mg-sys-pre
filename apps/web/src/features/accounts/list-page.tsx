@@ -229,6 +229,20 @@ export const AccountsListPage = ({
   const nextId = Math.max(0, ...accounts.map((item) => item.id)) + 1
   const tagCountText = selected.length > 0 ? `(${selected.length})` : `(${filtered.length})`
   const tagOperationDisabled = selected.length === 0 && filtered.length > 5000
+  const saveTags = async (mode: "add" | "remove" | "clear", tags: readonly string[]): Promise<void> => {
+    const targets = (selected.length > 0 ? selected : filtered).filter((item) => !item.deleted)
+    const deskIds = targets.map((item) => item.id)
+    if (groupId.length === 0) {
+      setAccounts((current) =>
+        mutateTagBucket(current, selected.length > 0 ? selectedIds : null, tags, mode, nowText(), query.tag),
+      )
+      return
+    }
+    const ids = targets.flatMap((item) => (item.recordId === undefined ? [] : [item.recordId]))
+    if (ids.length === 0) throw new Error("没有可写入的账号")
+    await createAccountsApi().updateTags(groupId, ids, mode, mode === "clear" ? [] : tags)
+    setAccounts((current) => mutateTagBucket(current, deskIds, tags, mode, nowText()))
+  }
 
   useEffect(() => {
     if (groupId.length === 0) return
@@ -739,18 +753,13 @@ export const AccountsListPage = ({
                       cancelText: "取消",
                       content: "确认清理这些账号的所有标签吗？",
                       okText: "确认清理",
-                      onOk: () => {
-                        setAccounts((current) =>
-                          mutateTagBucket(
-                            current,
-                            selected.length > 0 ? selectedIds : null,
-                            [],
-                            "clear",
-                            nowText(),
-                            query.tag,
-                          ),
-                        )
-                        message.success("已成功清理标签")
+                      onOk: async () => {
+                        try {
+                          await saveTags("clear", [])
+                          message.success("已成功清理标签")
+                        } catch (error: unknown) {
+                          message.error(await accountRequestError(error))
+                        }
                       },
                       title: "清理标签",
                     })
@@ -1285,18 +1294,14 @@ export const AccountsListPage = ({
           onCancel={() => setTagBucketOpen(null)}
           onChange={setTagBucketValue}
           onOk={() => {
-            setAccounts((current) =>
-              mutateTagBucket(
-                current,
-                selected.length > 0 ? selectedIds : null,
-                tagBucketValue,
-                tagBucketOpen,
-                nowText(),
-                query.tag,
-              ),
-            )
-            message.success("编辑成功")
-            setTagBucketOpen(null)
+            void saveTags(tagBucketOpen, tagBucketValue)
+              .then(() => {
+                message.success("编辑成功")
+                setTagBucketOpen(null)
+              })
+              .catch(async (error: unknown) => {
+                message.error(await accountRequestError(error))
+              })
           }}
           options={tagBuckets}
           tags={tagBucketValue}

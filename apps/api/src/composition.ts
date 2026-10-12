@@ -16,6 +16,7 @@ import { createPostgresAuditRepository } from "./modules/audit/service"
 import { createPostgresAuthRepository } from "./modules/auth/postgres-repository"
 import { createAuthService } from "./modules/auth/service"
 import { registerBoxLink } from "./modules/box-link"
+import { registerDispatchRoutes } from "./modules/dispatch/routes"
 import { createPostgresDeviceCommandRepository } from "./modules/device-commands/postgres-repository"
 import { createDeviceCommandService } from "./modules/device-commands/service"
 import { createPostgresDeviceRepository } from "./modules/devices/postgres-repository"
@@ -140,6 +141,7 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
     taskExecutionService,
   })
   const boxLink = registerBoxLink(app, client, config.databaseUrl, authService, auditRepository)
+  registerDispatchRoutes(app, client, cipher, authService, auditRepository)
   return {
     app,
     checkReadiness: async () => {
