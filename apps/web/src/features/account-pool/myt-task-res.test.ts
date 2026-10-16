@@ -45,7 +45,7 @@ describe("myt-task-res", () => {
   })
 
   it("rejects pool keys that contain plus signs", () => {
-    expect(validatePoolKey("")).toBe("编码不能为空")
+    expect(validatePoolKey("")).toBe("命名不能为空")
     expect(validatePoolKey("发布+1")).toBe("账号池名不能包含 +")
     expect(validatePoolKey("1107发布")).toBeNull()
   })

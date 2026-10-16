@@ -9,12 +9,25 @@ type DispatchFormProps = {
   readonly onCreated: () => void
 }
 
+type FileSource = "pool.backup" | "pool.image" | "pool.video"
+
+type FilePick = {
+  readonly deviceId?: string
+  readonly directory: string
+  readonly mode: "random" | "sequence"
+}
+
 const emptyOptions = (): DispatchOptions => ({
-  accountNotes: [],
-  accounts: [],
+  accountGroups: [],
+  accountTags: [],
+  boxGroups: [],
+  boxRemarks: [],
   chains: [],
   devices: [],
   pits: [1, 2, 3, 4, 5],
+  pools: [],
+  proxyGroups: [],
+  proxyRemarks: [],
   proxyTags: [],
   textTags: [],
 })
@@ -22,23 +35,40 @@ const emptyOptions = (): DispatchOptions => ({
 const boxLabel = (box: DispatchOptions["devices"][number]): string =>
   box.name.length > 0 && box.name !== box.host ? `${box.name} ${box.host}` : box.host
 
-const accountLabel = (account: DispatchOptions["accounts"][number]): string =>
-  account.note.length > 0 ? `${account.identifier}（${account.note}）` : account.identifier
+const fileLabel = (source: FileSource): string => {
+  if (source === "pool.image") return "图片目录"
+  if (source === "pool.backup") return "备份目录"
+  return "视频目录"
+}
+
+const rootDirectory = "__root__"
 
 export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps): ReactNode => {
   const { message } = App.useApp()
   const [options, setOptions] = useState<DispatchOptions>(emptyOptions)
   const [chainId, setChainId] = useState<string | null>(null)
-  const [accountIds, setAccountIds] = useState<string[]>([])
-  const [boxIds, setBoxIds] = useState<string[]>([])
+  const [accountBy, setAccountBy] = useState<"group" | "tag">("group")
+  const [accountName, setAccountName] = useState<string | null>(null)
+  const [boxBy, setBoxBy] = useState<"group" | "remark">("group")
+  const [boxName, setBoxName] = useState<string | null>(null)
+  const [proxyBy, setProxyBy] = useState<"group" | "remark">("group")
+  const [proxyName, setProxyName] = useState<string | null>(null)
   const [pitIndexes, setPitIndexes] = useState<number[]>([])
-  const [proxyTag, setProxyTag] = useState<string | null>(null)
+  const [files, setFiles] = useState<Record<string, FilePick>>({})
   const [texts, setTexts] = useState<Record<number, { mode: "random" | "sequence" | "tag"; tag?: string }>>({})
   const [saving, setSaving] = useState(false)
   const chain = options.chains.find((item) => item.id === chainId)
   const textSteps = (chain?.steps ?? [])
     .map((step, sequence) => ({ sequence, step }))
     .filter((item) => item.step.api === "SendText")
+  const fileSteps = (chain?.steps ?? []).flatMap((step, sequence) => {
+    const sources = Object.entries(step.sources).flatMap(([key, source]) =>
+      step.scopes[key] === "external" && (source === "pool.video" || source === "pool.image" || source === "pool.backup")
+        ? [source]
+        : [],
+    )
+    return [...new Set(sources)].map((source) => ({ sequence, source }))
+  })
 
   useEffect(() => {
     void createDispatchApi(groupId)
@@ -54,27 +84,41 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
       message.error("请选择任务")
       return
     }
-    if (accountIds.length === 0) {
-      message.error("请选择账号")
+    if (accountName === null) {
+      message.error(accountBy === "group" ? "请选择账号分组" : "请选择账号标签")
       return
     }
     if (textSteps.some((item) => texts[item.sequence]?.mode === "tag" && (texts[item.sequence]?.tag ?? "").length === 0)) {
       message.error("请选择文本池分组")
       return
     }
+    if (fileSteps.some((item) => (files[`${item.sequence}:${item.source}`]?.deviceId ?? "").length === 0)) {
+      message.error("请选择文件所在盒子")
+      return
+    }
     setSaving(true)
     void createDispatchApi(groupId)
       .create({
-        accountIds,
-        boxIds,
+        accounts: { by: accountBy, name: accountName },
         chainId,
+        files: fileSteps.map((item) => {
+          const picked = files[`${item.sequence}:${item.source}`]
+          return {
+            deviceId: picked?.deviceId ?? "",
+            directory: picked?.directory === rootDirectory ? "" : (picked?.directory ?? ""),
+            mode: picked?.mode ?? "sequence",
+            sequence: item.sequence,
+            source: item.source,
+          }
+        }),
         pitIndexes,
-        proxyTag,
         texts: textSteps.map((item) => ({
           mode: texts[item.sequence]?.mode ?? "sequence",
           sequence: item.sequence,
           ...(texts[item.sequence]?.tag === undefined ? {} : { tag: texts[item.sequence]?.tag }),
         })),
+        ...(boxName === null ? {} : { boxes: { by: boxBy, name: boxName } }),
+        ...(proxyName === null ? {} : { proxies: { by: proxyBy, name: proxyName } }),
       })
       .then(() => {
         message.success("新增成功，任务等待开始")
@@ -115,49 +159,37 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
           />
         </Form.Item>
         <Form.Item label="选择账号" required>
-          <Select
-            aria-label="选择账号"
-            filterOption={(input, option) =>
-              String(option?.label ?? "").toLowerCase().includes(input.trim().toLowerCase())
-            }
-            mode="multiple"
-            onChange={(value: string[]) => setAccountIds(value)}
-            options={options.accounts.map((item) => ({ label: accountLabel(item), value: item.id }))}
-            placeholder="检索用户名，可多选"
-            showSearch
-            value={accountIds}
-            virtual={false}
-          />
+          <Radio.Group onChange={(event) => { setAccountBy(event.target.value); setAccountName(null) }} value={accountBy}>
+            <Radio value="group">分组</Radio>
+            <Radio value="tag">标签</Radio>
+          </Radio.Group>
           <Select
             allowClear
-            aria-label="按备注选中"
-            filterOption={(input, option) =>
-              String(option?.label ?? "").toLowerCase().includes(input.trim().toLowerCase())
-            }
-            onChange={(value: string | null) => {
-              if (value === null || value.length === 0) return
-              setAccountIds(options.accounts.filter((item) => item.note === value).map((item) => item.id))
-            }}
-            options={options.accountNotes.map((item) => ({ label: item, value: item }))}
-            placeholder="或按备注一次选中"
-            showSearch
-            style={{ marginTop: 8 }}
+            aria-label="账号范围"
+            onChange={(value: string | null) => setAccountName(value)}
+            options={(accountBy === "group" ? options.accountGroups : options.accountTags).map((item) => ({
+              label: item,
+              value: item,
+            }))}
+            placeholder={accountBy === "group" ? "选择账号分组" : "选择账号标签"}
+            style={{ marginTop: 8, width: "100%" }}
+            value={accountName}
             virtual={false}
           />
         </Form.Item>
         <Form.Item label="选择盒子">
+          <Radio.Group onChange={(event) => { setBoxBy(event.target.value); setBoxName(null) }} value={boxBy}>
+            <Radio value="group">分组</Radio>
+            <Radio value="remark">备注</Radio>
+          </Radio.Group>
           <Select
             allowClear
-            aria-label="选择盒子"
-            filterOption={(input, option) =>
-              String(option?.label ?? "").toLowerCase().includes(input.trim().toLowerCase())
-            }
-            mode="multiple"
-            onChange={(value: string[]) => setBoxIds(value)}
-            options={options.devices.map((item) => ({ label: boxLabel(item), value: item.id }))}
+            aria-label="盒子范围"
+            onChange={(value: string | null) => setBoxName(value)}
+            options={(boxBy === "group" ? options.boxGroups : options.boxRemarks).map((item) => ({ label: item, value: item }))}
             placeholder="不选则用账号上一次的盒子"
-            showSearch
-            value={boxIds}
+            style={{ marginTop: 8, width: "100%" }}
+            value={boxName}
             virtual={false}
           />
         </Form.Item>
@@ -174,16 +206,35 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
           />
         </Form.Item>
         <Form.Item label="选择代理">
+          <Radio.Group onChange={(event) => { setProxyBy(event.target.value); setProxyName(null) }} value={proxyBy}>
+            <Radio value="group">分组</Radio>
+            <Radio value="remark">备注</Radio>
+          </Radio.Group>
           <Select
             allowClear
-            aria-label="选择代理"
-            onChange={(value: string | null) => setProxyTag(value)}
-            options={options.proxyTags.map((item) => ({ label: item, value: item }))}
+            aria-label="代理范围"
+            onChange={(value: string | null) => setProxyName(value)}
+            options={(proxyBy === "group" ? options.proxyGroups : options.proxyRemarks).map((item) => ({
+              label: item,
+              value: item,
+            }))}
             placeholder="不选则用账号上一次的代理"
-            value={proxyTag}
+            style={{ marginTop: 8, width: "100%" }}
+            value={proxyName}
             virtual={false}
           />
         </Form.Item>
+        {fileSteps.map((item) => (
+          <FileDirectoryField
+            groupId={groupId}
+            key={`${item.sequence}:${item.source}`}
+            onChange={(pick) => setFiles((current) => ({ ...current, [`${item.sequence}:${item.source}`]: pick }))}
+            options={options}
+            picked={files[`${item.sequence}:${item.source}`] ?? { directory: rootDirectory, mode: "sequence" }}
+            sequence={item.sequence}
+            source={item.source}
+          />
+        ))}
         {textSteps.map((item) => (
           <Form.Item key={item.sequence} label={`第 ${item.sequence + 1} 步输入文字`}>
             <Radio.Group
@@ -219,5 +270,69 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
         ))}
       </Form>
     </Modal>
+  )
+}
+
+const FileDirectoryField = ({
+  groupId,
+  onChange,
+  options,
+  picked,
+  sequence,
+  source,
+}: {
+  readonly groupId: string
+  readonly onChange: (pick: FilePick) => void
+  readonly options: DispatchOptions
+  readonly picked: FilePick
+  readonly sequence: number
+  readonly source: FileSource
+}): ReactNode => {
+  const [directories, setDirectories] = useState<readonly { readonly count: number; readonly directory: string }[]>([])
+  useEffect(() => {
+    if (picked.deviceId === undefined) {
+      setDirectories([])
+      return
+    }
+    const deviceId = picked.deviceId
+    void createDispatchApi(groupId)
+      .directories(deviceId, source)
+      .then(setDirectories)
+      .catch(() => setDirectories([]))
+  }, [groupId, picked.deviceId, source])
+  return (
+    <Form.Item label={`第 ${sequence + 1} 步${fileLabel(source)}`}>
+      <Select
+        aria-label={`第 ${sequence + 1} 步文件盒子`}
+        onChange={(value: string) => onChange({ ...picked, deviceId: value, directory: rootDirectory })}
+        options={options.devices.map((item) => ({ label: boxLabel(item), value: item.id }))}
+        placeholder="选择文件所在盒子"
+        value={picked.deviceId}
+        virtual={false}
+      />
+      <Select
+        aria-label={`第 ${sequence + 1} 步文件目录`}
+        onChange={(value: string) => onChange({ ...picked, directory: value })}
+        options={[
+          {
+            label:
+              directories.find((item) => item.directory.length === 0) === undefined
+                ? "根目录"
+                : `根目录（${directories.find((item) => item.directory.length === 0)?.count ?? 0}）`,
+            value: rootDirectory,
+          },
+          ...directories
+            .filter((item) => item.directory.length > 0)
+            .map((item) => ({ label: `${item.directory}（${item.count}）`, value: item.directory })),
+        ]}
+        style={{ marginTop: 8, width: "100%" }}
+        value={picked.directory}
+        virtual={false}
+      />
+      <Radio.Group onChange={(event) => onChange({ ...picked, mode: event.target.value })} value={picked.mode}>
+        <Radio value="sequence">顺序</Radio>
+        <Radio value="random">随机</Radio>
+      </Radio.Group>
+    </Form.Item>
   )
 }

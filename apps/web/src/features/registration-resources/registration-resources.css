@@ -40,9 +40,8 @@
   color: #909399;
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .registration-resources-page .parsed-data-more {
@@ -52,10 +51,10 @@
 .registration-resources-page .resource-tag {
   cursor: pointer;
   display: inline-block;
+  height: auto;
   max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .registration-resources-page .time-cell {
@@ -146,4 +145,19 @@
     align-self: flex-start;
     margin-left: 0;
   }
+}
+
+.registration-resources-page .pool-editable-tag {
+  cursor: text;
+  margin-inline-end: 0;
+}
+
+.registration-resources-page .pool-editable-tag.is-empty {
+  background: transparent;
+  border-style: dashed;
+  color: #8c8c8c;
+}
+
+.registration-resources-page .pool-edit-input {
+  width: 108px;
 }

@@ -1,8 +1,17 @@
-import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from "@ant-design/icons"
+import { DeleteOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons"
 import type { TableColumnsType } from "antd"
 import { App, Button, Card, Input, Space, Switch, Table, Tag } from "antd"
-import type { Key } from "react"
 import { type ReactNode, useMemo, useState } from "react"
+import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
+import {
+  type FilterMode,
+  type SelectionScope,
+  FilterModeSwitch,
+  SelectionScopeSwitch,
+  pageSlice,
+  useClientPagination,
+} from "../../components/tables/operation-controls"
+import { EditableTextTag } from "../labels/editable-text-tag"
 
 import { ConfigFormDialog } from "./form-dialog"
 import {
@@ -34,25 +43,30 @@ export const ConfigListPage = ({ canDelete, canWrite }: ConfigListPageProps): Re
   const allowDelete = canDelete === true
   const { message, modal } = App.useApp()
   const [draft, setDraft] = useState<ConfigQuery>(emptyConfigQuery)
+  const [filterMode, setFilterMode] = useState<FilterMode>("and")
+  const [selectionScope, setSelectionScope] = useState<SelectionScope>("all")
   const [query, setQuery] = useState<ConfigQuery>(emptyConfigQuery)
   const [configs, setConfigs] = useState<MytConfig[]>(() => createSeedConfigs())
   const [selectedIds, setSelectedIds] = useState<readonly number[]>([])
   const [editRecord, setEditRecord] = useState<MytConfig | null>(null)
-  const filtered = useMemo(() => filterConfigs(configs, query), [configs, query])
+  const filtered = useMemo(
+    () => filterConfigs(configs, query, filterMode),
+    [configs, filterMode, query],
+  )
+  const configPaging = useClientPagination(JSON.stringify([filterMode, query]))
   const selected = configs.filter((item) => selectedIds.includes(item.id))
   const nextId = Math.max(0, ...configs.map((item) => item.id)) + 1
 
-  const applyQuery = (next = draft): void => {
+  const changeQuery = (patch: Partial<ConfigQuery>): void => {
+    const next = { ...draft, ...patch }
     setDraft(next)
     setQuery(next)
-    setSelectedIds([])
   }
 
   const resetQuery = (): void => {
     const empty = emptyConfigQuery()
     setDraft(empty)
     setQuery(empty)
-    setSelectedIds([])
   }
 
   const deleteIds = (ids: readonly number[]): void => {
@@ -116,7 +130,32 @@ export const ConfigListPage = ({ canDelete, canWrite }: ConfigListPageProps): Re
       title: "启用",
       width: 80,
     },
-    { dataIndex: "remark", ellipsis: true, key: "remark", title: "备注", width: 140 },
+    {
+      key: "remark",
+      render: (_value: unknown, item: MytConfig) =>
+        canWrite ? (
+          <EditableTextTag
+            color="blue"
+            emptyLabel="备注"
+            name={item.remark.length === 0 ? null : item.remark}
+            onCommit={(name) =>
+              setConfigs((current) =>
+                current.map((entry) => (entry.id === item.id ? { ...entry, remark: name } : entry)),
+              )
+            }
+            onRemove={() =>
+              setConfigs((current) =>
+                current.map((entry) => (entry.id === item.id ? { ...entry, remark: "" } : entry)),
+              )
+            }
+            removeLabel={`移除备注 ${item.remark}`}
+          />
+        ) : (
+          item.remark
+        ),
+      title: "备注",
+      width: 140,
+    },
     ...(canWrite
       ? [
           {
@@ -146,70 +185,71 @@ export const ConfigListPage = ({ canDelete, canWrite }: ConfigListPageProps): Re
         ]
       : []),
   ]
+  const configSelection = useFilteredRowSelection({
+    getCheckboxProps: (item: MytConfig) => ({
+      "aria-label": `选择 ${item.name}`,
+    }),
+    onChange: (keys) => setSelectedIds(keys.map((key) => Number(key))),
+    pageKeys: pageSlice(filtered, configPaging.current, configPaging.pageSize).map((item) => item.id),
+    rowKey: "id",
+    rows: filtered,
+    selectedKeys: selectedIds,
+    selectionScope,
+  })
 
   return (
     <section className="module-page config-page">
-      <Card className="filter-bar" size="small">
-        <Space className="resource-filter-row" wrap>
-          <span className="filter-label">名称</span>
+      <Card className="condition-panel filter-bar" size="small">
+        <div className="condition-search">
+          <span className="filter-label">搜索</span>
           <Input
             allowClear
             aria-label="名称"
-            onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-            onPressEnter={() => applyQuery()}
+            onChange={(event) => changeQuery({ name: event.target.value })}
             placeholder="名称"
             style={{ width: 185 }}
             value={draft.name}
           />
-          <span className="filter-label">key</span>
           <Input
             allowClear
             aria-label="key"
-            onChange={(event) => setDraft({ ...draft, key: event.target.value })}
-            onPressEnter={() => applyQuery()}
+            onChange={(event) => changeQuery({ key: event.target.value })}
             placeholder="key"
             style={{ width: 185 }}
             value={draft.key}
           />
-          <span className="filter-label">用户名</span>
           <Input
             allowClear
             aria-label="用户名"
-            onChange={(event) => setDraft({ ...draft, username: event.target.value })}
-            onPressEnter={() => applyQuery()}
+            onChange={(event) => changeQuery({ username: event.target.value })}
             placeholder="用户名"
             style={{ width: 185 }}
             value={draft.username}
           />
-          <span className="filter-label">密码</span>
           <Input
             allowClear
             aria-label="密码筛选"
-            onChange={(event) => setDraft({ ...draft, password: event.target.value })}
-            onPressEnter={() => applyQuery()}
+            onChange={(event) => changeQuery({ password: event.target.value })}
             placeholder="密码"
             style={{ width: 185 }}
             type="password"
             value={draft.password}
           />
-          <span className="filter-label">备注</span>
           <Input
             allowClear
             aria-label="备注"
-            onChange={(event) => setDraft({ ...draft, remark: event.target.value })}
-            onPressEnter={() => applyQuery()}
+            onChange={(event) => changeQuery({ remark: event.target.value })}
             placeholder="备注"
             style={{ width: 185 }}
             value={draft.remark}
           />
-          <Button icon={<SearchOutlined aria-hidden />} onClick={() => applyQuery()} type="primary">
-            搜索
-          </Button>
           <Button onClick={resetQuery}>重置</Button>
-        </Space>
+          <FilterModeSwitch mode={filterMode} onChange={setFilterMode} />
+        </div>
       </Card>
       <div className="resource-crud-toolbar">
         <Space wrap>
+          <SelectionScopeSwitch onChange={setSelectionScope} scope={selectionScope} />
           {canWrite ? (
             <>
               <Button
@@ -243,15 +283,9 @@ export const ConfigListPage = ({ canDelete, canWrite }: ConfigListPageProps): Re
       <Table
         columns={columns}
         dataSource={filtered}
-        pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
+        pagination={{ ...configPaging.pagination, total: filtered.length }}
         rowKey="id"
-        rowSelection={{
-          getCheckboxProps: (item: MytConfig) => ({
-            "aria-label": `选择 ${item.name}`,
-          }),
-          onChange: (keys: readonly Key[]) => setSelectedIds(keys.map((key) => Number(key))),
-          selectedRowKeys: [...selectedIds],
-        }}
+        rowSelection={configSelection}
         scroll={{ x: "max-content" }}
         size="small"
       />

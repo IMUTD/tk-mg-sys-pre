@@ -87,7 +87,7 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
     auditRepository,
     repository: createPostgresAccountPoolRepository(client),
   })
-  const poolService = createPoolService(createPostgresPoolRepository(client))
+  const poolService = createPoolService(createPostgresPoolRepository(client, cipher))
   const dialTransport = createMihomoProbeTransport(
     process.env["MIHOMO_BINARY"] ?? "/usr/local/bin/mihomo",
   )

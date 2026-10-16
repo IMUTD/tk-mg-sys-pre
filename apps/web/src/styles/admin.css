@@ -164,11 +164,6 @@ html[data-theme="dark"] .route-loading {
   display: inline-flex;
 }
 
-.page-heading h1 {
-  font-size: 20px;
-  margin: 4px 0 0;
-}
-
 .content-shell {
   min-width: 0;
   padding: 16px 24px 24px;
@@ -267,7 +262,66 @@ html[data-theme="dark"] .route-loading {
 .module-page .ant-table,
 .data-table .ant-table,
 .ant-modal .ant-table {
-  min-width: 100%;
+  min-width: 0;
+}
+
+.module-page .ant-table-content > table,
+.module-page .ant-table-header > table,
+.module-page .ant-table-body > table,
+.data-table .ant-table-content > table,
+.data-table .ant-table-header > table,
+.data-table .ant-table-body > table,
+.ant-modal .ant-table-content > table,
+.ant-modal .ant-table-header > table,
+.ant-modal .ant-table-body > table {
+  width: 100% !important;
+  min-width: 0 !important;
+  table-layout: auto !important;
+}
+
+.module-page col,
+.data-table col,
+.ant-modal col {
+  width: auto !important;
+}
+
+.module-page .ant-table-selection-col,
+.data-table .ant-table-selection-col,
+.ant-modal .ant-table-selection-col,
+.module-page .ant-table-selection-column,
+.data-table .ant-table-selection-column,
+.ant-modal .ant-table-selection-column {
+  width: 48px !important;
+}
+
+.module-page .ant-table-thead > tr > th.ant-table-cell,
+.module-page .ant-table-tbody > tr > td.ant-table-cell,
+.data-table .ant-table-thead > tr > th.ant-table-cell,
+.data-table .ant-table-tbody > tr > td.ant-table-cell,
+.ant-modal .ant-table-thead > tr > th.ant-table-cell,
+.ant-modal .ant-table-tbody > tr > td.ant-table-cell {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.module-page .ant-table-thead > tr > th.ant-table-cell-fix-right,
+.module-page .ant-table-tbody > tr > td.ant-table-cell-fix-right,
+.data-table .ant-table-thead > tr > th.ant-table-cell-fix-right,
+.data-table .ant-table-tbody > tr > td.ant-table-cell-fix-right,
+.ant-modal .ant-table-thead > tr > th.ant-table-cell-fix-right,
+.ant-modal .ant-table-tbody > tr > td.ant-table-cell-fix-right {
+  white-space: nowrap;
+  width: 1%;
+}
+
+
+.module-page .ant-table-tbody .ant-tag,
+.data-table .ant-table-tbody .ant-tag,
+.ant-modal .ant-table-tbody .ant-tag {
+  height: auto;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .page-toolbar,
@@ -276,6 +330,29 @@ html[data-theme="dark"] .route-loading {
 .filter-bar .ant-space {
   flex-wrap: wrap;
   max-width: 100%;
+}
+
+.condition-panel .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.condition-panel .classification-row {
+  margin: 0;
+}
+
+.condition-search {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.list-mode-switch {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
 }
 
 .filter-bar .ant-input,

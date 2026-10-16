@@ -36,7 +36,7 @@ test("renders the 云大师-aligned registration resource page", async ({ page }
 
   // Then
   await expect(page.getByText("xxx12143@gmail.com")).toBeVisible()
-  await expect(page.getByRole("button", { name: "搜索" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "搜索" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "智能导入" })).toBeVisible()
   await expect(page.getByRole("button", { name: "统计" })).toBeVisible()
   await expect(page.getByRole("columnheader", { name: "智能解析" })).toBeVisible()

@@ -78,7 +78,7 @@ export const labelError = async (error: unknown): Promise<string> => {
     const body = await error.response
       .json<{ error?: string }>()
       .catch(() => ({}) as { error?: string })
-    if (body.error === "label_in_use") return "分组仍被业务数据使用，请先修改数据分组"
+    if (body.error === "label_in_use") return "仍被业务数据使用的分组或备注不能删除"
     if (body.error === "duplicate_label") return "分类名称已存在"
     if (body.error === "permission_denied") return "没有分类管理权限"
   }

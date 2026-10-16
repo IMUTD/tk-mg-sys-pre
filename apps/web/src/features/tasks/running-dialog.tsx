@@ -1,6 +1,7 @@
 import { StopOutlined } from "@ant-design/icons"
 import { Button, Checkbox, Modal, Table, Tag } from "antd"
 import { type ReactNode, useMemo, useState } from "react"
+import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
 
 import {
   deviceById,
@@ -32,6 +33,12 @@ export const RunningTaskDialog = ({
     (item) =>
       item.status === "2" && item.deviceId !== null && selectedDeviceIds.includes(item.deviceId),
   )
+  const runningSelection = useFilteredRowSelection({
+    onChange: (keys) => setSelectedIds(keys.map((key) => Number(key))),
+    rowKey: "id",
+    rows: queried,
+    selectedKeys: selectedIds,
+  })
 
   return (
     <Modal
@@ -145,10 +152,7 @@ export const RunningTaskDialog = ({
         dataSource={queried}
         pagination={false}
         rowKey="id"
-        rowSelection={{
-          onChange: (keys) => setSelectedIds(keys.map((key) => Number(key))),
-          selectedRowKeys: selectedIds,
-        }}
+        rowSelection={runningSelection}
         scroll={{ x: "max-content" }}
         size="small"
       />

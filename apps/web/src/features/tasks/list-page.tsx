@@ -9,8 +9,8 @@ import {
 } from "@ant-design/icons"
 import type { TableColumnsType } from "antd"
 import { App, Button, Card, Input, Progress, Select, Space, Table, Tag } from "antd"
-import type { Key } from "react"
 import { type ReactNode, useEffect, useMemo, useState } from "react"
+import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
 import { useSearchParams } from "react-router-dom"
 
 import { TaskFormDialog } from "./form-dialog"
@@ -119,7 +119,6 @@ export const TaskListPage = ({ canDelete, canWrite }: TaskListPageProps): ReactN
   const applyQuery = (next = draft): void => {
     setDraft(next)
     setQuery(next)
-    setSelectedIds([])
   }
 
   const changeSelectQuery = (patch: Partial<TaskQuery>): void => {
@@ -131,7 +130,6 @@ export const TaskListPage = ({ canDelete, canWrite }: TaskListPageProps): ReactN
     const empty = emptyTaskQuery()
     setDraft(empty)
     setQuery(empty)
-    setSelectedIds([])
   }
 
   const deleteIds = (ids: readonly number[], withChildren: boolean): void => {
@@ -329,6 +327,15 @@ export const TaskListPage = ({ canDelete, canWrite }: TaskListPageProps): ReactN
           },
         ]),
   ]
+  const taskSelection = useFilteredRowSelection({
+    getCheckboxProps: (item: MytTask) => ({
+      "aria-label": `选择 ${item.name}`,
+    }),
+    onChange: (keys) => setSelectedIds(keys.map((key) => Number(key))),
+    rowKey: "id",
+    rows: filtered,
+    selectedKeys: selectedIds,
+  })
 
   return (
     <section className="module-page tasks-page">
@@ -486,13 +493,7 @@ export const TaskListPage = ({ canDelete, canWrite }: TaskListPageProps): ReactN
         }}
         pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
         rowKey="id"
-        rowSelection={{
-          getCheckboxProps: (item: MytTask) => ({
-            "aria-label": `选择 ${item.name}`,
-          }),
-          onChange: (keys: readonly Key[]) => setSelectedIds(keys.map((key) => Number(key))),
-          selectedRowKeys: [...selectedIds],
-        }}
+        rowSelection={taskSelection}
         scroll={{ x: "max-content" }}
         size="small"
       />

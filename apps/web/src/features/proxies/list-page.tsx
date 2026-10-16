@@ -6,7 +6,6 @@ import {
   PlayCircleOutlined,
   PlusOutlined,
   QuestionCircleOutlined,
-  SearchOutlined,
   StarFilled,
   StarOutlined,
   UploadOutlined,
@@ -16,21 +15,25 @@ import {
   App,
   Button,
   Card,
-  Checkbox,
-  Dropdown,
   Input,
   Select,
   Space,
   Table,
   Tag,
 } from "antd"
-import type { Key } from "react"
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
+import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
+import {
+  type FilterMode,
+  type SelectionScope,
+  FilterModeSwitch,
+  SelectionScopeSwitch,
+  pageSlice,
+  useClientPagination,
+} from "../../components/tables/operation-controls"
 import { createProxiesApi, type ProxiesApi, proxyRequestError } from "./api"
 
 import {
-  ProxyBatchTagDialog,
-  ProxyBatchTurboDialog,
   ProxyBatchUpdateDialog,
   ProxyBuyDialog,
   ProxyCheckResultDialog,
@@ -45,8 +48,6 @@ import {
   checkMessage,
   createSeedProxyDevices,
   ENABLE_OPTIONS,
-  editSelectedTag,
-  editSelectedTurboNode,
   emptyProxy,
   emptyProxyQuery,
   endpointText,
@@ -75,7 +76,12 @@ import {
 } from "./myt-proxy"
 import "./proxies.css"
 import { PageKey } from "../../lib/pages"
-import { BusinessLabelFilter } from "../labels/filter-row"
+import { createLabelsApi, labelsChanged } from "../labels/api"
+import { BatchAssignDialog, batchClearOption, type BatchAssignResult } from "../labels/batch-assign-dialog"
+import { EditableTextTag } from "../labels/editable-text-tag"
+import { addRemarks, formatRemarks, splitRemarks } from "../labels/remark-list"
+import { RemarkTags } from "../labels/remark-tags"
+import { BusinessLabelFilter, LabelFilterRow, UNASSIGNED_VALUE, unionLabelNames, usageLabel } from "../labels/filter-row"
 
 type ProxiesListPageProps = {
   readonly groupIds?: readonly string[]
@@ -85,7 +91,7 @@ type ProxiesListPageProps = {
 }
 
 // PostgreSQL label names cannot contain NUL, so this filter cannot collide with a catalog name.
-const unassignedFilter = "\0unassigned"
+const choice = (value: string): string[] => (value.length === 0 ? [] : [value])
 const noGroups: readonly string[] = []
 
 const downloadCsv = (csv: string, filename: string): void => {
@@ -107,8 +113,10 @@ const copyText = async (value: string, onSuccess: () => void): Promise<void> => 
   onSuccess()
 }
 
-const rowLabel = (proxy: MytProxy): string =>
-  proxy.remark.length > 0 ? proxy.remark : endpointText(proxy)
+const rowLabel = (proxy: MytProxy): string => {
+  const remark = formatRemarks(proxy.remark)
+  return remark.length > 0 ? remark : endpointText(proxy)
+}
 
 export const ProxiesListPage = ({
   canDelete,
@@ -119,6 +127,8 @@ export const ProxiesListPage = ({
   const allowDelete = canDelete === true
   const { message, modal } = App.useApp()
   const [draft, setDraft] = useState<ProxyQuery>(emptyProxyQuery)
+  const [filterMode, setFilterMode] = useState<FilterMode>("and")
+  const [selectionScope, setSelectionScope] = useState<SelectionScope>("all")
   const [query, setQuery] = useState<ProxyQuery>(emptyProxyQuery)
   const api = useMemo(() => providedApi ?? createProxiesApi(), [providedApi])
   const [proxies, setProxies] = useState<MytProxy[]>([])
@@ -187,12 +197,55 @@ export const ProxiesListPage = ({
       throw new Error(`已保存 ${saved} 条，失败 ${errors.length} 条：${errors[0]}`)
     message.success(`已保存 ${saved} 条`)
   }
+  const applyProxyBatch = (choice: BatchAssignResult): void => {
+    const groupName = choice.group.kind === "set" ? (choice.group.values[0] ?? "") : ""
+    if (groupName.includes("+")) {
+      message.error("分组名称不能包含 + 符号")
+      return
+    }
+    const remarkNames = choice.remarks.kind === "set" ? [...choice.remarks.values] : []
+    const remarkOf = (current: string): string =>
+      choice.remarks.kind === "clear" ? "" : addRemarks(current, remarkNames)
+    if (
+      choice.remarks.kind !== "skip" &&
+      selected.some((item) => remarkOf(item.remark).length > 2000)
+    ) {
+      message.error("备注总长度不能超过 2000")
+      return
+    }
+    const next = selected.map((item) => ({
+      ...item,
+      ...(choice.group.kind === "skip" ? {} : { tag: groupName }),
+      ...(choice.remarks.kind === "skip" ? {} : { remark: remarkOf(item.remark) }),
+    }))
+    void perform(async () => {
+      const persisted = next.filter((item) => item.uuid !== undefined && item.groupId !== undefined)
+      const local = next.filter((item) => item.uuid === undefined || item.groupId === undefined)
+      if (local.length > 0) {
+        setProxies((current) => current.map((row) => local.find((item) => item.id === row.id) ?? row))
+      }
+      if (persisted.length > 0) await persistBatch(persisted)
+      else if (local.length > 0) message.success("已分配")
+      if (groupName.length > 0) {
+        void createLabelsApi()
+          .create(PageKey.Proxies, "group", groupName)
+          .then(() => labelsChanged())
+          .catch(() => undefined)
+      }
+      for (const name of remarkNames) {
+        void createLabelsApi()
+          .create(PageKey.Proxies, "remark", name)
+          .then(() => labelsChanged())
+          .catch(() => undefined)
+      }
+      setBatchAssignOpen(false)
+    })
+  }
   const [devices] = useState(() => createSeedProxyDevices())
   const [selectedIds, setSelectedIds] = useState<readonly number[]>([])
   const [editRecord, setEditRecord] = useState<MytProxy | null>(null)
   const [importOpen, setImportOpen] = useState(false)
-  const [batchTagOpen, setBatchTagOpen] = useState(false)
-  const [batchTurboOpen, setBatchTurboOpen] = useState(false)
+  const [batchAssignOpen, setBatchAssignOpen] = useState(false)
   const [batchUpdateOpen, setBatchUpdateOpen] = useState(false)
   const [runProxy, setRunProxy] = useState<MytProxy | null>(null)
   const [faqOpen, setFaqOpen] = useState(false)
@@ -202,9 +255,42 @@ export const ProxiesListPage = ({
     result: NonNullable<ReturnType<typeof parseCheckResult>>
   } | null>(null)
   const expireOptions = useMemo(() => expirePresetOptions(), [])
-  const filtered = useMemo(() => filterProxies(proxies, query), [proxies, query])
+  const filtered = useMemo(
+    () => filterProxies(proxies, query, filterMode),
+    [filterMode, proxies, query],
+  )
+  const proxyPaging = useClientPagination(JSON.stringify([filterMode, query]))
   const selected = proxies.filter((item) => selectedIds.includes(item.id))
   const tagOptions = uniqueTagOptions(proxies)
+  const [catalogGroups, setCatalogGroups] = useState<readonly string[]>([])
+  const [catalogRemarks, setCatalogRemarks] = useState<readonly string[]>([])
+  useEffect(() => {
+    const labels = createLabelsApi()
+    const load = (): void => {
+      void labels
+        .list(PageKey.Proxies, "proxy")
+        .then((result) => {
+          setCatalogGroups(result.groups.map((item) => item.name))
+          setCatalogRemarks(result.remarks.map((item) => item.name))
+        })
+        .catch(() => undefined)
+    }
+    load()
+    window.addEventListener("business-labels-changed", load)
+    return () => window.removeEventListener("business-labels-changed", load)
+  }, [])
+  const remarkCounts = new Map<string, number>()
+  for (const item of proxies) {
+    for (const remark of splitRemarks(item.remark)) {
+      remarkCounts.set(remark, (remarkCounts.get(remark) ?? 0) + 1)
+    }
+  }
+  const remarkOptions = [...remarkCounts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right, "zh-CN"))
+    .map(([remark, count]) => ({ label: usageLabel(remark, count), value: remark }))
+  const remarkNames = [
+    ...new Set([...catalogRemarks, ...remarkCounts.keys()].map((name) => name.trim()).filter((name) => name.length > 0)),
+  ].sort((left, right) => left.localeCompare(right, "zh-CN"))
   const turboOptions = turboNodeProxies(proxies).map((item) => ({
     label: turboNodeLabel(item),
     value: String(item.id),
@@ -252,7 +338,6 @@ export const ProxiesListPage = ({
   const applyQuery = (next = draft): void => {
     setDraft(next)
     setQuery(next)
-    setSelectedIds([])
   }
 
   const changeSelectQuery = (patch: Partial<ProxyQuery>): void => {
@@ -263,7 +348,6 @@ export const ProxiesListPage = ({
     const empty = emptyProxyQuery()
     setDraft(empty)
     setQuery(empty)
-    setSelectedIds([])
   }
 
   const requireSelection = (action: () => void): void => {
@@ -314,91 +398,154 @@ export const ProxiesListPage = ({
       message.success("导出成功")
     })
   }
+  const proxySelection = useFilteredRowSelection({
+    getCheckboxProps: (item: MytProxy) => ({
+      "aria-label": `选择 ${rowLabel(item)}`,
+    }),
+    onChange: (keys) => setSelectedIds(keys.map((key) => Number(key))),
+    pageKeys: pageSlice(filtered, proxyPaging.current, proxyPaging.pageSize).map((item) => item.id),
+    rowKey: "id",
+    rows: filtered,
+    selectedKeys: selectedIds,
+    selectionScope,
+  })
+
+  const saveProxyText = (item: MytProxy, patch: { readonly tag?: string; readonly remark?: string }): void => {
+    if (patch.tag?.includes("+")) {
+      message.error("分组名称不能包含 + 符号")
+      return
+    }
+    if ((patch.remark?.length ?? 0) > 2000) {
+      message.error("备注总长度不能超过 2000")
+      return
+    }
+    const next = { ...item, ...patch }
+    if (item.uuid === undefined || item.groupId === undefined) {
+      setProxies((current) => current.map((row) => (row.id === item.id ? next : row)))
+      return
+    }
+    void api
+      .save(next, proxies, false)
+      .then((saved) => {
+        setProxies((current) => current.map((row) => (row.id === item.id ? saved : row)))
+        const tag = patch.tag?.trim() ?? ""
+        const remark = patch.remark?.trim() ?? ""
+        if (tag.length > 0) {
+          void createLabelsApi()
+            .create(PageKey.Proxies, "group", tag)
+            .then(() => labelsChanged())
+            .catch(() => undefined)
+        }
+        for (const name of splitRemarks(remark)) {
+          void createLabelsApi()
+            .create(PageKey.Proxies, "remark", name)
+            .then(() => labelsChanged())
+            .catch(() => undefined)
+        }
+      })
+      .catch(async (error: unknown) => message.error(await proxyRequestError(error)))
+  }
 
   return (
     <section className="module-page proxies-page">
       {loadError === null ? null : <Alert message={loadError} showIcon type="error" />}
-      <Card className="filter-bar" size="small">
+      <Card className="condition-panel filter-bar" size="small">
         <BusinessLabelFilter
-          page={PageKey.Proxies}
-          options={[{ value: unassignedFilter, label: "未分组" }, ...tagOptions]}
-          value={draft.noTag ? unassignedFilter : draft.tag}
+          blankLabel={usageLabel(
+            "未分组",
+            proxies.filter((item) => item.tag.length === 0).length,
+          )}
+          canDelete={allowDelete}
+          canWrite={canWrite}
           onChange={(tag) =>
             changeSelectQuery({
-              tag: tag === unassignedFilter ? "" : tag,
-              noTag: tag === unassignedFilter,
+              tag: tag === UNASSIGNED_VALUE ? "" : tag,
+              noTag: tag === UNASSIGNED_VALUE,
             })
           }
-          canWrite={canWrite}
-          canDelete={allowDelete}
+          closable
+          options={tagOptions}
+          page={PageKey.Proxies}
+          system
+          title="分组"
+          value={draft.noTag ? UNASSIGNED_VALUE : draft.tag}
         />
-        <Space className="resource-filter-row" wrap>
-          {groupIds.length > 1 ? (
-            <Select
-              aria-label="代理权限组"
-              value={creationGroup}
-              options={groupIds.map((id) => ({ label: id, value: id }))}
-              onChange={setCreationGroup}
-              style={{ width: 180 }}
-              virtual={false}
-            />
-          ) : null}
-          <span className="filter-label">ID</span>
-          <Input
-            allowClear
-            aria-label="ID"
-            onChange={(event) => setDraft({ ...draft, id: event.target.value })}
-            onPressEnter={() => applyQuery()}
-            style={{ width: 85 }}
-            value={draft.id}
-          />
+        <BusinessLabelFilter
+          blankLabel={usageLabel(
+            "未备注",
+            proxies.filter((item) => splitRemarks(item.remark).length === 0).length,
+          )}
+          canDelete={allowDelete}
+          canWrite={canWrite}
+          closable
+          kind="remark"
+          multiple
+          onChange={(remarks) =>
+            changeSelectQuery(
+              remarks.includes(UNASSIGNED_VALUE)
+                ? { remarks: [], unremarked: true }
+                : { remarks, unremarked: false },
+            )
+          }
+          options={remarkOptions}
+          page={PageKey.Proxies}
+          system
+          title="备注"
+          value={draft.unremarked ? [UNASSIGNED_VALUE] : draft.remarks}
+        />
+        <LabelFilterRow
+          onChange={(values) => changeSelectQuery({ type: values[0] ?? "" })}
+          options={PROXY_TYPE_OPTIONS.map((option) => ({ label: option.label, value: option.value }))}
+          selected={choice(draft.type)}
+          system
+          title="类型"
+        />
+        <LabelFilterRow
+          onChange={(values) => changeSelectQuery({ save: values[0] ?? "" })}
+          options={ENABLE_OPTIONS.map((option) => ({ label: option.label, value: option.value }))}
+          selected={choice(draft.save)}
+          system
+          title="节流"
+        />
+        <LabelFilterRow
+          onChange={(values) => changeSelectQuery({ tun: values[0] ?? "" })}
+          options={ENABLE_OPTIONS.map((option) => ({ label: option.label, value: option.value }))}
+          selected={choice(draft.tun)}
+          system
+          title="TUN模式"
+        />
+        <LabelFilterRow
+          onChange={(values) => changeSelectQuery({ expiredTime: values[0] ?? "" })}
+          options={expireOptions}
+          selected={choice(draft.expiredTime)}
+          system
+          title="过期时间"
+        />
+        <LabelFilterRow
+          onChange={(values) => changeSelectQuery({ favorite: values[0] === "yes" })}
+          options={[{ label: "已收藏", value: "yes" }]}
+          selected={draft.favorite ? ["yes"] : []}
+          system
+          title="收藏"
+        />
+        <div className="condition-search">
           <span className="filter-label">搜索</span>
           <Input
             allowClear
+            aria-label="ID"
+            onChange={(event) => changeSelectQuery({ id: event.target.value })}
+            placeholder="ID"
+            style={{ width: 85 }}
+            value={draft.id}
+          />
+          <Input
+            allowClear
             aria-label="搜索"
-            onChange={(event) => setDraft({ ...draft, search: event.target.value })}
-            onPressEnter={() => applyQuery()}
+            onChange={(event) => changeSelectQuery({ search: event.target.value })}
             placeholder="IP/端口/备注/分组"
             style={{ width: 185 }}
             value={draft.search}
           />
-          <span className="filter-label">类型</span>
-          <Select
-            allowClear
-            aria-label="类型"
-            onChange={(value: string | null) => changeSelectQuery({ type: value ?? "" })}
-            options={PROXY_TYPE_OPTIONS.map((option) => ({
-              label: option.label,
-              value: option.value,
-            }))}
-            placeholder="类型"
-            style={{ width: 120 }}
-            value={draft.type.length === 0 ? null : draft.type}
-            virtual={false}
-          />
-          <span className="filter-label">节流</span>
-          <Select
-            allowClear
-            aria-label="节流"
-            onChange={(value: string | null) => changeSelectQuery({ save: value ?? "" })}
-            options={ENABLE_OPTIONS.map((option) => ({ label: option.label, value: option.value }))}
-            placeholder="节流"
-            style={{ width: 110 }}
-            value={draft.save.length === 0 ? null : draft.save}
-            virtual={false}
-          />
-          <span className="filter-label">TUN模式</span>
-          <Select
-            allowClear
-            aria-label="TUN模式"
-            onChange={(value: string | null) => changeSelectQuery({ tun: value ?? "" })}
-            options={ENABLE_OPTIONS.map((option) => ({ label: option.label, value: option.value }))}
-            placeholder="TUN模式"
-            style={{ width: 120 }}
-            value={draft.tun.length === 0 ? null : draft.tun}
-            virtual={false}
-          />
-          <span className="filter-label">加速节点</span>
           <Select
             allowClear
             aria-label="加速节点"
@@ -409,31 +556,23 @@ export const ProxiesListPage = ({
             value={draft.turboNode.length === 0 ? null : draft.turboNode}
             virtual={false}
           />
-          <span className="filter-label">过期时间</span>
-          <Select
-            allowClear
-            aria-label="过期时间"
-            onChange={(value: string | null) => changeSelectQuery({ expiredTime: value ?? "" })}
-            options={expireOptions}
-            placeholder="过期时间"
-            style={{ width: 120 }}
-            value={draft.expiredTime.length === 0 ? null : draft.expiredTime}
-            virtual={false}
-          />
-          <Checkbox
-            checked={draft.favorite}
-            onChange={(event) => changeSelectQuery({ favorite: event.target.checked })}
-          >
-            收藏
-          </Checkbox>
-          <Button icon={<SearchOutlined aria-hidden />} onClick={() => applyQuery()} type="primary">
-            搜索
-          </Button>
           <Button onClick={resetQuery}>重置</Button>
-        </Space>
+          <FilterModeSwitch mode={filterMode} onChange={setFilterMode} />
+        </div>
       </Card>
       <div className="resource-crud-toolbar">
         <Space wrap>
+          <SelectionScopeSwitch onChange={setSelectionScope} scope={selectionScope} />
+          {groupIds.length > 1 ? (
+            <Select
+              aria-label="代理权限组"
+              onChange={setCreationGroup}
+              options={groupIds.map((id) => ({ label: id, value: id }))}
+              style={{ width: 180 }}
+              value={creationGroup}
+              virtual={false}
+            />
+          ) : null}
           {canWrite ? (
             <>
               <Button
@@ -479,32 +618,13 @@ export const ProxiesListPage = ({
               >
                 批量导入
               </Button>
-              <Dropdown
+              <Button
                 disabled={selected.length === 0}
-                menu={{
-                  items: [
-                    { key: "editTag", label: "修改分组" },
-                    { key: "editTurbo", label: "修改加速" },
-                    { key: "detect", label: "批量检测" },
-                  ],
-                  onClick: ({ key }) => {
-                    if (key === "editTag") {
-                      requireSelection(() => setBatchTagOpen(true))
-                      return
-                    }
-                    if (key === "editTurbo") {
-                      requireSelection(() => setBatchTurboOpen(true))
-                      return
-                    }
-                    requireSelection(() => runDetect(selectedIds))
-                  },
-                }}
-                trigger={["click"]}
+                onClick={() => setBatchAssignOpen(true)}
+                type="primary"
               >
-                <Button disabled={selected.length === 0} type="primary">
-                  批量操作
-                </Button>
-              </Dropdown>
+                批量分配（{selected.length}）
+              </Button>
               <Button
                 disabled={selected.length === 0}
                 onClick={() => requireSelection(() => setBatchUpdateOpen(true))}
@@ -548,14 +668,19 @@ export const ProxiesListPage = ({
           {
             dataIndex: "tag",
             key: "tag",
-            render: (tag: string) => (
-              <Tag
-                className="proxy-tag"
-                onClick={() => void copyText(tag, () => message.success("复制成功"))}
-              >
-                {tag.length === 0 ? "未分组" : tag}
-              </Tag>
-            ),
+            render: (tag: string, item: MytProxy) =>
+              canWrite ? (
+                <EditableTextTag
+                  color="orange"
+                  emptyLabel="分组"
+                  name={tag.length === 0 ? null : tag}
+                  onCommit={(name) => saveProxyText(item, { tag: name })}
+                  onRemove={() => saveProxyText(item, { tag: "" })}
+                  removeLabel={`移除分组 ${tag}`}
+                />
+              ) : (
+                <Tag className="proxy-tag">{tag.length === 0 ? "未分组" : tag}</Tag>
+              ),
             title: "分组",
             width: 130,
           },
@@ -646,9 +771,14 @@ export const ProxiesListPage = ({
             width: 100,
           },
           {
-            dataIndex: "remark",
-            ellipsis: true,
             key: "remark",
+            render: (_value: unknown, item: MytProxy) =>
+              <RemarkTags
+                canWrite={canWrite}
+                onChange={(name) => saveProxyText(item, { remark: name })}
+                removeLabel={(name) => `移除备注 ${name}`}
+                value={item.remark}
+              />,
             title: "备注",
             width: 160,
           },
@@ -765,15 +895,9 @@ export const ProxiesListPage = ({
               ]),
         ]}
         dataSource={filtered}
-        pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
+        pagination={{ ...proxyPaging.pagination, total: filtered.length }}
         rowKey="id"
-        rowSelection={{
-          getCheckboxProps: (item: MytProxy) => ({
-            "aria-label": `选择 ${rowLabel(item)}`,
-          }),
-          onChange: (keys: readonly Key[]) => setSelectedIds(keys.map((key) => Number(key))),
-          selectedRowKeys: [...selectedIds],
-        }}
+        rowSelection={proxySelection}
         scroll={{ x: "max-content" }}
         size="small"
       />
@@ -826,33 +950,6 @@ export const ProxiesListPage = ({
           }
         />
       ) : null}
-      {batchTagOpen ? (
-        <ProxyBatchTagDialog
-          onCancel={() => setBatchTagOpen(false)}
-          onSubmit={(tag) =>
-            void perform(async () => {
-              await persistBatch(editSelectedTag(selected, selectedIds, tag, nowText()))
-              setBatchTagOpen(false)
-            })
-          }
-        />
-      ) : null}
-      {batchTurboOpen ? (
-        <ProxyBatchTurboDialog
-          onCancel={() => setBatchTurboOpen(false)}
-          onSubmit={(turboNode) =>
-            void perform(async () => {
-              await persistBatch(editSelectedTurboNode(selected, selectedIds, turboNode, nowText()))
-              setBatchTurboOpen(false)
-            })
-          }
-          proxies={proxies.filter(
-            (item) =>
-              !selectedIds.includes(item.id) &&
-              selected.every((row) => row.groupId === item.groupId),
-          )}
-        />
-      ) : null}
       {batchUpdateOpen ? (
         <ProxyBatchUpdateDialog
           onCancel={() => setBatchUpdateOpen(false)}
@@ -864,6 +961,23 @@ export const ProxiesListPage = ({
           }
         />
       ) : null}
+      <BatchAssignDialog
+        groupOptions={[
+          batchClearOption("清除分组"),
+          ...unionLabelNames(
+            catalogGroups,
+            tagOptions.map((item) => item.value),
+          ).map((name) => ({ label: name, value: name })),
+        ]}
+        onCancel={() => setBatchAssignOpen(false)}
+        onSubmit={applyProxyBatch}
+        open={batchAssignOpen}
+        remarkOptions={[
+          batchClearOption("清除备注"),
+          ...remarkNames.map((remark) => ({ label: remark, value: remark })),
+        ]}
+        selectedCount={selected.length}
+      />
       {runProxy === null ? null : (
         <ProxyRunDialog
           devices={devices}

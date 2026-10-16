@@ -1,5 +1,8 @@
 import type { Sql, TransactionSql } from "postgres"
 import { z } from "zod"
+
+import type { SecretCipher } from "../../lib/crypto"
+import { countDeskAccounts, listDeskAccounts, prepareDeskPool, readDeskQuery } from "./desk-pool"
 import {
   type AccountPool,
   type PoolConsume,
@@ -26,7 +29,7 @@ type PoolRow = {
   device_label: string
   times: number
   member_count: number
-  filter_condition: PoolSourceFilter | null
+  filter_condition: AccountPool["filterCondition"]
   created_at: Date
   updated_at: Date
   expires_at: Date
@@ -82,11 +85,18 @@ const toSource = (row: SourceRow): PoolSourceAccount => ({
     metric(row.extra["playBeforeYesterday"]),
   ],
 })
-const toPool = (row: PoolRow): AccountPool => ({
+const creatorName = async (sql: QuerySql, userId: string): Promise<string> => {
+  const rows = await sql<{ name: string }[]>`
+    select case when btrim(display_name) <> '' then display_name else email end as name
+    from app_user where id = ${userId}`
+  return rows[0]?.name ?? ""
+}
+const toPool = async (sql: QuerySql, row: PoolRow): Promise<AccountPool> => ({
   id: row.id,
   displayId: Number(row.display_id),
   groupId: row.group_id,
   createdByUserId: row.created_by_user_id,
+  createdByName: await creatorName(sql, row.created_by_user_id),
   key: row.key,
   remark: row.remark,
   backType: row.back_type,
@@ -104,7 +114,7 @@ const needsDevice = (type: string) => ["1", "2", "4"].includes(type)
 
 const sourceWhere = (sql: QuerySql, groupId: string, filter: PoolSourceFilter) => sql`
   a.group_id = ${groupId} and a.deleted = false and a.transferred = false
-  and a.encrypted_transfer_key = '' and a.status <> 'disabled'
+  and a.encrypted_transfer_key = '' and a.status not in ('disabled', 'expired', 'hidden')
   and a.backup_type = ${needsDevice(filter.backType) ? "local" : "private_cloud"}::operation_account_backup_type
   and (${!needsDevice(filter.backType)} or a.device_id = ${filter.deviceId}::uuid)
   and (${filter.deviceSeq}::integer is null or i.instance_index = ${filter.deviceSeq})
@@ -161,6 +171,7 @@ export interface PoolRepository {
     groups: readonly { tag: string; total: number }[]
   }>
   create(groupId: string, actorId: string, input: PoolWrite): Promise<AccountPool>
+  createDesk(groupId: string, actorId: string, input: unknown): Promise<AccountPool>
   details(groupId: string, poolId: string): Promise<PoolDetails>
   remove(groupId: string, actorId: string, ids: readonly string[]): Promise<number>
   consume(groupId: string, actorId: string, poolId: string, input: PoolConsume): Promise<void>
@@ -171,21 +182,46 @@ const audit = async (sql: QuerySql, actorId: string, action: string, target: str
     values (${crypto.randomUUID()}, ${actorId}, ${action}, 'allowed', ${target})`
 }
 
-export const createPostgresPoolRepository = (client: Sql): PoolRepository => ({
+const withDeskCount = async (
+  sql: QuerySql,
+  cipher: SecretCipher | undefined,
+  groupId: string,
+  row: PoolRow,
+): Promise<AccountPool> => {
+  const pool = await toPool(sql, row)
+  const query = readDeskQuery(row.filter_condition)
+  if (query === null) return pool
+  return { ...pool, count: await countDeskAccounts(sql, cipher, groupId, query) }
+}
+
+export const createPostgresPoolRepository = (
+  client: Sql,
+  cipher?: SecretCipher,
+): PoolRepository => ({
   list: async (groupId, filter) => {
-    const where = client`group_id = ${groupId} and deleted_at is null
-      and (${filter.id === ""} or position(${filter.id} in display_id::text) > 0)
-      and (${filter.key === ""} or position(lower(${filter.key}) in lower(key)) > 0)
-      and (${filter.remark === ""} or position(lower(${filter.remark}) in lower(remark)) > 0)`
+    const where = () => {
+      const creator = client`case when btrim(u.display_name) <> '' then u.display_name else coalesce(u.email, '') end`
+      return client`p.group_id = ${groupId} and p.deleted_at is null
+        and (${filter.id === ""} or position(${filter.id} in p.display_id::text) > 0)
+        and (${filter.key === ""} or position(lower(${filter.key}) in lower(p.key)) > 0
+          or position(lower(${filter.key}) in lower(${creator})) > 0)
+        and (${filter.remark === ""} or position(lower(${filter.remark}) in lower(p.remark)) > 0)`
+    }
     const [rows, counts] = await Promise.all([
-      client<PoolRow[]>`select * from operation_account_pool where ${where}
-        order by display_id desc limit ${filter.pageSize} offset ${(filter.page - 1) * filter.pageSize}`,
+      client<PoolRow[]>`select p.* from operation_account_pool p
+        left join app_user u on u.id = p.created_by_user_id
+        where ${where()}
+        order by p.display_id desc limit ${filter.pageSize} offset ${(filter.page - 1) * filter.pageSize}`,
       client<
         { total: string }[]
-      >`select count(*) as total from operation_account_pool where ${where}`,
+      >`select count(*) as total from operation_account_pool p
+        left join app_user u on u.id = p.created_by_user_id
+        where ${where()}`,
     ])
+    const items: AccountPool[] = []
+    for (const row of rows) items.push(await withDeskCount(client, cipher, groupId, row))
     return {
-      items: rows.map(toPool),
+      items,
       total: Number(counts[0]?.total ?? 0),
       page: filter.page,
       pageSize: filter.pageSize,
@@ -260,11 +296,38 @@ export const createPostgresPoolRepository = (client: Sql): PoolRepository => ({
         }))
         await tx`insert into operation_account_pool_member ${tx(members)}`
         await audit(tx, actorId, "account-pool.create", `account-pool:${id}`)
-        return toPool(row)
+        return toPool(tx, row)
       })
     } catch (error) {
       if (typeof error === "object" && error !== null && "code" in error && error.code === "23505")
         throw new PoolError("account_pool_key_conflict")
+      throw error
+    }
+  },
+  createDesk: async (groupId, actorId, input) => {
+    try {
+      return await client.begin(async (tx) => {
+        const prepared = await prepareDeskPool(tx, cipher, groupId, input)
+        const count = await countDeskAccounts(tx, cipher, groupId, prepared.query)
+        const id = crypto.randomUUID()
+        const inserted = await tx<PoolRow[]>`
+          insert into operation_account_pool
+            (id, group_id, created_by_user_id, key, remark, back_type, device_id, device_seq,
+              device_label, times, member_count, filter_condition)
+          values (${id}, ${groupId}, ${actorId}, ${prepared.key}, '', '5', null, null, '', 1,
+            ${Math.min(count, 3000)}, ${tx.json({ kind: "desk", query: prepared.query })})
+          returning *`
+        const row = inserted[0]
+        if (row === undefined) throw new Error("Account pool insert returned no record")
+        await audit(tx, actorId, "account-pool.create", `account-pool:${id}`)
+        return { ...(await toPool(tx, row)), count }
+      })
+    } catch (error) {
+      if (error instanceof PoolError) throw error
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "23505")
+        throw new PoolError("account_pool_key_conflict")
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "23514")
+        throw new PoolError("account_pool_invalid_source")
       throw error
     }
   },
@@ -274,13 +337,32 @@ export const createPostgresPoolRepository = (client: Sql): PoolRepository => ({
         where id = ${poolId} and group_id = ${groupId} and deleted_at is null for share`
       const row = rows[0]
       if (row === undefined) throw new PoolError("account_pool_not_found")
+      const deskQuery = readDeskQuery(row.filter_condition)
+      if (deskQuery !== null) {
+        const accounts = (await listDeskAccounts(tx, cipher, groupId, deskQuery)).map(toSource)
+        const count = await countDeskAccounts(tx, cipher, groupId, deskQuery)
+        return {
+          ...(await toPool(tx, row)),
+          count,
+          accounts,
+          progress: [
+            {
+              round: 1,
+              key: `${row.key}_1`,
+              total: count,
+              size: count,
+              unusedAccountIds: accounts.map((item) => item.id),
+            },
+          ],
+        }
+      }
       const members = await tx<{ snapshot: PoolSourceAccount }[]>`
         select snapshot from operation_account_pool_member where pool_id = ${poolId} order by position`
       const consumed = await tx<{ round: number; account_id: string }[]>`
         select round, account_id from operation_account_pool_consumption where pool_id = ${poolId}`
       const accounts = members.map((member) => member.snapshot)
       return {
-        ...toPool(row),
+        ...(await toPool(tx, row)),
         accounts,
         progress: Array.from({ length: row.times }, (_, index) => {
           const round = index + 1

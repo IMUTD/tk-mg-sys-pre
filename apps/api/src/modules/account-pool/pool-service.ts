@@ -1,5 +1,6 @@
 import { GroupIdSchema, UserIdSchema } from "../../lib/authorization"
 import {
+  DeskCreateSchema,
   PoolConsumeSchema,
   PoolIdSchema,
   PoolListSchema,
@@ -26,6 +27,12 @@ export const createPoolService = (repository: PoolRepository): PoolService => ({
       GroupIdSchema.parse(groupId),
       UserIdSchema.parse(actorId),
       PoolWriteSchema.parse(input),
+    ),
+  createDesk: (groupId, actorId, input) =>
+    repository.createDesk(
+      GroupIdSchema.parse(groupId),
+      UserIdSchema.parse(actorId),
+      DeskCreateSchema.parse(input),
     ),
   details: (groupId, poolId) =>
     repository.details(GroupIdSchema.parse(groupId), PoolIdSchema.parse(poolId)),

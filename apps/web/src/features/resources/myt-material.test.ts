@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { importMaterials, materialStatistics } from "./myt-material"
+import { emptyMaterialQuery, filterMaterials, importMaterials, materialStatistics } from "./myt-material"
 
 describe("importMaterials", () => {
   it("creates one record per non-empty line", () => {
@@ -44,5 +44,21 @@ describe("materialStatistics", () => {
 
     // Then
     expect(rows).toEqual([{ count: 3, tag: "评论" }])
+  })
+})
+
+describe("filterMaterials", () => {
+  it("keeps a row when any selected tag matches", () => {
+    const materials = [
+      ...importMaterials("甲", "评论", 1, "2026-09-17 12:00:00"),
+      ...importMaterials("乙", "私信", 2, "2026-09-17 12:00:00"),
+      { ...importMaterials("丙", "", 3, "2026-09-17 12:00:00")[0]!, tag: "" },
+    ]
+    expect(
+      filterMaterials(materials, { ...emptyMaterialQuery(), tags: ["评论", "私信"] }).map((item) => item.content),
+    ).toEqual(["甲", "乙"])
+    expect(filterMaterials(materials, { ...emptyMaterialQuery(), untagged: true }).map((item) => item.content)).toEqual([
+      "丙",
+    ])
   })
 })

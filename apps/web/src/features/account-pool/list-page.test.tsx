@@ -49,15 +49,22 @@ describe("AccountPoolListPage", () => {
     renderPage()
 
     expect(await screen.findByText("1107发布")).toBeVisible()
-    expect(screen.getByLabelText("ID")).toBeVisible()
-    expect(screen.getByLabelText("编码")).toBeVisible()
-    expect(screen.getByLabelText("备注")).toBeVisible()
-    expect(screen.getByRole("button", { name: "搜索" })).toBeVisible()
+    expect(screen.queryByLabelText("ID")).not.toBeInTheDocument()
+    expect(screen.getByLabelText("搜索")).toHaveAttribute("placeholder", "用户/命名")
+    expect(screen.queryByLabelText("备注")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "搜索" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "重置" })).toBeVisible()
     expect(screen.getByRole("button", { name: "新增" })).toBeVisible()
-    expect(screen.getByRole("button", { name: "创建账号池" })).toBeVisible()
+    expect(screen.queryByRole("button", { name: "创建账号池" })).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "什么是账号池?" })).toBeVisible()
-    expect(screen.getByRole("columnheader", { name: "备份方式" })).toBeVisible()
-    expect(screen.getByRole("columnheader", { name: "绑定设备" })).toBeVisible()
+    expect(screen.getByRole("columnheader", { name: "ID" })).toBeVisible()
+    expect(screen.getByRole("columnheader", { name: "用户" })).toBeVisible()
+    expect(screen.getByText("cccccccc-cccc-4ccc-8ccc-000000000101")).toBeVisible()
+    expect(screen.getAllByText("操作员").length).toBeGreaterThan(0)
+    expect(screen.queryByRole("columnheader", { name: "备注" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("columnheader", { name: "重复次数" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("columnheader", { name: "备份方式" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("columnheader", { name: "绑定设备" })).not.toBeInTheDocument()
     expect(screen.getByRole("columnheader", { name: "分析" })).toBeVisible()
     expect(screen.getByText("1107养号")).toBeVisible()
     expect(screen.getByText("gen-1108测试")).toBeVisible()
@@ -77,13 +84,12 @@ describe("AccountPoolListPage", () => {
     await screen.findByText("1107发布")
 
     expect(screen.queryByRole("button", { name: "新增" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "创建账号池" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "删除" })).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "什么是账号池?" })).toBeVisible()
     expect(screen.getAllByRole("button", { name: "数据统计" }).length).toBeGreaterThan(0)
   })
 
-  it("creates a pool from 新增 without showing secrets", async () => {
+  it("creates a pool from the account filters and names it by those conditions", async () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText("1107发布")
@@ -91,25 +97,23 @@ describe("AccountPoolListPage", () => {
     await user.click(screen.getByRole("button", { name: "新增" }))
     const dialog = await screen.findByRole("dialog")
     expect(within(dialog).getByText("新增账号池")).toBeInTheDocument()
-    await user.type(within(dialog).getByLabelText("账号池名"), "1109矩阵")
-    await user.click(within(dialog).getByLabelText("设备"))
-    await user.click(await screen.findByRole("option", { name: "192.168.76.130-270-亮18" }))
-    await user.click(within(dialog).getByLabelText("账号分组"))
-    await user.click(await screen.findByRole("option", { name: /亮2/ }))
+    expect(within(dialog).getByLabelText("命名")).toHaveValue("")
+    expect(within(dialog).queryByRole("button", { name: "添加账号分组" })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole("button", { name: "添加账号标签" })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole("button", { name: "添加用户备注" })).not.toBeInTheDocument()
+    expect(within(dialog).getByText("全部账号")).toBeVisible()
+    expect(within(dialog).getByRole("columnheader", { name: "用户名" })).toBeVisible()
+    expect(within(dialog).getByRole("columnheader", { name: "状态" })).toBeVisible()
+    await user.click(within(dialog).getByRole("button", { name: "正常" }))
+    expect(within(dialog).getByText("账号状态=正常")).toBeVisible()
     await user.click(within(dialog).getByRole("button", { name: "确认" }))
 
     expect(await screen.findByText("新增成功")).toBeVisible()
-    expect(screen.getByText("1109矩阵")).toBeVisible()
-    expect(screen.queryByText("Acc#SeedAlpha")).not.toBeInTheDocument()
-    expect(state.writes).toHaveLength(1)
-    expect(state.writes[0]).toMatchObject({
-      key: "1109矩阵",
-      mode: "all",
-      filter: { tag: ["亮2"] },
-    })
+    expect(screen.getByText("账号状态=正常")).toBeVisible()
+    expect(screen.queryByRole("button", { name: "创建账号池" })).not.toBeInTheDocument()
     const saved = await state.api.list(poolTestGroup, {
       id: "",
-      key: "1109矩阵",
+      key: "账号状态=正常",
       remark: "",
       page: 1,
       pageSize: 10,
@@ -117,38 +121,54 @@ describe("AccountPoolListPage", () => {
     expect(saved.total).toBe(1)
   })
 
-  it("creates a pool from selected API accounts", async () => {
+  it("stores a typed name instead of the automatic condition name", async () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText("1107发布")
 
-    await user.click(screen.getByRole("button", { name: "创建账号池" }))
+    await user.click(screen.getByRole("button", { name: "新增" }))
     const dialog = await screen.findByRole("dialog")
-    expect(within(dialog).getByText("创建账号池")).toBeInTheDocument()
-    await user.click(within(dialog).getByLabelText("创建设备"))
-    await user.click(await screen.findByRole("option", { name: "192.168.76.130-270-亮18" }))
-    await user.click(within(dialog).getByLabelText("选择账号 184992211"))
-    await user.click(within(dialog).getByRole("button", { name: /新建选中/ }))
+    await user.click(within(dialog).getByRole("button", { name: "正常" }))
+    await user.type(within(dialog).getByLabelText("命名"), "养号池")
+    expect(within(dialog).getByText("养号池")).toBeVisible()
+    await user.click(within(dialog).getByRole("button", { name: "确认" }))
 
-    expect(await screen.findByText("新建成功")).toBeVisible()
-    expect(await screen.findByText("gen-104")).toBeVisible()
-    expect(state.writes[0]).toMatchObject({
-      mode: "selected",
-      accountIds: ["aaaaaaaa-aaaa-4aaa-8aaa-000000000001"],
+    expect(await screen.findByText("新增成功")).toBeVisible()
+    expect(screen.getByText("养号池")).toBeVisible()
+    expect(screen.queryByText("账号状态=正常")).not.toBeInTheDocument()
+    const saved = await state.api.list(poolTestGroup, {
+      id: "",
+      key: "养号池",
+      remark: "",
+      page: 1,
+      pageSize: 10,
     })
+    expect(saved.total).toBe(1)
+    expect(saved.items[0]?.filterCondition).toMatchObject({ kind: "desk", query: { status: "0" } })
   })
 
-  it("filters by encoding without rendering passwords", async () => {
+  it("filters by name without rendering passwords", async () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText("1107养号")
 
-    await user.type(screen.getByLabelText("编码"), "养号")
-    await user.click(screen.getByRole("button", { name: "搜索" }))
+    await user.type(screen.getByLabelText("搜索"), "养号")
 
     await waitFor(() => expect(screen.queryByText("1107发布")).not.toBeInTheDocument())
     expect(await screen.findByText("1107养号")).toBeVisible()
     expect(screen.queryByText("Acc#SeedTravel")).not.toBeInTheDocument()
+  })
+
+  it("matches the creator name as well as the pool name", async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("gen-1108测试")
+
+    await user.type(screen.getByLabelText("搜索"), "千寻")
+
+    await waitFor(() => expect(screen.queryByText("1107发布")).not.toBeInTheDocument())
+    expect(screen.getByText("gen-1108测试")).toBeVisible()
+    expect(screen.queryByText("1107养号")).not.toBeInTheDocument()
   })
 
   it("opens help and persisted account list dialogs", async () => {
@@ -193,56 +213,6 @@ describe("AccountPoolListPage", () => {
     view.unmount()
     renderPage()
     expect(await screen.findByText("持久化验收")).toBeVisible()
-  })
-
-  it("preserves UUID selections across candidate pages", async () => {
-    const user = userEvent.setup()
-    renderPage()
-    await screen.findByText("1107发布")
-    await user.click(screen.getByRole("button", { name: "创建账号池" }))
-    const dialog = await screen.findByRole("dialog")
-    await user.click(within(dialog).getByLabelText("创建设备"))
-    await user.click(await screen.findByRole("option", { name: "192.168.76.130-270-亮18" }))
-    await user.click(await within(dialog).findByLabelText("选择账号 184992211"))
-    await user.click(within(dialog).getByTitle("2"))
-    await user.click(await within(dialog).findByLabelText("选择账号 SIM-11"))
-    await user.click(within(dialog).getByRole("button", { name: "新建选中(2)" }))
-    expect(await screen.findByText("新建成功")).toBeVisible()
-    expect(state.writes[0]?.accountIds).toEqual([
-      "aaaaaaaa-aaaa-4aaa-8aaa-000000000001",
-      "aaaaaaaa-aaaa-4aaa-8aaa-000000000011",
-    ])
-  })
-
-  it("keeps the dialog and shows failure without inventing a successful write", async () => {
-    vi.spyOn(state.api, "create").mockRejectedValue(new Error("offline"))
-    const user = userEvent.setup()
-    renderPage()
-    await screen.findByText("1107发布")
-    await user.click(screen.getByRole("button", { name: "创建账号池" }))
-    const dialog = await screen.findByRole("dialog")
-    await user.click(within(dialog).getByLabelText("创建设备"))
-    await user.click(await screen.findByRole("option", { name: "192.168.76.130-270-亮18" }))
-    await within(dialog).findByLabelText("选择账号 184992211")
-    await user.click(within(dialog).getByRole("button", { name: "新建所有(12)" }))
-    expect(await screen.findByText("账号池请求失败")).toBeVisible()
-    expect(screen.getByRole("dialog")).toBeVisible()
-    expect(screen.queryByText("新建成功")).not.toBeInTheDocument()
-    expect(state.writes).toHaveLength(0)
-  })
-
-  it("shows candidate-read errors and prevents creating from a failed read", async () => {
-    vi.spyOn(state.api, "sources").mockRejectedValue(new Error("offline"))
-    const user = userEvent.setup()
-    renderPage()
-    await screen.findByText("1107发布")
-    await user.click(screen.getByRole("button", { name: "创建账号池" }))
-    const dialog = await screen.findByRole("dialog")
-    await user.click(within(dialog).getByLabelText("创建设备"))
-    await user.click(await screen.findByRole("option", { name: "192.168.76.130-270-亮18" }))
-    expect(await within(dialog).findByText("候选账号加载失败")).toBeVisible()
-    expect(within(dialog).getByRole("button", { name: /新建所有/ })).toBeDisabled()
-    expect(state.writes).toHaveLength(0)
   })
 
   it("loads persisted round progress and differentiates stored statistics from unqueried data", async () => {

@@ -160,9 +160,10 @@ export const applyInitializerSnapshot = async (
         status = case when exists (select 1 from device_agent a where a.device_id = device.id
           and a.last_heartbeat_at > now() - interval '45 seconds') then status
           else ${box.online ? "online" : "offline"} end, updated_at = now(),
-        remark_id = case when ${changing} then null else remark_id end,
-        box_group_id = case when ${changing} then null else box_group_id end
+        box_group_id = case when ${changing} then null else box_group_id end,
+        sequence_no = case when ${changing} then null else sequence_no end
         where id = ${deviceId}`
+      if (changing) await tx`delete from device_remark where device_id = ${deviceId}`
     }
     await tx`insert into init_sync_state(source_key) values (${sourceKey})
       on conflict(source_key) do update set last_success_at = now()`

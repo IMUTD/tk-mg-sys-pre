@@ -34,7 +34,7 @@ const shortcuts = [
   { icon: <FundOutlined />, path: "/marketing/dashboard", title: "营销面板" },
   { icon: <DashboardOutlined />, path: "/marketing/accounts", title: "账号市场" },
   { icon: <GiftOutlined />, path: "/mall/records", title: "积分记录" },
-  { icon: <PlaySquareOutlined />, path: "/studio/video-pool", title: "视频池" },
+  { icon: <PlaySquareOutlined />, path: "/studio/video-pool", title: "视频数据" },
   { icon: <VideoCameraOutlined />, path: "/studio/video", title: "视频制作" },
   { icon: <NodeIndexOutlined />, path: "/engineering/behaviors", title: "行为中心" },
 ] as const

@@ -46,6 +46,10 @@ const setup = async (permission: "write" | "read" = "write", accounts = true, ca
       writes++
       throw new PoolError("account_pool_empty")
     },
+    createDesk: async () => {
+      writes++
+      throw new PoolError("account_pool_invalid_source")
+    },
     details: async () => {
       throw new PoolError("account_pool_not_found")
     },

@@ -50,12 +50,14 @@ test("scoped categories persist, reuse the right objects and isolate administrat
       ["备注", remarkName, "box-remarks"],
     ] as const) {
       await page.getByRole("button", { name: `添加${title}`, exact: true }).click()
-      const dialog = page.getByRole("dialog", { name: `添加${title}` })
-      await dialog.getByRole("textbox", { name: "名称", exact: true }).fill(name)
+      const input = page.getByRole("group", { name: title, exact: true }).getByRole("textbox", {
+        name: `添加${title}`,
+      })
+      await input.fill(name)
       const response = page.waitForResponse(
         (result) => result.request().method() === "POST" && result.url().endsWith(`/api/${route}`),
       )
-      await dialog.getByRole("button", { name: "添加", exact: true }).click()
+      await input.press("Enter")
       const result = await response
       expect(result.status()).toBe(201)
       created.push({
@@ -63,7 +65,7 @@ test("scoped categories persist, reuse the right objects and isolate administrat
         page: "/operations/devices",
         scope: "device",
       })
-      await expect(dialog).not.toBeVisible()
+      await expect(input).not.toBeVisible()
     }
     await page.reload()
     await expect(
@@ -80,18 +82,20 @@ test("scoped categories persist, reuse the right objects and isolate administrat
     ] as const) {
       await page.goto(path)
       await page.getByRole("button", { name: `添加${title}`, exact: true }).click()
-      const dialog = page.getByRole("dialog", { name: `添加${title}` })
-      await dialog.getByRole("textbox", { name: "分类名称" }).fill(name)
+      const input = page.getByRole("group", { name: title, exact: true }).getByRole("textbox", {
+        name: `添加${title}`,
+      })
+      await input.fill(name)
       const response = page.waitForResponse(
         (result) =>
           result.request().method() === "POST" && result.url().includes("/api/labels/catalog"),
       )
-      await dialog.getByRole("button", { name: "添加", exact: true }).click()
+      await input.press("Enter")
       const result = await response
       expect(result.status()).toBe(201)
       expect(new URL(result.url()).searchParams.get("scope")).toBe(scope)
       created.push({ id: labelId.parse(await result.json()).id, page: path, scope })
-      await expect(dialog).not.toBeVisible()
+      await expect(input).not.toBeVisible()
       await page.reload()
       await verify(title, name)
       if (scope === "proxy") {
@@ -110,10 +114,9 @@ test("scoped categories persist, reuse the right objects and isolate administrat
     await verify("代理分组", names.proxy)
     await verify("分配账号分组", names.account)
     await page.goto("/operations/account-pool")
-    await page.getByRole("button", { name: "创建账号池", exact: true }).click()
-    await verify("创建账号分组", names.account)
-    await verify("包含标签", names.tag)
-    await verify("排除标签", names.tag)
+    await page.getByRole("button", { name: "新增", exact: true }).click()
+    await verify("账号分组", names.account)
+    await verify("账号标签", names.tag)
     await page.goto("/operations/tasks")
     await verify("设备分组", names.device)
     const other = await browser.newContext({

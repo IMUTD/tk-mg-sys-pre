@@ -1,7 +1,9 @@
 import type { TableColumnsType } from "antd"
 import { App, Button, InputNumber, Modal, Progress, Space, Table, Tag } from "antd"
-import type { Key } from "react"
 import { type ReactNode, useMemo, useState } from "react"
+import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
+import { useClientPagination } from "../../components/tables/operation-controls"
+import { formatRemarks } from "../labels/remark-list"
 
 import {
   type MytTaskRes,
@@ -75,6 +77,7 @@ type StatsDialogProps = {
 
 export const StatsDialog = ({ onClose, pool, variant }: StatsDialogProps): ReactNode => {
   const { message } = App.useApp()
+  const statsPaging = useClientPagination(String(pool.accounts.length))
   const banned = pool.accounts.filter((item) => item.status === "1").length
   const playTotal = pool.accounts.reduce((sum, item) => sum + item.playTotal, 0)
   const columns: TableColumnsType<PoolAccount> = [
@@ -103,7 +106,13 @@ export const StatsDialog = ({ onClose, pool, variant }: StatsDialogProps): React
       title: "查询状态",
       width: 90,
     },
-    { dataIndex: "remark", ellipsis: true, key: "remark", title: "备注" },
+    {
+      dataIndex: "remark",
+      ellipsis: true,
+      key: "remark",
+      render: (remark: string) => formatRemarks(remark),
+      title: "备注",
+    },
   ]
 
   return (
@@ -136,7 +145,7 @@ export const StatsDialog = ({ onClose, pool, variant }: StatsDialogProps): React
       <Table
         columns={columns}
         dataSource={[...pool.accounts]}
-        pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
+        pagination={{ ...statsPaging.pagination, total: pool.accounts.length }}
         rowKey="id"
         scroll={{ x: "max-content" }}
         size="small"
@@ -228,6 +237,7 @@ export const AccountListDialog = ({ onClose, pool }: AccountListDialogProps): Re
   const { message } = App.useApp()
   const [minPlay, setMinPlay] = useState<number | null>(null)
   const [selectedIds, setSelectedIds] = useState<readonly number[]>([])
+  const accountPaging = useClientPagination(`${pool.id}:${minPlay ?? ""}`)
   const filtered = useMemo(
     () =>
       minPlay === null
@@ -235,6 +245,12 @@ export const AccountListDialog = ({ onClose, pool }: AccountListDialogProps): Re
         : pool.accounts.filter((item) => item.playTotal < minPlay),
     [minPlay, pool.accounts],
   )
+  const accountSelection = useFilteredRowSelection({
+    onChange: (keys) => setSelectedIds(keys.map((key) => Number(key))),
+    rowKey: "id",
+    rows: filtered,
+    selectedKeys: selectedIds,
+  })
   const lowPlay = pool.accounts.filter((item) => item.playTotal < (minPlay ?? 0))
   const columns: TableColumnsType<PoolAccount> = [
     { dataIndex: "uid", ellipsis: true, key: "uid", title: "UID", width: 180 },
@@ -262,8 +278,20 @@ export const AccountListDialog = ({ onClose, pool }: AccountListDialogProps): Re
       title: "播放量",
       width: 140,
     },
-    { dataIndex: "proxyRemark", key: "proxyRemark", title: "代理", width: 90 },
-    { dataIndex: "remark", ellipsis: true, key: "remark", title: "备注" },
+    {
+      dataIndex: "proxyRemark",
+      key: "proxyRemark",
+      render: (remark: string) => formatRemarks(remark),
+      title: "代理",
+      width: 90,
+    },
+    {
+      dataIndex: "remark",
+      ellipsis: true,
+      key: "remark",
+      render: (remark: string) => formatRemarks(remark),
+      title: "备注",
+    },
   ]
 
   return (
@@ -292,12 +320,9 @@ export const AccountListDialog = ({ onClose, pool }: AccountListDialogProps): Re
       <Table
         columns={columns}
         dataSource={filtered}
-        pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
+        pagination={{ ...accountPaging.pagination, total: filtered.length }}
         rowKey="id"
-        rowSelection={{
-          onChange: (keys: readonly Key[]) => setSelectedIds(keys.map((key) => Number(key))),
-          selectedRowKeys: [...selectedIds],
-        }}
+        rowSelection={accountSelection}
         scroll={{ x: "max-content" }}
         size="small"
       />

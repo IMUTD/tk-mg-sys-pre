@@ -24,6 +24,9 @@ export const operationAccountStatus = pgEnum("operation_account_status", [
   "ready",
   "suspended",
   "disabled",
+  "expired",
+  "hidden",
+  "unregistered",
 ])
 
 export const operationAccountApp = pgEnum("operation_account_app", [
@@ -37,6 +40,8 @@ export const operationAccountApp = pgEnum("operation_account_app", [
 export const operationAccountBackupType = pgEnum("operation_account_backup_type", [
   "local",
   "private_cloud",
+  "cloud",
+  "full",
 ])
 
 export const operationProxyStatus = pgEnum("operation_proxy_status", [
@@ -176,6 +181,7 @@ export const operationAccounts = pgTable(
     status: operationAccountStatus("status").notNull().default("ready"),
     tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
     transferred: boolean("transferred").notNull().default(false),
+    transferKeyHash: text("transfer_key_hash"),
     updatedAt: timestamp("updated_at", { mode: "date", withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -186,6 +192,7 @@ export const operationAccounts = pgTable(
     index("operation_account_group_created_index").on(table.groupId, table.createdAt),
     index("operation_account_platform_uid_index").on(table.groupId, table.platformUid),
     index("operation_account_proxy_index").on(table.proxyId),
+    index("operation_account_group_transfer_hash_index").on(table.groupId, table.transferKeyHash),
     index("operation_account_backup_device_index").on(table.backupDeviceId),
     uniqueIndex("operation_account_group_identifier_unique").on(table.groupId, table.identifier),
     foreignKey({
@@ -194,6 +201,48 @@ export const operationAccounts = pgTable(
       name: "operation_account_device_instance_pair_fk",
     }),
   ],
+)
+
+export const operationAccountTransfers = pgTable(
+  "operation_account_transfer",
+  {
+    codeHash: text("code_hash").notNull(),
+    consumedAt: timestamp("consumed_at", { mode: "date", withTimezone: true }),
+    createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).defaultNow().notNull(),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "restrict" }),
+    encryptedCode: text("encrypted_code").notNull(),
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => accessGroups.id, { onDelete: "cascade" }),
+    id: uuid("id").defaultRandom().primaryKey(),
+    revokedAt: timestamp("revoked_at", { mode: "date", withTimezone: true }),
+    splitSize: integer("split_size"),
+    status: text("status").notNull().default("active"),
+  },
+  (table) => [
+    uniqueIndex("operation_account_transfer_code_unique").on(table.codeHash),
+    index("operation_account_transfer_group_status_index").on(table.groupId, table.status),
+    check(
+      "operation_account_transfer_status_check",
+      sql`${table.status} in ('active', 'revoked', 'consumed')`,
+    ),
+  ],
+)
+
+export const operationAccountTransferItems = pgTable(
+  "operation_account_transfer_item",
+  {
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => operationAccounts.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    transferId: uuid("transfer_id")
+      .notNull()
+      .references(() => operationAccountTransfers.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ columns: [table.transferId, table.accountId] })],
 )
 
 export const operationAccountLeases = pgTable(

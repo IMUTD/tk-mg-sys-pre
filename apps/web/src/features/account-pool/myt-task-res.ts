@@ -7,6 +7,7 @@ import {
   type MytAccount,
   statusLabel,
 } from "../accounts/myt-account"
+import { formatRemarks } from "../labels/remark-list"
 
 export const POOL_BACK_TYPE_OPTIONS = [
   { label: "容器备份(内测)", value: "1" },
@@ -178,7 +179,7 @@ export const canJoinPool = (account: MytAccount): boolean =>
 
 export const validatePoolKey = (key: string): string | null => {
   const trimmed = key.trim()
-  if (trimmed.length === 0) return "编码不能为空"
+  if (trimmed.length === 0) return "命名不能为空"
   if (trimmed.includes("+")) return "账号池名不能包含 +"
   return null
 }
@@ -250,11 +251,11 @@ export const filterTaskRes = (pools: readonly MytTaskRes[], query: TaskResQuery)
   pools
     .filter((item) => {
       if (query.id.trim().length > 0 && !String(item.id).includes(query.id.trim())) return false
-      if (
-        query.key.trim().length > 0 &&
-        !item.key.toLowerCase().includes(query.key.trim().toLowerCase())
-      )
-        return false
+      if (query.key.trim().length > 0) {
+        const needle = query.key.trim().toLowerCase()
+        const user = String(item.userId).toLowerCase()
+        if (!item.key.toLowerCase().includes(needle) && !user.includes(needle)) return false
+      }
       if (
         query.remark.trim().length > 0 &&
         !item.remark.toLowerCase().includes(query.remark.trim().toLowerCase())
@@ -320,7 +321,7 @@ export const poolAccountsToCsv = (accounts: readonly PoolAccount[]): string => {
       String(item.follower),
       String(item.following),
       String(item.playTotal),
-      item.remark,
+      formatRemarks(item.remark),
     ]
       .map(csvCell)
       .join(","),

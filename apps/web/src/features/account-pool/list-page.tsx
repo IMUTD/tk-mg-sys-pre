@@ -1,28 +1,25 @@
-import {
-  CopyOutlined,
-  DeleteOutlined,
-  PlusOutlined,
-  QuestionCircleOutlined,
-  SearchOutlined,
-} from "@ant-design/icons"
+import { CopyOutlined, DeleteOutlined, PlusOutlined, QuestionCircleOutlined } from "@ant-design/icons"
 import type { TableColumnsType } from "antd"
 import { Alert, App, Button, Card, Input, Space, Table } from "antd"
-import type { Key } from "react"
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 
+import { FilteredSelectCheckbox } from "../../components/tables/filtered-selection"
+import {
+  type FilterMode,
+  type SelectionScope,
+  FilterModeSwitch,
+  SelectionScopeSwitch,
+} from "../../components/tables/operation-controls"
 import "./account-pool.css"
 import { AccountListDialog, HelpDialog, ProgressDialog, StatsDialog } from "./analysis-dialogs"
 import { createAccountPoolsApi, poolRequestError, type StoredPool } from "./api"
-import { CreatePoolDialog } from "./create-dialog"
+import { PoolFilterDialog } from "./filter-dialog"
 import { TaskResFormDialog } from "./form-dialog"
 import {
   allowCopy,
-  deviceLabel,
-  emptyTaskRes,
   emptyTaskResQuery,
   type MytTaskRes,
   nowText,
-  poolBackTypeLabel,
   remainingDays,
   shortDate,
   type TaskResQuery,
@@ -44,6 +41,8 @@ export const AccountPoolListPage = ({
 }: AccountPoolListPageProps): ReactNode => {
   const allowDelete = canDelete === true
   const { message, modal } = App.useApp()
+  const [filterMode, setFilterMode] = useState<FilterMode>("and")
+  const [selectionScope, setSelectionScope] = useState<SelectionScope>("all")
   const [draft, setDraft] = useState<TaskResQuery>(emptyTaskResQuery)
   const [query, setQuery] = useState<TaskResQuery>(emptyTaskResQuery)
   const [api] = useState(createAccountPoolsApi)
@@ -62,8 +61,11 @@ export const AccountPoolListPage = ({
   const detailRequest = useRef(0)
   const [analysisLoading, setAnalysisLoading] = useState<number | null>(null)
   const [selectedIds, setSelectedIds] = useState<readonly number[]>([])
+  const [recordIndex, setRecordIndex] = useState<ReadonlyMap<number, string>>(() => new Map())
+  const [selectingAll, setSelectingAll] = useState(false)
+  const selectRequest = useRef(0)
   const [editRecord, setEditRecord] = useState<MytTaskRes | null>(null)
-  const [createOpen, setCreateOpen] = useState(false)
+  const [filterOpen, setFilterOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [analysis, setAnalysis] = useState<AnalysisState>(null)
   const pools = useMemo(
@@ -74,7 +76,6 @@ export const AccountPoolListPage = ({
   useEffect(() => {
     let active = true
     setStoredPools([])
-    setSelectedIds([])
     setTotal(0)
     setLoadError(false)
     if (groupId === undefined) {
@@ -99,6 +100,68 @@ export const AccountPoolListPage = ({
       active = false
     }
   }, [api, groupId, query, page, pageSize, revision])
+  const selectedIdsRef = useRef(selectedIds)
+  selectedIdsRef.current = selectedIds
+  useEffect(() => {
+    selectRequest.current += 1
+    const request = selectRequest.current
+    setSelectingAll(false)
+    if (groupId === undefined) {
+      setSelectedIds([])
+      setRecordIndex(new Map())
+      return
+    }
+    const chosen = selectedIdsRef.current
+    if (chosen.length === 0) return
+    let active = true
+    void (async () => {
+      const items: StoredPool[] = []
+      let pageNo = 1
+      let totalCount = 0
+      try {
+        do {
+          const result = await api.list(groupId, { ...query, page: pageNo, pageSize: 500 })
+          if (!active || selectRequest.current !== request) return
+          items.push(...result.items)
+          totalCount = result.total
+          pageNo += 1
+          if (result.items.length === 0) break
+        } while (items.length < totalCount && pageNo <= 20)
+      } catch {
+        if (active && selectRequest.current === request) setSelectedIds([])
+        return
+      }
+      if (!active || selectRequest.current !== request) return
+      const allowed = new Set(items.map((item) => item.displayId))
+      setSelectedIds(chosen.filter((id) => allowed.has(id)))
+      setRecordIndex((current) => {
+        const next = new Map<number, string>()
+        for (const item of items) {
+          if (chosen.includes(item.displayId)) next.set(item.displayId, item.id)
+        }
+        for (const [id, recordId] of current) {
+          if (allowed.has(id) && !next.has(id)) next.set(id, recordId)
+        }
+        return next
+      })
+    })()
+    return () => {
+      active = false
+    }
+  }, [api, groupId, query])
+  useEffect(() => {
+    setRecordIndex((current) => {
+      const next = new Map(current)
+      let changed = false
+      for (const item of pools) {
+        if (item.recordId !== undefined && next.get(item.id) !== item.recordId) {
+          next.set(item.id, item.recordId)
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+  }, [pools])
   // biome-ignore lint/correctness/useExhaustiveDependencies: Device revision retries a failed device read.
   useEffect(() => {
     let active = true
@@ -120,7 +183,7 @@ export const AccountPoolListPage = ({
   }, [api, groupId, canWrite, deviceRevision])
   // biome-ignore lint/correctness/useExhaustiveDependencies: Changing the authorization group closes all scoped dialogs.
   useEffect(() => {
-    setCreateOpen(false)
+    setFilterOpen(false)
     setEditRecord(null)
     setAnalysis(null)
     setAnalysisLoading(null)
@@ -130,24 +193,48 @@ export const AccountPoolListPage = ({
   const applyQuery = (next = draft): void => {
     setDraft(next)
     setQuery(next)
-    setSelectedIds([])
     setPage(1)
   }
 
-  const resetQuery = (): void => {
-    const empty = emptyTaskResQuery()
-    setDraft(empty)
-    setQuery(empty)
-    setSelectedIds([])
-    setPage(1)
+  const selectAllMatching = async (): Promise<void> => {
+    if (groupId === undefined) return
+    const request = ++selectRequest.current
+    setSelectingAll(true)
+    try {
+      const items: StoredPool[] = []
+      let pageNo = 1
+      let totalCount = 0
+      do {
+        const result = await api.list(groupId, { ...query, page: pageNo, pageSize: 500 })
+        if (selectRequest.current !== request) return
+        items.push(...result.items)
+        totalCount = result.total
+        pageNo += 1
+        if (result.items.length === 0) break
+      } while (items.length < totalCount && pageNo <= 20)
+      if (selectRequest.current !== request) return
+      const mapped = items.map((item) => deskPool(item, devices))
+      setRecordIndex((current) => {
+        const next = new Map(current)
+        for (const item of mapped) {
+          if (item.recordId !== undefined) next.set(item.id, item.recordId)
+        }
+        return next
+      })
+      setSelectedIds(mapped.map((item) => item.id))
+    } catch (error) {
+      if (selectRequest.current === request) message.error(await poolRequestError(error))
+    } finally {
+      if (selectRequest.current === request) setSelectingAll(false)
+    }
   }
 
   const deleteIds = async (ids: readonly number[]): Promise<void> => {
     if (groupId === undefined) return
-    const recordIds = pools
-      .filter((item) => ids.includes(item.id))
-      .map((item) => item.recordId)
-      .filter((id): id is string => id !== undefined)
+    const recordIds = ids.flatMap((id) => {
+      const recordId = recordIndex.get(id)
+      return recordId === undefined ? [] : [recordId]
+    })
     await api.remove(groupId, recordIds)
     if (groupRef.current !== groupId) return
     setSelectedIds([])
@@ -208,24 +295,9 @@ export const AccountPoolListPage = ({
   }
 
   const columns: TableColumnsType<MytTaskRes> = [
-    { dataIndex: "id", key: "id", title: "ID", width: 70 },
-    { dataIndex: "userId", ellipsis: true, key: "userId", title: "用户", width: 70 },
-    { dataIndex: "remark", ellipsis: true, key: "remark", title: "备注", width: 140 },
-    { dataIndex: "key", ellipsis: true, key: "key", title: "编码", width: 140 },
-    { dataIndex: "times", key: "times", title: "重复次数", width: 90 },
-    {
-      key: "backType",
-      render: (_value: unknown, item: MytTaskRes) => poolBackTypeLabel(item.backType),
-      title: "备份方式",
-      width: 120,
-    },
-    {
-      ellipsis: true,
-      key: "device",
-      render: (_value: unknown, item: MytTaskRes) => deviceLabel(devices, item),
-      title: "绑定设备",
-      width: 180,
-    },
+    { dataIndex: "recordId", ellipsis: true, key: "id", title: "ID", width: 280 },
+    { dataIndex: "userId", ellipsis: true, key: "userId", title: "用户", width: 120 },
+    { dataIndex: "key", ellipsis: true, key: "key", title: "命名", width: 220 },
     { dataIndex: "count", key: "count", title: "账号总数", width: 90 },
     {
       key: "analysis",
@@ -334,51 +406,36 @@ export const AccountPoolListPage = ({
           }
         />
       ) : null}
-      <Card className="filter-bar" size="small">
-        <Space className="resource-filter-row" wrap>
-          <span className="filter-label">ID</span>
+      <Card className="condition-panel filter-bar" size="small">
+        <Space className="condition-search resource-filter-row" wrap>
+          <span className="filter-label">搜索</span>
           <Input
             allowClear
-            aria-label="ID"
-            onChange={(event) => setDraft({ ...draft, id: event.target.value })}
-            onPressEnter={() => applyQuery()}
-            placeholder="ID"
-            style={{ width: 100 }}
-            value={draft.id}
-          />
-          <span className="filter-label">编码</span>
-          <Input
-            allowClear
-            aria-label="编码"
-            onChange={(event) => setDraft({ ...draft, key: event.target.value })}
-            onPressEnter={() => applyQuery()}
-            placeholder="编码"
-            style={{ width: 185 }}
+            aria-label="搜索"
+            onChange={(event) => applyQuery({ ...draft, key: event.target.value })}
+            placeholder="用户/命名"
+            style={{ width: 220 }}
             value={draft.key}
           />
-          <span className="filter-label">备注</span>
-          <Input
-            allowClear
-            aria-label="备注"
-            onChange={(event) => setDraft({ ...draft, remark: event.target.value })}
-            onPressEnter={() => applyQuery()}
-            placeholder="备注"
-            style={{ width: 185 }}
-            value={draft.remark}
-          />
-          <Button icon={<SearchOutlined aria-hidden />} onClick={() => applyQuery()} type="primary">
-            搜索
+          <Button
+            onClick={() => {
+              setFilterMode("and")
+              applyQuery(emptyTaskResQuery())
+            }}
+          >
+            重置
           </Button>
-          <Button onClick={resetQuery}>重置</Button>
+          <FilterModeSwitch mode={filterMode} onChange={setFilterMode} />
         </Space>
       </Card>
       <div className="resource-crud-toolbar">
         <Space wrap>
+          <SelectionScopeSwitch onChange={setSelectionScope} scope={selectionScope} />
           {canWrite ? (
             <>
               <Button
                 icon={<PlusOutlined aria-hidden />}
-                onClick={() => setEditRecord(emptyTaskRes(0, nowText()))}
+                onClick={() => setFilterOpen(true)}
                 type="primary"
               >
                 新增
@@ -393,7 +450,6 @@ export const AccountPoolListPage = ({
                   {selectedIds.length > 0 ? `删除(${selectedIds.length})` : "删除"}
                 </Button>
               ) : null}
-              <Button onClick={() => setCreateOpen(true)}>创建账号池</Button>
             </>
           ) : null}
           <Button
@@ -413,12 +469,12 @@ export const AccountPoolListPage = ({
           current: page,
           pageSize,
           total,
+          pageSizeOptions: [10, 20, 50, 100],
           showSizeChanger: true,
           showTotal: (count) => `共 ${count} 条`,
           onChange: (nextPage, size) => {
             setPage(size === pageSize ? nextPage : 1)
             setPageSize(size)
-            setSelectedIds([])
           },
         }}
         rowKey="id"
@@ -427,10 +483,42 @@ export const AccountPoolListPage = ({
         {...(canWrite
           ? {
               rowSelection: {
+                columnTitle: (
+                  <FilteredSelectCheckbox
+                    busy={selectingAll}
+                    filteredCount={selectionScope === "page" ? pools.length : total}
+                    onClear={() => {
+                      if (selectionScope === "page") {
+                        const pageIds = new Set(pools.map((item) => item.id))
+                        setSelectedIds((current) => current.filter((id) => !pageIds.has(id)))
+                        return
+                      }
+                      setSelectedIds([])
+                    }}
+                    onSelectAll={() => {
+                      if (selectionScope === "page") {
+                        setSelectedIds((current) => [
+                          ...new Set([...current, ...pools.map((item) => item.id)]),
+                        ])
+                        return
+                      }
+                      void selectAllMatching()
+                    }}
+                    selectedCount={
+                      selectionScope === "page"
+                        ? pools.filter((item) => selectedIds.includes(item.id)).length
+                        : selectedIds.length
+                    }
+                  />
+                ),
                 getCheckboxProps: (item: MytTaskRes) => ({
                   "aria-label": `选择 ${item.key}`,
                 }),
-                onChange: (keys: readonly Key[]) => setSelectedIds(keys.map((key) => Number(key))),
+                onChange: (keys, _rows, info) => {
+                  if (info.type === "all" || info.type === "none") return
+                  setSelectedIds(keys.map((key) => Number(key)))
+                },
+                preserveSelectedRowKeys: true,
                 selectedRowKeys: [...selectedIds],
               },
             }
@@ -454,18 +542,20 @@ export const AccountPoolListPage = ({
           record={editRecord}
         />
       )}
-      {createOpen ? (
-        <CreatePoolDialog
-          api={api}
-          groupId={groupId ?? ""}
-          devices={devices}
-          onCancel={() => setCreateOpen(false)}
-          onSubmit={async (input) => {
-            if (groupId === undefined) return
-            await api.create(groupId, input)
+      {filterOpen && groupId !== undefined ? (
+        <PoolFilterDialog
+          groupId={groupId}
+          onCancel={() => setFilterOpen(false)}
+          onSubmit={async (query, name) => {
+            try {
+              await api.createDesk(groupId, query, name)
+            } catch (error) {
+              message.error(await poolRequestError(error))
+              throw error
+            }
             if (groupRef.current !== groupId) return
-            setCreateOpen(false)
-            message.success("新建成功")
+            message.success("新增成功")
+            setFilterOpen(false)
             setPage(1)
             setRevision((value) => value + 1)
           }}

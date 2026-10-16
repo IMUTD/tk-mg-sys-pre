@@ -107,6 +107,11 @@ const DeviceCommandPageSchema = z.object({
   total: z.number().int(),
 })
 
+const BoxRemarkRefSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+})
+
 const OwnedBoxSchema = z.object({
   boxGroupId: z.string().uuid().nullable().default(null),
   boxGroupName: z.string().nullable().default(null),
@@ -122,8 +127,8 @@ const OwnedBoxSchema = z.object({
   memory: z.string().default(""),
   model: z.string().default(""),
   name: z.string(),
-  remarkId: z.string().uuid().nullable().default(null),
-  remarkName: z.string().nullable().default(null),
+  remarks: z.array(BoxRemarkRefSchema).default([]),
+  sequenceNo: z.number().int().min(1).max(999).nullable().default(null),
   status: z.enum(["unknown", "online", "offline"]),
   updatedAt: z.coerce.date(),
   version: z.string().nullable().default(null),
@@ -195,6 +200,9 @@ export interface DevicesApi {
     readonly boxGroupId?: string | null
     readonly deviceIds: readonly string[]
     readonly remarkId?: string | null
+    readonly remarkIds?: readonly string[]
+    readonly remarkMode?: "add" | "replace"
+    readonly sequenceNo?: number | null
   }): Promise<void>
   listCommands(input: {
     readonly deviceId: string

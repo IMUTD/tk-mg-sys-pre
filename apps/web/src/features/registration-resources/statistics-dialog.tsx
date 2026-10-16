@@ -1,6 +1,7 @@
 import { App, Button, Input, Modal, Space, Table } from "antd"
-import type { Key, ReactNode } from "react"
+import type { ReactNode } from "react"
 import { useState } from "react"
+import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
 
 import type { TagStatistic } from "./tk-reg-resource"
 
@@ -23,6 +24,15 @@ export const StatisticsDialog = ({
   const [confirmText, setConfirmText] = useState("")
   const [deleteAllTags, setDeleteAllTags] = useState<readonly string[] | null>(null)
   const [selected, setSelected] = useState<readonly TagStatistic[]>([])
+  const statisticSelection = useFilteredRowSelection({
+    onChange: (keys) => {
+      const chosen = new Set(keys.map((key) => String(key)))
+      setSelected(rows.filter((row) => chosen.has(row.tag)))
+    },
+    rowKey: "tag",
+    rows,
+    selectedKeys: selected.map((row) => row.tag),
+  })
   const selectedUsed = selected.reduce((sum, row) => sum + row.usedCount, 0)
   const selectedTotal = selected.reduce((sum, row) => sum + row.totalCount, 0)
 
@@ -166,15 +176,7 @@ export const StatisticsDialog = ({
           dataSource={[...rows]}
           pagination={false}
           rowKey="tag"
-          {...(canWrite
-            ? {
-                rowSelection: {
-                  onChange: (_keys: readonly Key[], selectedRows: TagStatistic[]) =>
-                    setSelected(selectedRows),
-                  selectedRowKeys: selected.map((row) => row.tag),
-                },
-              }
-            : {})}
+          {...(canWrite ? { rowSelection: statisticSelection } : {})}
           scroll={{ x: "max-content", y: 500 }}
           size="small"
         />

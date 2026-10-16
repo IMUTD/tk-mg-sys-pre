@@ -10,6 +10,7 @@ import {
   hasOperationAuthorizationFailure,
 } from "../resources/route-authorization"
 import {
+  DeskCreateSchema,
   PoolConsumeSchema,
   PoolError,
   PoolIdSchema,
@@ -103,12 +104,32 @@ export const registerPoolRoutes = (
     if (hasOperationAuthorizationFailure(auth)) return auth.response
     if (!canViewPage(auth.principal.scope, PageKey.Accounts))
       return context.json({ error: "permission_denied" }, 403)
-    const input = await json(context, PoolWriteSchema)
-    if (input === null) return context.json({ error: "invalid_account_pool_request" }, 400)
-    if (input.filter.deviceId !== null && !canViewPage(auth.principal.scope, PageKey.Devices))
+    let body: unknown
+    try {
+      body = await context.req.json()
+    } catch (error) {
+      if (error instanceof SyntaxError) return context.json({ error: "invalid_account_pool_request" }, 400)
+      throw error
+    }
+    if (body !== null && typeof body === "object" && "desk" in body) {
+      const record = body as { desk: unknown; name?: unknown }
+      const desk = DeskCreateSchema.safeParse({
+        name: record.name ?? "",
+        query: record.desk,
+      })
+      if (!desk.success) return context.json({ error: "invalid_account_pool_request" }, 400)
+      if (desk.data.query.deviceId !== null && !canViewPage(auth.principal.scope, PageKey.Devices))
+        return context.json({ error: "permission_denied" }, 403)
+      return respond(context, async () =>
+        context.json(await service.createDesk(auth.groupId, auth.principal.userId, desk.data), 201),
+      )
+    }
+    const input = PoolWriteSchema.safeParse(body)
+    if (!input.success) return context.json({ error: "invalid_account_pool_request" }, 400)
+    if (input.data.filter.deviceId !== null && !canViewPage(auth.principal.scope, PageKey.Devices))
       return context.json({ error: "permission_denied" }, 403)
     return respond(context, async () =>
-      context.json(await service.create(auth.groupId, auth.principal.userId, input), 201),
+      context.json(await service.create(auth.groupId, auth.principal.userId, input.data), 201),
     )
   })
   app.post(`${root}/batch-delete`, async (context) => {

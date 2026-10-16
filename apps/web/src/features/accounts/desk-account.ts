@@ -34,19 +34,35 @@ const deskExtra = (item: OperationAccount): AccountExtra => {
   }
 }
 
-const deskStatus = (status: OperationAccount["status"]): AccountStatus =>
-  status === "suspended" ? "1" : "0"
+const deskStatus = (status: OperationAccount["status"]): AccountStatus => {
+  if (status === "suspended") return "1"
+  if (status === "expired") return "2"
+  if (status === "hidden") return "3"
+  if (status === "unregistered") return "4"
+  return "0"
+}
+
+const deskBackup = (backupType: OperationAccount["backupType"]): MytAccount["backType"] => {
+  if (backupType === "local") return "2"
+  if (backupType === "private_cloud") return "3"
+  if (backupType === "cloud") return "4"
+  if (backupType === "full") return "5"
+  return ""
+}
 
 export const toDeskAccount = (item: OperationAccount, index: number): MytAccount => ({
   app: item.app ?? "tiktok",
   backKey: item.backupKey,
-  backType: item.backupType === "private_cloud" ? "3" : item.backupType === "local" ? "2" : "",
+  backType: deskBackup(item.backupType),
   createTime: item.createdAt.toISOString().replace("T", " ").slice(0, 19),
   deleted: item.deleted,
   deleteTime:
     item.deletedAt === null ? null : item.deletedAt.toISOString().replace("T", " ").slice(0, 19),
   deviceId: null,
-  deviceSeq: null,
+  deviceSeq: item.instanceIndex,
+  recordDeviceId: item.deviceId ?? undefined,
+  recordInstanceId: item.deviceInstanceId ?? undefined,
+  recordProxyId: item.proxyId ?? undefined,
   enable: item.status !== "disabled",
   extra: deskExtra(item),
   favorite: (item.favorite ?? 0) > 0,
@@ -114,11 +130,27 @@ export const accountWrite = (account: MytAccount) => {
     region: account.region,
     ...(Object.keys(resourceSecrets).length > 0 ? { resourceSecrets } : {}),
     ...(account.password.length > 0 ? { secret: account.password } : {}),
+    backupType:
+      account.backType === "3"
+        ? ("private_cloud" as const)
+        : account.backType === "4"
+          ? ("cloud" as const)
+          : account.backType === "5"
+            ? ("full" as const)
+            : account.backType === "2"
+              ? ("local" as const)
+              : null,
     status: !account.enable
       ? ("disabled" as const)
       : account.status === "1"
         ? ("suspended" as const)
-        : ("ready" as const),
+        : account.status === "2"
+          ? ("expired" as const)
+          : account.status === "3"
+            ? ("hidden" as const)
+            : account.status === "4"
+              ? ("unregistered" as const)
+              : ("ready" as const),
     tags,
     ...(account.totp.length > 0 ? { totp: account.totp } : {}),
   }

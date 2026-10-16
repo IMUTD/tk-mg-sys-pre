@@ -23,8 +23,13 @@ export type FillContext = {
   readonly instance: { readonly index: string } | null
   readonly manualText: boolean
   readonly proxy: FillProxy | null
+  readonly backup: string
+  readonly backupFileHost: string
+  readonly image: string
+  readonly imageHost: string
   readonly text: { readonly content: string; readonly resourceId: string } | null
   readonly video: string
+  readonly videoHost: string
 }
 
 export type FillStep = {
@@ -79,9 +84,40 @@ const sourceValue = (source: string, context: FillContext): string => {
       return context.text?.content ?? ""
     case "pool.video":
       return context.video
+    case "pool.video_host":
+      return context.videoHost
+    case "pool.image":
+      return context.image
+    case "pool.image_host":
+      return context.imageHost
+    case "pool.backup":
+      return context.backup
+    case "pool.backup_host":
+      return context.backupFileHost
     default:
       return ""
   }
+}
+
+export const refreshDeviceHosts = (
+  parameters: Readonly<Record<string, string>>,
+  sources: unknown,
+  hosts: { readonly backupHost: string; readonly deviceHost: string },
+): { readonly changed: boolean; readonly parameters: Record<string, string> } => {
+  const sourceMap =
+    sources !== null && typeof sources === "object" && !Array.isArray(sources)
+      ? Object.entries(sources).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+      : []
+  const next = { ...parameters }
+  let changed = false
+  for (const [key, source] of sourceMap) {
+    if (!(key in next)) continue
+    const host = source === "device.host" ? hosts.deviceHost : source === "account.backup_device" ? hosts.backupHost : ""
+    if (host.length === 0 || next[key] === host) continue
+    next[key] = host
+    changed = true
+  }
+  return { changed, parameters: next }
 }
 
 export const fillStep = (step: FillStep, context: FillContext): FilledStep => {
@@ -117,7 +153,7 @@ export type TextMaterial = {
 const byAge = (left: TextMaterial, right: TextMaterial): number =>
   left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)
 
-const shuffle = (items: readonly TextMaterial[], random: () => number): TextMaterial[] => {
+const shuffle = <T>(items: readonly T[], random: () => number): T[] => {
   const copy = [...items]
   for (let index = copy.length - 1; index > 0; index -= 1) {
     const swap = Math.floor(random() * (index + 1))
@@ -139,8 +175,38 @@ export const drawTexts = (
 ): { readonly content: string; readonly resourceId: string }[] => {
   const filtered = mode === "tag" ? materials.filter((item) => item.category === tag) : [...materials]
   const ordered = mode === "random" ? shuffle(filtered, random) : [...filtered].sort(byAge)
-  return Array.from({ length: count }, (_, index) => {
-    const item = ordered.length === 0 ? undefined : ordered[index % ordered.length]
-    return { content: item?.content ?? "", resourceId: item?.id ?? "" }
-  })
+  return cycleDraw(ordered, count).map((item) => ({
+    content: item?.content ?? "",
+    resourceId: item?.id ?? "",
+  }))
+}
+
+const cycleDraw = <T>(ordered: readonly T[], count: number): (T | undefined)[] =>
+  Array.from({ length: count }, (_, index) => (ordered.length === 0 ? undefined : ordered[index % ordered.length]))
+
+export type ShareDrawFile = {
+  readonly deviceId: string
+  readonly host: string
+  readonly parent: string
+  readonly path: string
+  readonly pool: "backup" | "image" | "video"
+}
+
+export const drawShareFiles = (
+  files: readonly ShareDrawFile[],
+  deviceId: string,
+  directory: string,
+  pool: ShareDrawFile["pool"],
+  mode: "random" | "sequence",
+  count: number,
+  random: () => number = Math.random,
+): { readonly host: string; readonly path: string }[] => {
+  const matched = files.filter(
+    (item) => item.deviceId === deviceId && item.parent === directory && item.pool === pool,
+  )
+  const ordered =
+    mode === "random"
+      ? shuffle(matched, random)
+      : [...matched].sort((left, right) => left.path.localeCompare(right.path) || left.host.localeCompare(right.host))
+  return cycleDraw(ordered, count).map((item) => ({ host: item?.host ?? "", path: item?.path ?? "" }))
 }

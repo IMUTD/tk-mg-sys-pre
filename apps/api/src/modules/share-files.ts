@@ -251,7 +251,7 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
       join device d on d.id = e.device_id
       where e.id = any(${fileIds}::uuid[]) and e.kind = 'file'
         and (
-          (e.category = 'video' and e.bucket <> 'backup')
+          (e.category in ('video', 'image') and e.bucket <> 'backup')
           or e.bucket = 'backup'
         )
         and d.assignee_user_id = ${administratorId}::uuid and d.enabled and not d.assignment_pending
@@ -492,6 +492,11 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
           parent_path = excluded.parent_path, name = excluded.name, sha256 = excluded.sha256,
           category = excluded.category, size_bytes = excluded.size_bytes, seen_at = now()
       `
+    }
+    const targets = [...new Set((body?.moves ?? []).flatMap((move) => (typeof move.toDeviceId === "string" && move.toDeviceId.length > 0 ? [move.toDeviceId] : [])))]
+    for (const deviceId of targets) {
+      await sql`select pg_notify('agent_task', ${deviceId})`
+      wake(deviceId)
     }
     return context.json({ moved: body?.moves?.length ?? 0 })
   })

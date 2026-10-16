@@ -3,10 +3,20 @@ import { createHash, randomUUID } from "node:crypto"
 import type { Sql } from "postgres"
 
 import type { SecretCipher } from "../../lib/crypto"
+import { listDeskAccounts, readDeskQuery } from "../account-pool/desk-pool"
 import { fingerprint } from "../box-contract"
 import { parseCredentials } from "../proxies/configuration"
 import { takeBalanced } from "./allocate"
-import { drawTexts, fillStep, type FillProxy, resolveProxyLink, type TextMaterial } from "./fill"
+import {
+  drawShareFiles,
+  drawTexts,
+  fillStep,
+  type FillProxy,
+  refreshDeviceHosts,
+  resolveProxyLink,
+  type ShareDrawFile,
+  type TextMaterial,
+} from "./fill"
 
 export type TextChoice = {
   readonly mode: "random" | "sequence" | "tag"
@@ -14,14 +24,37 @@ export type TextChoice = {
   readonly tag?: string
 }
 
+export type NamedSet = {
+  readonly by: "group" | "remark" | "tag"
+  readonly name: string
+}
+
+export type FileChoice = {
+  readonly deviceId: string
+  readonly directory: string
+  readonly mode: "random" | "sequence"
+  readonly sequence: number
+  readonly source: "pool.backup" | "pool.image" | "pool.video"
+}
+
 export type DispatchSelection = {
   readonly accountIds: readonly string[]
   readonly accountNote: string
+  readonly accounts: NamedSet | null
   readonly boxIds: readonly string[]
+  readonly boxes: NamedSet | null
+  readonly files: readonly FileChoice[]
   readonly pitIndexes: readonly number[]
+  readonly poolId: string
+  readonly proxies: NamedSet | null
+  readonly proxyIds: readonly string[]
   readonly proxyTag: string | null
   readonly texts: readonly TextChoice[]
 }
+
+type SharePaths = { readonly backup: string; readonly image: string; readonly video: string }
+
+const emptySharePaths: SharePaths = { backup: "", image: "", video: "" }
 
 type ChainStep = {
   readonly afterMs: number
@@ -146,6 +179,59 @@ const pickPit = (
   return index
 }
 
+const loadSharePaths = async (sql: Sql, deviceIds: readonly string[]): Promise<Map<string, SharePaths>> => {
+  const paths = new Map<string, SharePaths>()
+  if (deviceIds.length === 0) return paths
+  const rows = await sql<{ deviceId: string; path: string; pool: string }[]>`
+    select distinct on (device_id, pool)
+      device_id::text as "deviceId",
+      pool,
+      bucket || '/' || relative_path as path
+    from (
+      select device_id, bucket, relative_path, seen_at,
+        case
+          when bucket = 'backup' then 'backup'
+          when category = 'video' and bucket <> 'backup' then 'video'
+          when category = 'image' and bucket <> 'backup' then 'image'
+          else ''
+        end as pool
+      from box_share_entry
+      where device_id = any(${deviceIds}::uuid[]) and kind = 'file' and sha256 <> ''
+    ) listed
+    where pool <> ''
+    order by device_id, pool, seen_at desc, relative_path
+  `
+  for (const row of rows) {
+    const current = { ...(paths.get(row.deviceId) ?? emptySharePaths) }
+    if (row.pool === "video") paths.set(row.deviceId, { ...current, video: row.path })
+    if (row.pool === "image") paths.set(row.deviceId, { ...current, image: row.path })
+    if (row.pool === "backup") paths.set(row.deviceId, { ...current, backup: row.path })
+  }
+  return paths
+}
+
+const loadCatalog = async (sql: Sql, deviceIds: readonly string[]): Promise<ShareDrawFile[]> => {
+  if (deviceIds.length === 0) return []
+  const rows = await sql<{ deviceId: string; host: string; parent: string; path: string; pool: string }[]>`
+    select e.device_id::text as "deviceId", d.host, e.parent_path as parent,
+      e.bucket || '/' || e.relative_path as path,
+      case
+        when e.bucket = 'backup' then 'backup'
+        when e.category = 'video' and e.bucket <> 'backup' then 'video'
+        when e.category = 'image' and e.bucket <> 'backup' then 'image'
+        else ''
+      end as pool
+    from box_share_entry e
+    join device d on d.id = e.device_id
+    where e.device_id = any(${[...deviceIds]}::uuid[]) and e.kind = 'file' and e.sha256 <> ''
+  `
+  return rows.flatMap((row) =>
+    row.pool === "video" || row.pool === "image" || row.pool === "backup"
+      ? [{ deviceId: row.deviceId, host: row.host, parent: row.parent, path: row.path, pool: row.pool }]
+      : [],
+  )
+}
+
 const decryptSecret = (cipher: SecretCipher, value: string): string => {
   if (value.length === 0) return ""
   try {
@@ -153,6 +239,13 @@ const decryptSecret = (cipher: SecretCipher, value: string): string => {
   } catch {
     return ""
   }
+}
+
+const filePool = (source: string): ShareDrawFile["pool"] | null => {
+  if (source === "pool.video") return "video"
+  if (source === "pool.image") return "image"
+  if (source === "pool.backup") return "backup"
+  return null
 }
 
 export const planDispatch = (
@@ -164,6 +257,8 @@ export const planDispatch = (
   proxies: readonly ProxyRow[],
   texts: readonly TextMaterial[],
   backupHosts: ReadonlyMap<string, string>,
+  sharePaths: ReadonlyMap<string, SharePaths>,
+  catalog: readonly ShareDrawFile[],
   steps: readonly ChainStep[],
 ) => {
   const readyProxies = proxies.map((row) => proxyView(cipher, row))
@@ -174,17 +269,28 @@ export const planDispatch = (
   for (const choice of selection.texts) {
     textDraws.set(choice.sequence, drawTexts(texts, choice.mode, choice.tag, accounts.length))
   }
+  const fileDraws = new Map<string, ReturnType<typeof drawShareFiles>>()
+  for (const choice of selection.files) {
+    const pool = filePool(choice.source)
+    if (pool === null) continue
+    fileDraws.set(
+      `${choice.sequence}:${choice.source}`,
+      drawShareFiles(catalog, choice.deviceId, choice.directory, pool, choice.mode, accounts.length),
+    )
+  }
+  void sharePaths
+  const constrainBoxes = selection.boxes !== null || selection.boxIds.length > 0
+  const constrainProxies = selection.proxies !== null || selection.proxyTag !== null || selection.proxyIds.length > 0
   return accounts.map((account, accountIndex) => {
     const chosen = new Set(selection.boxIds)
     const grouped = selection.boxIds.length === 0 ? [] : devices.filter((item) => chosen.has(item.id))
     const savedDevice = devices.find((item) => item.id === account.deviceId) ?? null
-    const device =
-      selection.boxIds.length > 0
-        ? takeBalanced(grouped, deviceCounts)
-        : savedDevice !== null
-          ? savedDevice
-          : takeBalanced(devices, deviceCounts)
-    if (selection.boxIds.length === 0 && savedDevice !== null) {
+    const device = constrainBoxes
+      ? takeBalanced(grouped, deviceCounts)
+      : savedDevice !== null
+        ? savedDevice
+        : takeBalanced(devices, deviceCounts)
+    if (!constrainBoxes && savedDevice !== null) {
       deviceCounts.set(savedDevice.id, (deviceCounts.get(savedDevice.id) ?? 0) + 1)
     }
     const manualPits = [...new Set(selection.pitIndexes)]
@@ -201,17 +307,18 @@ export const planDispatch = (
       pitCounts.set(pitKey, (pitCounts.get(pitKey) ?? 0) + 1)
     }
     const tagged =
-      selection.proxyTag === null
-        ? []
-        : readyProxies.filter((item) => item.tags.includes(selection.proxyTag ?? ""))
+      selection.proxyIds.length > 0
+        ? readyProxies.filter((item) => selection.proxyIds.includes(item.id))
+        : selection.proxyTag === null
+          ? []
+          : readyProxies.filter((item) => item.tags.includes(selection.proxyTag ?? ""))
     const savedProxy = readyProxies.find((item) => item.id === account.proxyId) ?? null
-    const proxy =
-      selection.proxyTag !== null
-        ? takeBalanced(tagged, proxyCounts)
-        : savedProxy !== null
-          ? savedProxy
-          : takeBalanced(readyProxies, proxyCounts)
-    if (selection.proxyTag === null && savedProxy !== null) {
+    const proxy = constrainProxies
+      ? takeBalanced(tagged, proxyCounts)
+      : savedProxy !== null
+        ? savedProxy
+        : takeBalanced(readyProxies, proxyCounts)
+    if (!constrainProxies && savedProxy !== null) {
       proxyCounts.set(savedProxy.id, (proxyCounts.get(savedProxy.id) ?? 0) + 1)
     }
     const instance =
@@ -221,6 +328,9 @@ export const planDispatch = (
       const choice = selection.texts.some((item) => item.sequence === sequence)
       const drawn = textDraws.get(sequence)?.[accountIndex]
       const text = choice && drawn !== undefined && drawn.content.length > 0 ? drawn : null
+      const video = fileDraws.get(`${sequence}:pool.video`)?.[accountIndex]
+      const image = fileDraws.get(`${sequence}:pool.image`)?.[accountIndex]
+      const backupFile = fileDraws.get(`${sequence}:pool.backup`)?.[accountIndex]
       const result = fillStep(step, {
         account: {
           backupDevice:
@@ -236,7 +346,12 @@ export const planDispatch = (
         manualText: choice,
         proxy,
         text,
-        video: "",
+        backup: backupFile?.path ?? "",
+        backupFileHost: backupFile?.host ?? "",
+        image: image?.path ?? "",
+        imageHost: image?.host ?? "",
+        video: video?.path ?? "",
+        videoHost: video?.host ?? "",
       })
       return { ...step, sequence, ...result }
     })
@@ -349,21 +464,92 @@ export const createDispatchRepository = (sql: Sql, cipher: SecretCipher) => {
       devices,
       instances,
       proxies,
+      catalog: await loadCatalog(sql, selection.files.map((item) => item.deviceId)),
+      sharePaths: await loadSharePaths(sql, devices.map((item) => item.id)),
       steps: chainSteps(chain),
       texts,
     }
   }
 
+  const accountsForPool = async (groupId: string, poolId: string): Promise<readonly string[] | null> => {
+    const rows = await sql<{ filter_condition: unknown }[]>`
+      select filter_condition from operation_account_pool
+      where group_id = ${groupId}::uuid and id = ${poolId}::uuid and deleted_at is null`
+    const row = rows[0]
+    if (row === undefined) return null
+    const query = readDeskQuery(row.filter_condition)
+    if (query !== null) {
+      const matched = await listDeskAccounts(sql, cipher, groupId, query)
+      return matched.map((item) => item.id)
+    }
+    const members = await sql<{ id: string }[]>`
+      select account_id::text as id from operation_account_pool_member
+      where pool_id = ${poolId}::uuid
+      order by position`
+    return members.map((item) => item.id)
+  }
+
+  const accountsForSet = async (groupId: string, set: NamedSet): Promise<readonly string[]> => {
+    if (set.by === "group") {
+      const rows = await sql<{ id: string }[]>`
+        select id::text as id from operation_account
+        where group_id = ${groupId}::uuid and not deleted and coalesce(tags[1], '') = ${set.name}
+        order by identifier, id`
+      return rows.map((item) => item.id)
+    }
+    const rows = await sql<{ id: string }[]>`
+      select id::text as id from operation_account
+      where group_id = ${groupId}::uuid and not deleted
+        and ${set.name} = any(tags[2:cardinality(tags)])
+      order by identifier, id`
+    return rows.map((item) => item.id)
+  }
+
+  const devicesForSet = async (groupId: string, set: NamedSet): Promise<readonly string[]> => {
+    if (set.by === "remark") {
+      const rows = await sql<{ id: string }[]>`
+        select d.id::text as id from device d
+        join device_remark r on r.device_id = d.id
+        join business_label l on l.id = r.label_id
+        where d.group_id = ${groupId}::uuid and d.enabled and not d.assignment_pending
+          and l.scope = 'device' and l.kind = 'remark' and l.name = ${set.name}
+        order by d.id`
+      return rows.map((item) => item.id)
+    }
+    const rows = await sql<{ id: string }[]>`
+      select d.id::text as id from device d
+      join business_label l on l.id = d.box_group_id
+      where d.group_id = ${groupId}::uuid and d.enabled and not d.assignment_pending
+        and l.scope = 'device' and l.kind = 'group' and l.name = ${set.name}
+      order by d.id`
+    return rows.map((item) => item.id)
+  }
+
+  const proxiesForSet = async (groupId: string, set: NamedSet): Promise<readonly string[]> => {
+    if (set.by === "remark") {
+      const rows = await sql<{ id: string }[]>`
+        select id::text as id from operation_proxy
+        where group_id = ${groupId}::uuid and status = 'ready' and exists (
+          select 1 from unnest(string_to_array(btrim(coalesce(note, '')), ${"\u001e"})) as part(name)
+          where btrim(name) = ${set.name}
+        )
+        order by id`
+      return rows.map((item) => item.id)
+    }
+    const rows = await sql<{ id: string }[]>`
+      select id::text as id from operation_proxy
+      where group_id = ${groupId}::uuid and status = 'ready' and coalesce(tags[1], '') = ${set.name}
+      order by id`
+    return rows.map((item) => item.id)
+  }
+
   return {
     options: async (groupId: string, administratorId: string | null) => {
-      const [accounts, notes, devices, proxyTags, textTags, chains] = await Promise.all([
-        sql<{ id: string; identifier: string; note: string }[]>`
-          select id::text as id, identifier, note from operation_account
-          where group_id = ${groupId}::uuid and not deleted
-          order by identifier, id`,
-        sql<{ note: string }[]>`
-          select distinct note from operation_account
-          where group_id = ${groupId}::uuid and not deleted and note <> '' order by note`,
+      const [pools, devices, proxyTags, textTags, chains, accountGroups, accountTags, boxGroups, boxRemarks, proxyGroups, proxyRemarks] = await Promise.all([
+        sql<{ id: string; key: string }[]>`
+          select id::text as id, key from operation_account_pool
+          where group_id = ${groupId}::uuid and deleted_at is null
+          order by display_id desc`,
         sql<{ host: string; id: string; name: string }[]>`
           select d.id::text as id, d.name, d.host from device d
           where d.group_id = ${groupId}::uuid and d.enabled and not d.assignment_pending
@@ -383,11 +569,42 @@ export const createDispatchRepository = (sql: Sql, cipher: SecretCipher) => {
               select id::text as id, name, parameters, param_scopes as "paramScopes", param_sources as "paramSources"
               from behavior_chain where administrator_id = ${administratorId}::uuid
               order by updated_at desc`,
+        sql<{ name: string }[]>`
+          select distinct coalesce(tags[1], '') as name from operation_account
+          where group_id = ${groupId}::uuid and not deleted and coalesce(tags[1], '') <> ''
+          order by name`,
+        sql<{ name: string }[]>`
+          select distinct tag as name from operation_account, unnest(tags[2:cardinality(tags)]) as tag
+          where group_id = ${groupId}::uuid and not deleted and tag <> ''
+          order by name`,
+        sql<{ name: string }[]>`
+          select distinct l.name from device d
+          join business_label l on l.id = d.box_group_id
+          where d.group_id = ${groupId}::uuid and l.scope = 'device' and l.kind = 'group'
+          order by l.name`,
+        sql<{ name: string }[]>`
+          select distinct l.name from device d
+          join device_remark r on r.device_id = d.id
+          join business_label l on l.id = r.label_id
+          where d.group_id = ${groupId}::uuid and l.scope = 'device' and l.kind = 'remark'
+          order by l.name`,
+        sql<{ name: string }[]>`
+          select distinct coalesce(tags[1], '') as name from operation_proxy
+          where group_id = ${groupId}::uuid and status = 'ready' and coalesce(tags[1], '') <> ''
+          order by name`,
+        sql<{ name: string }[]>`
+          select distinct btrim(part.name) as name from operation_proxy,
+            unnest(string_to_array(btrim(coalesce(note, '')), ${"\u001e"})) as part(name)
+          where group_id = ${groupId}::uuid and status = 'ready' and btrim(part.name) <> ''
+          order by name`,
       ])
       return {
-        accountNotes: notes.map((row) => row.note),
-        accounts: accounts.map((row) => ({ id: row.id, identifier: row.identifier, note: row.note })),
+        accountGroups: accountGroups.map((row) => row.name),
+        accountTags: accountTags.map((row) => row.name),
+        boxGroups: boxGroups.map((row) => row.name),
+        boxRemarks: boxRemarks.map((row) => row.name),
         devices,
+        pools,
         chains: chains.map((row) => ({
           id: row.id,
           name: row.name,
@@ -400,23 +617,52 @@ export const createDispatchRepository = (sql: Sql, cipher: SecretCipher) => {
           }).map((step) => ({ api: step.skill, scopes: step.scopes, sources: step.sources })),
         })),
         pits: [1, 2, 3, 4, 5],
+        proxyGroups: proxyGroups.map((row) => row.name),
+        proxyRemarks: proxyRemarks.map((row) => row.name),
         proxyTags: proxyTags.map((row) => row.tag),
         textTags: textTags.map((row) => row.category),
       }
     },
+    directories: async (groupId: string, deviceId: string, source: FileChoice["source"]) => {
+      const rows = await sql<{ bucket: string; count: number; directory: string }[]>`
+        select e.bucket, e.parent_path as directory, count(*)::int as count
+        from box_share_entry e
+        join device d on d.id = e.device_id
+        where d.group_id = ${groupId}::uuid and d.id = ${deviceId}::uuid
+          and e.kind = 'file' and e.sha256 <> ''
+          and (
+            (${source} = 'pool.backup' and e.bucket = 'backup')
+            or (${source} = 'pool.video' and e.category = 'video' and e.bucket <> 'backup')
+            or (${source} = 'pool.image' and e.category = 'image' and e.bucket <> 'backup')
+          )
+        group by e.bucket, e.parent_path
+        order by e.bucket, e.parent_path`
+      return rows
+    },
     create: async (groupId: string, actorId: string, administratorId: string, chainId: string, selection: DispatchSelection) => {
-      const loaded = await workspace(groupId, administratorId, chainId, selection)
+      const accountIds =
+        selection.accounts === null
+          ? await accountsForPool(groupId, selection.poolId)
+          : await accountsForSet(groupId, selection.accounts)
+      if (accountIds === null) return { kind: "missing_pool" as const }
+      if (accountIds.length === 0) return { kind: "no_accounts" as const }
+      const boxIds = selection.boxes === null ? selection.boxIds : await devicesForSet(groupId, selection.boxes)
+      const proxyIds = selection.proxies === null ? selection.proxyIds : await proxiesForSet(groupId, selection.proxies)
+      const selected = { ...selection, accountIds, accountNote: "", boxIds, proxyIds }
+      const loaded = await workspace(groupId, administratorId, chainId, selected)
       if (loaded === null) return { kind: "missing_chain" as const }
       if (loaded.accounts.length === 0) return { kind: "no_accounts" as const }
       const planned = planDispatch(
         cipher,
-        selection,
+        selected,
         loaded.accounts,
         loaded.devices,
         loaded.instances,
         loaded.proxies,
         loaded.texts,
         loaded.backups,
+        loaded.sharePaths,
+        loaded.catalog,
         loaded.steps,
       )
       const status = planned.some((item) => item.status === "incomplete") ? "incomplete" : "ready"
@@ -426,7 +672,7 @@ export const createDispatchRepository = (sql: Sql, cipher: SecretCipher) => {
           insert into operation_dispatch (id, group_id, requester_id, chain_id, name, selection, status)
           values (
             ${dispatchId}::uuid, ${groupId}::uuid, ${actorId}::uuid, ${chainId}::uuid,
-            ${loaded.chain.name}, ${tx.json(selection)}, ${status}
+            ${loaded.chain.name}, ${tx.json(selected)}, ${status}
           )`
         for (const item of planned) {
           const itemId = randomUUID()
@@ -459,6 +705,7 @@ export const createDispatchRepository = (sql: Sql, cipher: SecretCipher) => {
       const rows = await sql<
         {
           account: string
+          accountId: string
           chainName: string
           createdAt: Date
           deviceHost: string
@@ -477,7 +724,7 @@ export const createDispatchRepository = (sql: Sql, cipher: SecretCipher) => {
       >`
         select d.id::text as "dispatchId", d.name, d.status, d.created_at as "createdAt", c.name as "chainName",
           i.id::text as "itemId", i.status as "itemStatus", i.missing, i.instance_index as "instanceIndex",
-          a.identifier, a.note, coalesce(dev.name, '') as "deviceName", coalesce(dev.host, '') as "deviceHost",
+          a.id::text as "accountId", a.identifier, a.note, coalesce(dev.name, '') as "deviceName", coalesce(dev.host, '') as "deviceHost",
           coalesce(p.name, '') as "proxyName"
         from operation_dispatch d
         join behavior_chain c on c.id = d.chain_id
@@ -487,6 +734,26 @@ export const createDispatchRepository = (sql: Sql, cipher: SecretCipher) => {
         left join operation_proxy p on p.id = i.proxy_id
         where d.group_id = ${groupId}::uuid
         order by d.created_at desc, a.identifier`
+      const itemIds = rows.map((row) => row.itemId)
+      const stepRows =
+        itemIds.length === 0
+          ? []
+          : await sql<{ itemId: string; parameters: Record<string, string>; sources: Record<string, string> }[]>`
+              select item_id::text as "itemId", parameters, sources
+              from operation_dispatch_step
+              where item_id = any(${itemIds}::uuid[])`
+      const filesOf = new Map<string, { backupHost: string; backupPath: string; videoHost: string; videoPath: string }>()
+      for (const step of stepRows) {
+        const current = filesOf.get(step.itemId) ?? { backupHost: "", backupPath: "", videoHost: "", videoPath: "" }
+        for (const [key, source] of Object.entries(step.sources ?? {})) {
+          const value = step.parameters?.[key] ?? ""
+          if (source === "pool.video") current.videoPath = value
+          if (source === "pool.video_host") current.videoHost = value
+          if (source === "pool.backup") current.backupPath = value
+          if (source === "pool.backup_host") current.backupHost = value
+        }
+        filesOf.set(step.itemId, current)
+      }
       const grouped = new Map<string, (typeof rows)[number][]>()
       for (const row of rows) {
         const list = grouped.get(row.dispatchId) ?? []
@@ -501,12 +768,14 @@ export const createDispatchRepository = (sql: Sql, cipher: SecretCipher) => {
           accounts: items.map((item) => ({
             deviceHost: item.deviceHost,
             deviceName: item.deviceName,
+            accountId: item.accountId,
             id: item.itemId,
             identifier: item.identifier,
             instanceIndex: item.instanceIndex,
             missing: item.missing,
             note: item.note,
             proxyName: item.proxyName,
+            ...(filesOf.get(item.itemId) ?? { backupHost: "", backupPath: "", videoHost: "", videoPath: "" }),
             status: item.itemStatus,
           })),
           chainName: first.chainName,
@@ -550,14 +819,18 @@ export const createDispatchRepository = (sql: Sql, cipher: SecretCipher) => {
             proxyId: string | null
             sequence: number
             skill: string
+            sources: Record<string, string>
+            backupDeviceId: string | null
           }[]
         >`
           select i.id::text as "itemId", i.account_id::text as "accountId", i.device_id::text as "deviceId",
             i.instance_index as "instanceIndex", i.instance_id::text as "instanceId", i.proxy_id::text as "proxyId",
-            d.name, s.sequence, s.skill, s.parameters, s.guards, s.after_ms as "afterMs"
+            d.name, s.sequence, s.skill, s.parameters, s.sources, s.guards, s.after_ms as "afterMs",
+            a.backup_device_id::text as "backupDeviceId"
           from operation_dispatch_item i
           join operation_dispatch d on d.id = i.dispatch_id
           join operation_dispatch_step s on s.item_id = i.id
+          join operation_account a on a.id = i.account_id
           where i.dispatch_id = any(${[...ids]}::uuid[]) and i.status = 'ready'
           order by i.id, s.sequence`
         const byItem = new Map<string, typeof items>()
@@ -566,13 +839,34 @@ export const createDispatchRepository = (sql: Sql, cipher: SecretCipher) => {
           list.push(row)
           byItem.set(row.itemId, list)
         }
+        const hostIds = [
+          ...new Set(
+            items.flatMap((item) =>
+              [item.deviceId, item.backupDeviceId].filter((id): id is string => id !== null && id.length > 0),
+            ),
+          ),
+        ]
+        const hostRows =
+          hostIds.length === 0
+            ? []
+            : await tx<{ host: string; id: string }[]>`
+                select id::text as id, host from device where id = any(${hostIds}::uuid[])`
+        const hostOf = new Map(hostRows.map((item) => [item.id, item.host]))
         const devices = new Set<string>()
         for (const [itemId, steps] of byItem) {
           const first = steps[0]
           if (first === undefined || first.deviceId === null) continue
+          const current = {
+            backupHost: first.backupDeviceId === null ? "" : (hostOf.get(first.backupDeviceId) ?? ""),
+            deviceHost: hostOf.get(first.deviceId) ?? "",
+          }
+          const refreshed = steps.map((step) => ({
+            ...step,
+            parameters: refreshDeviceHosts(step.parameters, step.sources, current).parameters,
+          }))
           const taskId = randomUUID()
           const key = `dispatch:${itemId}`
-          const parameters = steps.map((step) => ({ input: step.parameters, skill: step.skill }))
+          const parameters = refreshed.map((step) => ({ input: step.parameters, skill: step.skill }))
           const guards = steps.map((step) => step.guards)
           const delays = steps.map((step) => step.afterMs)
           const digest = hashValue({
@@ -599,7 +893,7 @@ export const createDispatchRepository = (sql: Sql, cipher: SecretCipher) => {
           )[0]?.id
           if (resolved === undefined) continue
           if (existing !== undefined) {
-            for (const [sequence, step] of steps.entries()) {
+            for (const [sequence, step] of refreshed.entries()) {
               await tx`
                 insert into execution_task_step (
                   id, task_id, group_id, sequence, command_idempotency_key, fingerprint, kind, target,

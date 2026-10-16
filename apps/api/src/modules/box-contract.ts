@@ -104,9 +104,13 @@ export const LabelsSchema = z
   .object({
     deviceIds: z.array(z.string().uuid()).min(1).max(500),
     remarkId: z.string().uuid().nullable().optional(),
+    remarkIds: z.array(z.string().uuid()).max(40).optional(),
+    remarkMode: z.enum(["add", "replace"]).optional(),
     boxGroupId: z.string().uuid().nullable().optional(),
+    sequenceNo: z.number().int().min(1).max(999).nullable().optional(),
   })
   .refine((value) => new Set(value.deviceIds).size === value.deviceIds.length)
+  .refine((value) => value.remarkIds === undefined || new Set(value.remarkIds).size === value.remarkIds.length)
 export const WatchSchema = z.object({ indexNums: z.array(Index).max(5) })
 
 export const fingerprint = (value: unknown): string => {

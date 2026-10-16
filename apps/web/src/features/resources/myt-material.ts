@@ -9,7 +9,8 @@ export type MytMaterial = {
 }
 
 export type MaterialQuery = {
-  tag: string
+  tags: readonly string[]
+  untagged: boolean
 }
 
 export type MaterialTagStatistic = {
@@ -17,7 +18,7 @@ export type MaterialTagStatistic = {
   tag: string
 }
 
-export const emptyMaterialQuery = (): MaterialQuery => ({ tag: "" })
+export const emptyMaterialQuery = (): MaterialQuery => ({ tags: [], untagged: false })
 
 const pad2 = (value: number): string => value.toString().padStart(2, "0")
 
@@ -35,7 +36,11 @@ export const filterMaterials = (
   materials: readonly MytMaterial[],
   query: MaterialQuery,
 ): MytMaterial[] =>
-  materials.filter((item) => (query.tag.length === 0 ? true : item.tag === query.tag))
+  materials.filter((item) => {
+    if (query.untagged) return item.tag.trim().length === 0
+    if (query.tags.length > 0) return query.tags.includes(item.tag.trim())
+    return true
+  })
 
 export const materialStatistics = (materials: readonly MytMaterial[]): MaterialTagStatistic[] => {
   const grouped = new Map<string, number>()

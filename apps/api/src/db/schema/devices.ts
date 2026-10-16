@@ -39,7 +39,7 @@ export const devices = pgTable(
     agentVersion: text("agent_version").notNull().default(""),
     apiVersion: text("api_version").notNull().default(""),
     lastSeenAt: timestamp("last_seen_at", { mode: "date", withTimezone: true }),
-    remarkId: uuid("remark_id").references(() => businessLabels.id, { onDelete: "set null" }),
+    sequenceNo: integer("sequence_no"),
     boxGroupId: uuid("box_group_id").references(() => businessLabels.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).defaultNow().notNull(),
     enabled: boolean("enabled").notNull().default(true),
@@ -59,11 +59,17 @@ export const devices = pgTable(
   },
   (table) => [
     index("device_group_created_index").on(table.groupId, table.createdAt),
-    uniqueIndex("device_group_host_unique").on(table.groupId, sql`lower(trim(${table.host}))`),
     unique("device_group_id_unique").on(table.id, table.groupId),
     uniqueIndex("device_external_id_unique")
       .on(table.externalId)
       .where(sql`${table.externalId} is not null`),
+    uniqueIndex("device_assignee_sequence_unique")
+      .on(table.assigneeUserId, table.sequenceNo)
+      .where(sql`${table.assigneeUserId} is not null and ${table.sequenceNo} is not null`),
+    check(
+      "device_sequence_no_check",
+      sql`${table.sequenceNo} is null or (${table.sequenceNo} >= 1 and ${table.sequenceNo} <= 999)`,
+    ),
   ],
 )
 
@@ -140,6 +146,22 @@ export const businessLabels = pgTable(
       sql`${table.scope} in ('device', 'account', 'account-tag', 'proxy', 'resource', 'registration', 'legacy')`,
     ),
     check("business_label_name_check", sql`length(trim(${table.name})) > 0`),
+  ],
+)
+
+export const deviceRemarks = pgTable(
+  "device_remark",
+  {
+    deviceId: uuid("device_id")
+      .notNull()
+      .references(() => devices.id, { onDelete: "cascade" }),
+    labelId: uuid("label_id")
+      .notNull()
+      .references(() => businessLabels.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.deviceId, table.labelId] }),
+    index("device_remark_label_index").on(table.labelId),
   ],
 )
 

@@ -51,8 +51,8 @@ const createApi = (): DevicesApi => ({
       externalId: "test-box",
       boxGroupId: null,
       boxGroupName: null,
-      remarkId: null,
-      remarkName: null,
+      remarks: [],
+      sequenceNo: null,
       firmware: "",
       disk: "",
       diskPct: 0,
@@ -127,6 +127,38 @@ describe("DeviceListPage", () => {
 
     await waitFor(() => {
       expect(api.delete).toHaveBeenCalledWith({ deviceId, groupId })
+    })
+  })
+
+  it("asks before deleting a box remark and only deletes after confirmation", async () => {
+    const user = userEvent.setup()
+    const api = createApi()
+    api.labels = vi.fn().mockResolvedValue({
+      administratorId: "11111111-1111-4111-8111-111111111111",
+      groups: [],
+      remarks: [{ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", administratorId: "11111111-1111-4111-8111-111111111111", name: "机柜备注" }],
+    })
+    vi.spyOn(window, "matchMedia").mockReturnValue({
+      addEventListener: vi.fn(),
+      addListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      matches: false,
+      media: "",
+      onchange: null,
+      removeEventListener: vi.fn(),
+      removeListener: vi.fn(),
+    })
+    renderPage(api)
+
+    await user.click(await screen.findByLabelText(/^close$/i))
+    expect(await screen.findByText("确认删除“机柜备注”？仍被盒子使用的备注或分组不能删除。")).toBeVisible()
+    await user.click(screen.getByRole("button", { name: "取消" }))
+    expect(api.deleteRemark).not.toHaveBeenCalled()
+
+    await user.click(screen.getByLabelText(/^close$/i))
+    await user.click(await screen.findByRole("button", { name: "删除" }))
+    await waitFor(() => {
+      expect(api.deleteRemark).toHaveBeenCalledWith("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
     })
   })
 })

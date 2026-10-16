@@ -75,26 +75,34 @@ export const sourceAccount = (
   updateTime: item.updateTime,
   username: item.username,
 })
+const isDeskPool = (item: StoredPool): boolean =>
+  item.filterCondition !== null &&
+  "kind" in item.filterCondition &&
+  item.filterCondition.kind === "desk"
+
 export const deskPool = (item: StoredPool, devices: readonly PoolDeskDevice[]): MytTaskRes => ({
   accounts: [],
   progress: [],
   id: item.displayId,
   recordId: item.id,
-  backType: item.backType,
+  backType: isDeskPool(item) ? "" : item.backType,
   count: item.count,
   createTime: dateText(item.createdAt),
-  deviceId: devices.find((device) => device.recordId === item.deviceId)?.id ?? null,
-  deviceLabel: item.deviceLabel,
-  deviceSeq: item.deviceSeq,
+  deviceId: isDeskPool(item)
+    ? null
+    : (devices.find((device) => device.recordId === item.deviceId)?.id ?? null),
+  deviceLabel: isDeskPool(item) ? "" : item.deviceLabel,
+  deviceSeq: isDeskPool(item) ? null : item.deviceSeq,
   enable: true,
   expiresAt: item.expiresAt.toISOString(),
   filterCondition: item.filterCondition === null ? "" : JSON.stringify(item.filterCondition),
   key: item.key,
   remark: item.remark,
-  tag: item.filterCondition?.tag ?? [],
+  tag:
+    item.filterCondition !== null && "tag" in item.filterCondition ? item.filterCondition.tag : [],
   times: item.times,
   updateTime: dateText(item.updatedAt),
-  userId: item.createdByUserId,
+  userId: item.createdByName,
 })
 export const deskPoolDetails = (
   item: StoredPoolDetails,

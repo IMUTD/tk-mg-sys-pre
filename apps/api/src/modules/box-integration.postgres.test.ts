@@ -466,6 +466,27 @@ describe("initializer and box software integration", () => {
     },
   )
 
+  pgTest("rejects deleting a proxy remark that is still written on a proxy", async () => {
+    const env = await setup()
+    const name = "proxy-remark-used"
+    const created = await env.post("/api/labels/catalog?page=/operations/proxies", {
+      kind: "remark",
+      name,
+    })
+    expect(created.status).toBe(201)
+    const label = (await created.json()) as { id: string }
+    await env.sql`insert into operation_proxy(group_id,name,endpoint,encrypted_credentials,tags,note)
+      values (${env.first.groupId}, 'Proxy', '8.8.8.8:1080', '', '{}', ${`keep\u001e${name}`})`
+    const remove = () =>
+      env.app.request(`/api/labels/catalog/${label.id}?page=/operations/proxies&scope=proxy`, {
+        method: "DELETE",
+        headers: { cookie: env.cookie },
+      })
+    expect((await remove()).status).toBe(409)
+    await env.sql`update operation_proxy set note = 'keep' where note like ${`%${name}`}`
+    expect((await remove()).status).toBe(204)
+  })
+
   pgTest(
     "requires requesting and source page access and prevents catalog deletion by members",
     async () => {
@@ -978,12 +999,18 @@ describe("initializer and box software integration", () => {
         ],
       ).toBe(true)
       expect(
-        (await sql`select box_group_id, remark_id from device where id = ${device.id}`)[0],
-      ).toMatchObject({ box_group_id: groupId, remark_id: remarkId })
+        (await sql`select box_group_id from device where id = ${device.id}`)[0],
+      ).toMatchObject({ box_group_id: groupId })
+      expect(await sql`select label_id from device_remark where device_id = ${device.id}`).toEqual([
+        { label_id: remarkId },
+      ])
       await applyInitializerSnapshot(sql, "fixture", moved)
       expect(
-        (await sql`select box_group_id, remark_id from device where id = ${device.id}`)[0],
-      ).toMatchObject({ box_group_id: groupId, remark_id: remarkId })
+        (await sql`select box_group_id from device where id = ${device.id}`)[0],
+      ).toMatchObject({ box_group_id: groupId })
+      expect(await sql`select label_id from device_remark where device_id = ${device.id}`).toEqual([
+        { label_id: remarkId },
+      ])
       expect(await (await app.request("/api/devices", { headers: { cookie } })).json()).toEqual([])
       expect((await enqueue("old-owner")).status).toBe(404)
       expect((await sql`select status from execution_task`)[0]?.["status"]).toBe(
@@ -997,8 +1024,9 @@ describe("initializer and box software integration", () => {
         (await sql`select group_id from device where id = ${device.id}`)[0]?.["group_id"],
       ).toBe(second.groupId)
       expect(
-        (await sql`select box_group_id, remark_id from device where id = ${device.id}`)[0],
-      ).toMatchObject({ box_group_id: null, remark_id: null })
+        (await sql`select box_group_id from device where id = ${device.id}`)[0],
+      ).toMatchObject({ box_group_id: null })
+      expect(await sql`select label_id from device_remark where device_id = ${device.id}`).toEqual([])
       expect(
         await sql`select id from business_label where id = any(${[groupId, remarkId]}::uuid[])`,
       ).toHaveLength(2)

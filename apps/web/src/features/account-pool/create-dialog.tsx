@@ -13,11 +13,12 @@ import {
   Table,
   Tag,
 } from "antd"
-import type { Key } from "react"
 import { type ReactNode, useEffect, useMemo, useState } from "react"
+import { FilteredSelectCheckbox } from "../../components/tables/filtered-selection"
 import { PageKey } from "../../lib/pages"
 import { type MytAccount, STATUS_OPTIONS } from "../accounts/myt-account"
 import { BusinessLabelFilter } from "../labels/filter-row"
+import { formatRemarks } from "../labels/remark-list"
 import { type AccountPoolsApi, type PoolWrite, poolRequestError } from "./api"
 import {
   CREATE_BACK_TYPE_OPTIONS,
@@ -31,7 +32,7 @@ import {
   statusLabel,
   uniqueTagBuckets,
 } from "./myt-task-res"
-import { type PoolDeskDevice, sourceFilter, usePoolSources } from "./wiring"
+import { type PoolDeskDevice, sourceAccount, sourceFilter, usePoolSources } from "./wiring"
 
 type CreatePoolDialogProps = {
   readonly devices: readonly PoolDeskDevice[]
@@ -56,6 +57,8 @@ export const CreatePoolDialog = ({
   const [times, setTimes] = useState(1)
   const [selectedIds, setSelectedIds] = useState<readonly string[]>([])
   const [saving, setSaving] = useState(false)
+  const [selectingAll, setSelectingAll] = useState(false)
+  const [selectionCoversFilter, setSelectionCoversFilter] = useState(false)
   const [pageSize, setPageSize] = useState(10)
   const source = usePoolSources(groupId, api, query, devices, pageSize)
   const tagOptions = source.groups
@@ -64,7 +67,34 @@ export const CreatePoolDialog = ({
   // biome-ignore lint/correctness/useExhaustiveDependencies: A changed filter invalidates the selected account UUIDs.
   useEffect(() => {
     setSelectedIds([])
+    setSelectionCoversFilter(false)
   }, [queryKey])
+
+  const selectAllSources = async (): Promise<void> => {
+    setSelectingAll(true)
+    try {
+      const filter = sourceFilter(query, devices)
+      const ids: string[] = []
+      let pageNo = 1
+      let totalCount = 0
+      do {
+        const result = await api.sources(groupId, filter, pageNo, 500)
+        result.items.forEach((item, index) => {
+          const account = sourceAccount(item, index, devices)
+          if (canJoinPool(account)) ids.push(account.recordId ?? String(account.id))
+        })
+        totalCount = result.total
+        pageNo += 1
+        if (result.items.length === 0) break
+      } while ((pageNo - 1) * 500 < totalCount && pageNo <= 20)
+      setSelectedIds([...new Set(ids)].slice(0, CREATE_LIMIT))
+      setSelectionCoversFilter(true)
+    } catch (error) {
+      message.error(await poolRequestError(error))
+    } finally {
+      setSelectingAll(false)
+    }
+  }
 
   const changeBackType = (value: string): void => {
     setQuery({
@@ -153,7 +183,13 @@ export const CreatePoolDialog = ({
       title: "转移状态",
       width: 140,
     },
-    { dataIndex: "remark", ellipsis: true, key: "remark", title: "备注" },
+    {
+      dataIndex: "remark",
+      ellipsis: true,
+      key: "remark",
+      render: (remark: string) => formatRemarks(remark),
+      title: "备注",
+    },
     {
       key: "updateTime",
       render: (_value: unknown, item: MytAccount) => shortDate(item.updateTime),
@@ -354,13 +390,28 @@ export const CreatePoolDialog = ({
             }}
             rowKey={(item) => item.recordId ?? String(item.id)}
             rowSelection={{
+              columnTitle: (
+                <FilteredSelectCheckbox
+                  busy={selectingAll}
+                  filteredCount={selectionCoversFilter ? selectedIds.length : source.total}
+                  onClear={() => {
+                    setSelectedIds([])
+                    setSelectionCoversFilter(false)
+                  }}
+                  onSelectAll={() => void selectAllSources()}
+                  selectedCount={selectedIds.length}
+                />
+              ),
               getCheckboxProps: (item: MytAccount) => ({
                 "aria-label": `选择账号 ${item.uid}`,
                 disabled: !canJoinPool(item),
               }),
               preserveSelectedRowKeys: true,
-              onChange: (keys: readonly Key[]) =>
-                setSelectedIds(keys.map(String).slice(0, CREATE_LIMIT)),
+              onChange: (keys, _rows, info) => {
+                if (info.type === "all" || info.type === "none") return
+                setSelectionCoversFilter(false)
+                setSelectedIds(keys.map(String).slice(0, CREATE_LIMIT))
+              },
               selectedRowKeys: [...selectedIds],
             }}
             scroll={{ x: "max-content", y: 500 }}

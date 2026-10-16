@@ -17,10 +17,16 @@ export const createSeedVideos = (): VideoWork[] => []
 export type VideoQuery = {
   caption: string
   group: string
+  ungrouped: boolean
   workId: string
 }
 
-export const emptyVideoQuery = (): VideoQuery => ({ caption: "", group: "", workId: "" })
+export const emptyVideoQuery = (): VideoQuery => ({
+  caption: "",
+  group: "",
+  ungrouped: false,
+  workId: "",
+})
 
 export const filterVideos = (rows: readonly VideoWork[], query: VideoQuery): VideoWork[] =>
   rows.filter((item) => {
@@ -32,6 +38,7 @@ export const filterVideos = (rows: readonly VideoWork[], query: VideoQuery): Vid
       return false
     }
     if (query.caption.length > 0 && !item.caption.includes(query.caption)) return false
-    if (query.group.length > 0 && item.group !== query.group) return false
+    if (query.ungrouped ? item.group.trim().length > 0 : query.group.length > 0 && item.group !== query.group)
+      return false
     return true
   })

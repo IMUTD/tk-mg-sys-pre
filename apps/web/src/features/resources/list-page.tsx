@@ -1,7 +1,7 @@
 import { DeleteOutlined, EditOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons"
 import { App, Button, Card, Space, Table } from "antd"
-import type { Key } from "react"
 import { type ReactNode, useEffect, useMemo, useState } from "react"
+import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
 
 import { createTextPoolApi, type TextPoolApi } from "./api"
 import { BatchDeleteDialog } from "./batch-delete-dialog"
@@ -18,7 +18,7 @@ import {
 } from "./myt-material"
 import "./resources.css"
 import { PageKey } from "../../lib/pages"
-import { BusinessLabelFilter } from "../labels/filter-row"
+import { BusinessLabelFilter, UNASSIGNED_VALUE, usageLabel } from "../labels/filter-row"
 import { MaterialStatisticsDialog } from "./statistics-dialog"
 
 type ResourcesListPageProps = {
@@ -50,7 +50,12 @@ export const ResourcesListPage = ({
   const filtered = useMemo(() => filterMaterials(materials, query), [materials, query])
   const selected = materials.filter((item) => selectedIds.includes(item.id))
   const tags = uniqueTags(materials)
-  const tagOptions = tags.map((tag) => ({ label: tag, value: tag }))
+  const tagCounts = new Map<string, number>()
+  for (const item of materials) {
+    const tag = item.tag.trim()
+    if (tag.length > 0) tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1)
+  }
+  const tagOptions = tags.map((tag) => ({ label: usageLabel(tag, tagCounts.get(tag) ?? 0), value: tag }))
   const statistics = materialStatistics(materials)
   const reload = async (): Promise<void> => {
     if (api === undefined && groupId.length === 0) {
@@ -76,14 +81,12 @@ export const ResourcesListPage = ({
   const applyQuery = (next = draft): void => {
     setDraft(next)
     setQuery(next)
-    setSelectedIds([])
   }
 
   const resetQuery = (): void => {
     const empty = emptyMaterialQuery()
     setDraft(empty)
     setQuery(empty)
-    setSelectedIds([])
   }
 
   const remove = async (ids: readonly string[], success: string): Promise<void> => {
@@ -124,6 +127,15 @@ export const ResourcesListPage = ({
     if (record === undefined) return
     setEditRecord(record)
   }
+  const materialSelection = useFilteredRowSelection({
+    getCheckboxProps: (item: MytMaterial) => ({
+      "aria-label": `选择 ${item.content}`,
+    }),
+    onChange: (keys) => setSelectedIds(keys.map((key) => String(key))),
+    rowKey: "id",
+    rows: filtered,
+    selectedKeys: selectedIds,
+  })
 
   return (
     <section className="module-page resources-page">
@@ -131,9 +143,20 @@ export const ResourcesListPage = ({
         <BusinessLabelFilter
           page={PageKey.StudioTextPool}
           title="标签"
+          blankLabel={usageLabel(
+            "未标签",
+            materials.filter((item) => item.tag.trim().length === 0).length,
+          )}
+          multiple
           options={tagOptions}
-          value={draft.tag}
-          onChange={(tag) => applyQuery({ tag })}
+          value={draft.untagged ? [UNASSIGNED_VALUE] : draft.tags}
+          onChange={(tags) =>
+            applyQuery(
+              tags.includes(UNASSIGNED_VALUE)
+                ? { ...draft, tags: [], untagged: true }
+                : { ...draft, tags, untagged: false },
+            )
+          }
           canWrite={canWrite}
           canDelete={allowDelete}
         />
@@ -237,13 +260,7 @@ export const ResourcesListPage = ({
           showTotal: (total) => `共 ${total} 条`,
         }}
         rowKey="id"
-        rowSelection={{
-          getCheckboxProps: (item: MytMaterial) => ({
-            "aria-label": `选择 ${item.content}`,
-          }),
-          onChange: (keys: readonly Key[]) => setSelectedIds(keys.map((key) => String(key))),
-          selectedRowKeys: [...selectedIds],
-        }}
+        rowSelection={materialSelection}
         scroll={{ x: "max-content" }}
         size="small"
       />

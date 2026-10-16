@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { accountWrite, applyCredential } from "./desk-account"
+import type { OperationAccount } from "./api"
+import { accountWrite, applyCredential, toDeskAccount } from "./desk-account"
 import { createBackupAccount } from "./myt-account"
 
 describe("account API mapping", () => {
@@ -67,5 +68,48 @@ describe("account API mapping", () => {
       emailPassword: "email-secret",
     })
     expect(account.password).toBe("")
+  })
+
+  it("keeps an unregistered account unregistered when the desk edits it", () => {
+    const source: OperationAccount = {
+      app: "tiktok",
+      avatar: "",
+      backupKey: "",
+      backupSlot: "",
+      backupType: null,
+      createdAt: new Date("2026-10-14T00:00:00Z"),
+      credentialState: "none",
+      deleted: false,
+      deletedAt: null,
+      deviceId: null,
+      deviceInstanceId: null,
+      deviceName: null,
+      extra: {},
+      favorite: 0,
+      follower: 0,
+      following: 0,
+      groupId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      hasPassword: false,
+      hasTotp: false,
+      hasTransferKey: false,
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      identifier: "pool@example.test",
+      instanceIndex: null,
+      instanceLabel: null,
+      name: "pool@example.test",
+      note: "",
+      online: false,
+      platformUid: "",
+      proxyId: null,
+      proxyName: null,
+      region: "",
+      status: "unregistered",
+      tags: ["测试"],
+      transferred: false,
+      updatedAt: new Date("2026-10-14T00:00:00Z"),
+    }
+    const desk = toDeskAccount(source, 0)
+    expect(desk.status).toBe("4")
+    expect(accountWrite(desk).status).toBe("unregistered")
   })
 })

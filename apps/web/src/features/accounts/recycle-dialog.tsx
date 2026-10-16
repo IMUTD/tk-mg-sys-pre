@@ -1,8 +1,9 @@
 import { Alert, Button, Input, Modal, Select, Space, Table } from "antd"
-import type { Key } from "react"
 import { type ReactNode, useMemo, useState } from "react"
+import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
+import { useClientPagination } from "../../components/tables/operation-controls"
 import { PageKey } from "../../lib/pages"
-import { BusinessLabelFilter } from "../labels/filter-row"
+import { BusinessLabelFilter, UNASSIGNED_VALUE } from "../labels/filter-row"
 import {
   type AccountQuery,
   APP_OPTIONS,
@@ -31,6 +32,16 @@ export const RecycleDialog = ({
   const [query, setQuery] = useState<AccountQuery>(emptyAccountQuery())
   const [selectedIds, setSelectedIds] = useState<readonly number[]>([])
   const rows = useMemo(() => filterAccounts(accounts, query, true), [accounts, query])
+  const recyclePaging = useClientPagination(JSON.stringify(query), 20)
+  const recycleSelection = useFilteredRowSelection({
+    getCheckboxProps: (account: MytAccount) => ({
+      "aria-label": `选择 ${account.username || account.uid}`,
+    }),
+    onChange: (keys) => setSelectedIds(keys.map((key) => Number(key))),
+    rowKey: "id",
+    rows,
+    selectedKeys: selectedIds,
+  })
 
   return (
     <Modal footer={null} onCancel={onCancel} open title="账号回收站" width="85%">
@@ -40,12 +51,15 @@ export const RecycleDialog = ({
         options={[...new Set(accounts.filter((item) => item.deleted).map((item) => item.tag))]
           .filter(Boolean)
           .map((tag) => ({ value: tag, label: tag }))}
-        value={draft.tag}
+        blankLabel="未分组"
+        value={draft.ungrouped ? UNASSIGNED_VALUE : draft.tag}
         onChange={(tag) => {
-          const next = { ...draft, tag }
+          const next =
+            tag === UNASSIGNED_VALUE
+              ? { ...draft, tag: "", ungrouped: true }
+              : { ...draft, tag, ungrouped: false }
           setDraft(next)
           setQuery(next)
-          setSelectedIds([])
         }}
       />
       <Space className="recycle-filter" wrap>
@@ -96,7 +110,6 @@ export const RecycleDialog = ({
         <Button
           onClick={() => {
             setQuery(draft)
-            setSelectedIds([])
           }}
           type="primary"
         >
@@ -107,7 +120,6 @@ export const RecycleDialog = ({
             const empty = emptyAccountQuery()
             setDraft(empty)
             setQuery(empty)
-            setSelectedIds([])
           }}
         >
           重置
@@ -170,15 +182,9 @@ export const RecycleDialog = ({
         ]}
         dataSource={rows}
         locale={{ emptyText: "暂无数据" }}
-        pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
+        pagination={{ ...recyclePaging.pagination, total: rows.length }}
         rowKey="id"
-        rowSelection={{
-          getCheckboxProps: (account: MytAccount) => ({
-            "aria-label": `选择 ${account.username || account.uid}`,
-          }),
-          onChange: (keys: readonly Key[]) => setSelectedIds(keys.map((key) => Number(key))),
-          selectedRowKeys: [...selectedIds],
-        }}
+        rowSelection={recycleSelection}
         scroll={{ x: "max-content" }}
         size="small"
       />

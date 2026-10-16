@@ -1,4 +1,5 @@
 import { Button, Table, type TableColumnsType, Tag } from "antd"
+import { FilteredSelectCheckbox } from "../../components/tables/filtered-selection"
 import type { ReactNode } from "react"
 
 import type { ManagedPage, ManagedRecord } from "./api"
@@ -11,7 +12,9 @@ type Props = {
   readonly nameTitle: string
   readonly onEdit: (record: ManagedRecord) => void
   readonly onPageChange: (page: number) => void
+  readonly onSelectAll: () => void
   readonly onSelectedChange: (ids: ReadonlySet<string>) => void
+  readonly selectingAll?: boolean
   readonly page: ManagedPage
   readonly selectedIds: ReadonlySet<string>
   readonly statusOptions: readonly StatusOption[]
@@ -38,7 +41,9 @@ export const ManagementTable = ({
   nameTitle,
   onEdit,
   onPageChange,
+  onSelectAll,
   onSelectedChange,
+  selectingAll = false,
   page,
   selectedIds,
   statusOptions,
@@ -116,10 +121,23 @@ export const ManagementTable = ({
       {...(canWrite
         ? {
             rowSelection: {
+              columnTitle: (
+                <FilteredSelectCheckbox
+                  busy={selectingAll}
+                  filteredCount={page.total}
+                  onClear={() => onSelectedChange(new Set())}
+                  onSelectAll={onSelectAll}
+                  selectedCount={selectedIds.size}
+                />
+              ),
               getCheckboxProps: (item: ManagedRecord) => ({
                 "aria-label": `选择 ${item.name}`,
               }),
-              onChange: (keys) => onSelectedChange(new Set(keys.map((key) => String(key)))),
+              onChange: (keys, _rows, info) => {
+                if (info.type === "all" || info.type === "none") return
+                onSelectedChange(new Set(keys.map((key) => String(key))))
+              },
+              preserveSelectedRowKeys: true,
               selectedRowKeys: [...selectedIds],
             },
           }

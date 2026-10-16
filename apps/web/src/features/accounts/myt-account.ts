@@ -1,3 +1,6 @@
+import { type FilterMode, combineChecks } from "../../components/tables/operation-controls"
+import { formatRemarks, splitRemarks } from "../labels/remark-list"
+
 export const APP_OPTIONS = [
   { label: "Tiktok", value: "tiktok" },
   { label: "Youtube", value: "youtube" },
@@ -15,11 +18,16 @@ export const BACKUP_APP_OPTIONS = [
 export const STATUS_OPTIONS = [
   { label: "正常", value: "0" },
   { label: "封号", value: "1" },
+  { label: "过期", value: "2" },
+  { label: "不可见", value: "3" },
+  { label: "未注册", value: "4" },
 ] as const
 
 export const BACK_TYPE_OPTIONS = [
   { label: "本地备份", value: "2" },
   { label: "私有云备份", value: "3" },
+  { label: "云端备份", value: "4" },
+  { label: "全量备份", value: "5" },
 ] as const
 
 export const QUICK_FILTER_OPTIONS = [
@@ -93,9 +101,12 @@ export type AccountExtra = {
 }
 
 export type AccountDevice = {
+  boxGroupName?: string
   id: number
   ip: string
   name: string
+  recordId?: string | undefined
+  sequenceNo?: number
   serial: string
 }
 
@@ -104,6 +115,7 @@ export type AccountProxy = {
   id: number
   ip: string
   port: number
+  recordId?: string | undefined
   remark: string
   tags?: readonly string[]
 }
@@ -126,7 +138,10 @@ export type MytAccount = {
   online: boolean
   password: string
   proxyId: number | null
-  recordId?: string
+  recordDeviceId?: string | undefined
+  recordId?: string | undefined
+  recordInstanceId?: string | undefined
+  recordProxyId?: string | undefined
   region: string
   remark: string
   status: AccountStatus
@@ -146,15 +161,21 @@ export type AccountQuery = {
   deviceId: string
   followerGT: string
   followingGT: string
+  identity: string
   proxyId: string
   quick: readonly AccountQuickFilter[]
-  region: string
+  region: readonly string[]
   remark: string
   status: string
   tag: string
-  tagBucket: string
+  tagBucket: readonly string[]
   transferKey: string
   uidQuery: string
+  ungrouped: boolean
+  unremarked: boolean
+  untagged: boolean
+  userRemark: string
+  userRemarks: readonly string[]
   username: string
 }
 
@@ -178,15 +199,21 @@ export const emptyAccountQuery = (): AccountQuery => ({
   deviceId: "",
   followerGT: "",
   followingGT: "",
+  identity: "",
   proxyId: "",
   quick: [],
-  region: "",
+  region: [],
   remark: "",
   status: "",
   tag: "",
-  tagBucket: "",
+  tagBucket: [],
   transferKey: "",
   uidQuery: "",
+  ungrouped: false,
+  unremarked: false,
+  untagged: false,
+  userRemark: "",
+  userRemarks: [],
   username: "",
 })
 
@@ -248,6 +275,10 @@ export const parseUidQuery = (value: string): string[] => [
   ...new Set(value.split(/[,，\s]+/).filter((item) => item.length > 0)),
 ]
 
+export const parseIdentityQuery = (value: string): string[] => [
+  ...new Set(value.split(/[,，;；、|\s]+/).filter((item) => item.length > 0)),
+]
+
 export const getAvatar = (extra: AccountExtra): string =>
   extra.avatar.length === 0 ? DEFAULT_AVATAR : extra.avatar.replace("sign-", "")
 
@@ -284,7 +315,7 @@ export const accountProxy = (
 ): AccountProxy | null => proxies.find((proxy) => proxy.id === proxyId) ?? null
 
 export const formatProxyOptionLabel = (proxy: AccountProxy, usedCount: number): string =>
-  `[ID:${proxy.id}] ${proxy.ip}:${proxy.port} (备注:${proxy.remark}) - (绑定:${usedCount})`
+  `[ID:${proxy.id}] ${proxy.ip}:${proxy.port} (备注:${formatRemarks(proxy.remark)}) - (绑定:${usedCount})`
 
 export const proxyUsedCounts = (accounts: readonly MytAccount[]): Map<number, number> => {
   const counts = new Map<number, number>()
@@ -362,8 +393,10 @@ export const filterAccounts = (
   accounts: readonly MytAccount[],
   query: AccountQuery,
   recycled = false,
+  mode: FilterMode = "and",
 ): MytAccount[] => {
   const uids = parseUidQuery(query.uidQuery)
+  const identity = parseIdentityQuery(query.identity)
   const followerGT = query.followerGT.length === 0 ? null : Number(query.followerGT)
   const followingGT = query.followingGT.length === 0 ? null : Number(query.followingGT)
   const deviceId = query.deviceId.length === 0 ? null : Number(query.deviceId)
@@ -374,43 +407,49 @@ export const filterAccounts = (
     } else if (account.deleted) {
       return false
     }
-    if (query.tag.length > 0 && account.tag !== query.tag) return false
-    if (query.status.length > 0 && account.status !== query.status) return false
-    if (query.app.length > 0 && account.app !== query.app) return false
-    if (query.backType.length > 0 && account.backType !== query.backType) return false
-    if (deviceId !== null && account.deviceId !== deviceId) return false
-    if (proxyId !== null && account.proxyId !== proxyId) return false
-    if (
-      query.username.length > 0 &&
-      !account.username.toLowerCase().includes(query.username.toLowerCase())
-    ) {
-      return false
-    }
-    if (uids.length > 0 && !uids.includes(account.uid)) return false
-    if (
-      query.remark.length > 0 &&
-      !account.remark.toLowerCase().includes(query.remark.toLowerCase())
-    ) {
-      return false
-    }
-    if (
-      query.region.length > 0 &&
-      !account.region.toLowerCase().includes(query.region.toLowerCase())
-    ) {
-      return false
-    }
-    if (followerGT !== null && !Number.isNaN(followerGT) && account.follower < followerGT)
-      return false
-    if (followingGT !== null && !Number.isNaN(followingGT) && account.following < followingGT)
-      return false
-    if (
-      query.transferKey.length > 0 &&
-      !account.transferKey.toLowerCase().includes(query.transferKey.toLowerCase())
-    ) {
-      return false
-    }
-    if (query.tagBucket.length > 0 && !account.tagBucket.includes(query.tagBucket)) return false
-    return matchesQuick(account, query.quick)
+    const remarkParts = splitRemarks(account.remark)
+    return combineChecks(mode, [
+      query.ungrouped || query.tag.length > 0
+        ? query.ungrouped
+          ? account.tag.trim().length === 0
+          : account.tag === query.tag
+        : null,
+      query.status.length > 0 ? account.status === query.status : null,
+      query.app.length > 0 ? account.app === query.app : null,
+      query.backType.length > 0 ? account.backType === query.backType : null,
+      deviceId !== null ? account.deviceId === deviceId : null,
+      proxyId !== null ? account.proxyId === proxyId : null,
+      query.username.length > 0
+        ? account.username.toLowerCase().includes(query.username.toLowerCase())
+        : null,
+      uids.length > 0 ? uids.includes(account.uid) : null,
+      identity.length > 0
+        ? identity.some(
+            (token) =>
+              account.username.toLowerCase() === token.toLowerCase() || account.uid === token,
+          )
+        : null,
+      query.remark.length > 0
+        ? account.remark.toLowerCase().includes(query.remark.toLowerCase())
+        : null,
+      query.unremarked ? remarkParts.length === 0 : null,
+      ...(query.unremarked
+        ? []
+        : query.userRemarks.length > 0
+          ? query.userRemarks.map((name) => remarkParts.includes(name))
+          : query.userRemark.length > 0
+            ? [remarkParts.includes(query.userRemark)]
+            : []),
+      ...query.region.map((region) => account.region.trim().toLowerCase() === region.toLowerCase()),
+      followerGT !== null && !Number.isNaN(followerGT) ? account.follower >= followerGT : null,
+      followingGT !== null && !Number.isNaN(followingGT) ? account.following >= followingGT : null,
+      query.transferKey.length > 0
+        ? account.transferKey.toLowerCase().includes(query.transferKey.toLowerCase())
+        : null,
+      query.untagged ? !account.tagBucket.some((tag) => tag.trim().length > 0) : null,
+      ...(query.untagged ? [] : query.tagBucket.map((tag) => account.tagBucket.includes(tag))),
+      ...query.quick.map((item) => matchesQuick(account, [item])),
+    ])
   })
 }
 
@@ -428,7 +467,7 @@ export const accountStatistics = (accounts: readonly MytAccount[]): AccountTagSt
     }
     current.total += 1
     if (account.status === "1") current.baned += 1
-    else current.available += 1
+    else if (account.status !== "4") current.available += 1
     if (account.transferred) current.transferred += 1
     grouped.set(tag, current)
   }
@@ -574,6 +613,18 @@ export const editSelectedTag = (
   const idSet = new Set(ids)
   return accounts.map((account) =>
     idSet.has(account.id) ? { ...account, tag: newTag, updateTime } : account,
+  )
+}
+
+export const editSelectedRemark = (
+  accounts: readonly MytAccount[],
+  ids: readonly number[],
+  remark: string,
+  updateTime: string,
+): MytAccount[] => {
+  const idSet = new Set(ids)
+  return accounts.map((account) =>
+    idSet.has(account.id) ? { ...account, remark, updateTime } : account,
   )
 }
 

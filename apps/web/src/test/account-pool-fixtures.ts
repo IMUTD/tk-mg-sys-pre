@@ -1,10 +1,12 @@
 import type {
   AccountPoolsApi,
+  DeskPoolQuery,
   PoolSource,
   PoolWrite,
   SourceFilter,
   StoredPoolDetails,
 } from "../features/account-pool/api"
+import { deskPoolKey, normalizeDeskQuery, resolveDeskPoolName } from "../features/account-pool/desk-pool"
 
 export const poolTestGroup = "11111111-1111-4111-8111-111111111111"
 export const poolTestDevice = {
@@ -63,6 +65,7 @@ export const poolTestDetails = (
   displayId,
   groupId: poolTestGroup,
   createdByUserId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  createdByName: "操作员",
   key,
   remark: displayId === 103 ? "测试池" : "发布任务池",
   backType: filter?.backType ?? "2",
@@ -90,7 +93,10 @@ export const createPoolTestApi = () => {
   let pools = [
     poolTestDetails(),
     poolTestDetails(102, "1107养号"),
-    poolTestDetails(103, "gen-1108测试", poolTestSources().slice(0, 2), null),
+    {
+      ...poolTestDetails(103, "gen-1108测试", poolTestSources().slice(0, 2), null),
+      createdByName: "千寻",
+    },
   ]
   const writes: PoolWrite[] = []
   const matches = (account: PoolSource, filter: SourceFilter) =>
@@ -108,12 +114,16 @@ export const createPoolTestApi = () => {
   const api: AccountPoolsApi = {
     list: async (_groupId, query) => {
       const found = pools
-        .filter(
-          (pool) =>
+        .filter((pool) => {
+          const needle = query.key.trim().toLowerCase()
+          return (
             String(pool.displayId).includes(query.id) &&
-            pool.key.includes(query.key) &&
-            pool.remark.includes(query.remark),
-        )
+            (needle.length === 0 ||
+              pool.key.toLowerCase().includes(needle) ||
+              pool.createdByName.toLowerCase().includes(needle)) &&
+            pool.remark.includes(query.remark)
+          )
+        })
         .sort((left, right) => right.displayId - left.displayId)
       return {
         items: found.slice((query.page - 1) * query.pageSize, query.page * query.pageSize),
@@ -152,6 +162,28 @@ export const createPoolTestApi = () => {
           input.times,
         ),
         remark: input.remark,
+      }
+      pools = [...pools, created]
+      return created
+    },
+    createDesk: async (_groupId, query: DeskPoolQuery, name = "") => {
+      const normalized = normalizeDeskQuery(query)
+      const id = Math.max(...pools.map((pool) => pool.displayId), 103) + 1
+      const created = {
+        ...poolTestDetails(
+          id,
+          resolveDeskPoolName(deskPoolKey(normalized, { device: "", proxy: "" }), name),
+          [],
+          null,
+          1,
+        ),
+        backType: "5" as const,
+        count: 0,
+        deviceId: null,
+        deviceLabel: "",
+        deviceSeq: null,
+        filterCondition: { kind: "desk" as const, query: normalized },
+        remark: "",
       }
       pools = [...pools, created]
       return created

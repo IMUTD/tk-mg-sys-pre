@@ -52,7 +52,14 @@ const registerSession = async (page: Page): Promise<string[]> => {
       await api.remove(groupId, request.postDataJSON().ids)
       body = { deleted: request.postDataJSON().ids.length }
     } else if (pathname === root && request.method() === "POST") {
-      body = await api.create(groupId, request.postDataJSON() as PoolWrite)
+      const input = request.postDataJSON() as PoolWrite & {
+        desk?: Parameters<typeof api.createDesk>[1]
+        name?: string
+      }
+      body =
+        input.desk === undefined
+          ? await api.create(groupId, input)
+          : await api.createDesk(groupId, input.desk, input.name ?? "")
       status = 201
     } else if (pathname === root) {
       const query = new URL(request.url()).searchParams
@@ -83,10 +90,12 @@ test("renders the 云大师-aligned account pool page", async ({ page }) => {
   await page.goto("/operations/account-pool")
 
   await expect(page.getByText("1107发布")).toBeVisible()
-  await expect(page.getByRole("button", { name: "搜索" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "搜索" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "新增" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "创建账号池" })).toBeVisible()
-  await expect(page.getByRole("columnheader", { name: "备份方式" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "创建账号池" })).toHaveCount(0)
+  await expect(page.getByRole("columnheader", { name: "命名" })).toBeVisible()
+  await expect(page.getByRole("columnheader", { name: "备份方式" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "重置" })).toHaveCount(0)
   await expect(page.getByText("1107养号")).toBeVisible()
   await expect(page.getByRole("button", { name: "新建账号池" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "租用" })).toHaveCount(0)
@@ -102,62 +111,43 @@ test("creates an account pool through the API and retains it after refresh", asy
   await page.getByRole("button", { name: "新增" }).click()
   const dialog = page.getByRole("dialog")
   await expect(dialog.getByText("新增账号池")).toBeVisible()
-  await dialog.getByLabel("账号池名").fill("1109矩阵")
-  await dialog.getByLabel("设备").click()
-  await page
-    .locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)")
-    .getByText("192.168.76.130-270-亮18", { exact: true })
-    .click()
-  await dialog.getByLabel("账号分组").click()
-  await page
-    .locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)")
-    .getByText(/亮2/, { exact: false })
-    .click()
+  await dialog.getByRole("button", { name: "正常", exact: true }).click()
+  await expect(dialog.getByText("账号状态=正常")).toBeVisible()
   await dialog.getByRole("button", { name: "确认" }).click()
 
   await expect(page.getByText("新增成功")).toBeVisible()
-  await expect(page.getByText("1109矩阵")).toBeVisible()
+  await expect(page.getByText("账号状态=正常")).toBeVisible()
   expect(requests).toContain(`POST /api/groups/${groupId}/operations/account-pools`)
-  expect(requests).toContain(`POST /api/groups/${groupId}/operations/account-pools/sources`)
   await page.reload()
-  await expect(page.getByText("1109矩阵")).toBeVisible()
+  await expect(page.getByText("账号状态=正常")).toBeVisible()
   await expect(page.getByText("Acc#SeedAlpha")).toHaveCount(0)
 })
 
 test("creates selected UUIDs across pages and deletes through the API", async ({ page }) => {
   const requests = await registerSession(page)
   await page.goto("/operations/account-pool")
-  await page.getByRole("button", { name: "创建账号池", exact: true }).click()
+  await expect(page.getByRole("button", { name: "创建账号池" })).toHaveCount(0)
+  await page.getByRole("button", { name: "新增", exact: true }).click()
   const dialog = page.getByRole("dialog")
-  await dialog.getByLabel("创建设备").click()
-  await page.getByRole("option", { name: "192.168.76.130-270-亮18" }).click()
-  await dialog.getByLabel("选择账号 184992211").check()
-  await dialog.getByTitle("2", { exact: true }).click()
-  await dialog.getByLabel("选择账号 SIM-11").check()
   const save = page.waitForResponse(
     (result) =>
       result.request().method() === "POST" &&
       result.url().endsWith(`/groups/${groupId}/operations/account-pools`),
   )
-  await dialog.getByRole("button", { name: "新建选中(2)", exact: true }).click()
+  await dialog.getByRole("button", { name: "封号", exact: true }).click()
+  await dialog.getByRole("button", { name: "确认", exact: true }).click()
   const response = await save
   expect(response.request().postDataJSON()).toMatchObject({
-    mode: "selected",
-    accountIds: ["aaaaaaaa-aaaa-4aaa-8aaa-000000000001", "aaaaaaaa-aaaa-4aaa-8aaa-000000000011"],
+    desk: { status: "1" },
   })
-  await expect(page.getByText("gen-104")).toBeVisible()
+  await expect(page.getByText("账号状态=封号")).toBeVisible()
   await page.reload()
-  const row = page.getByRole("row").filter({ hasText: "gen-104" })
-  await row.getByRole("button", { name: "账号列表", exact: true }).click()
-  await expect(page.getByRole("dialog").getByText("user.alpha", { exact: true })).toBeVisible()
-  await expect(page.getByRole("dialog").getByText("simulation.11", { exact: true })).toBeVisible()
-  await page.keyboard.press("Escape")
-  await expect(page.getByRole("dialog")).not.toBeVisible()
+  const row = page.getByRole("row").filter({ hasText: "账号状态=封号" })
   await row.getByRole("button", { name: "删除", exact: true }).click()
   await page.getByRole("button", { name: "确定", exact: true }).click()
   await expect(page.getByText("删除成功")).toBeVisible()
   expect(requests).toContain(`POST /api/groups/${groupId}/operations/account-pools/batch-delete`)
   await page.reload()
   await expect(page.getByText("1107发布")).toBeVisible()
-  await expect(page.getByText("gen-104")).toHaveCount(0)
+  await expect(page.getByText("账号状态=封号")).toHaveCount(0)
 })

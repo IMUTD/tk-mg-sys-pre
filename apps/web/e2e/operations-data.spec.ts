@@ -136,7 +136,8 @@ test("renders the 云大师 account pool without posting lease requests", async 
   await page.goto("/operations/account-pool")
 
   await expect(page.getByText("1107发布")).toBeVisible()
-  await expect(page.getByRole("button", { name: "创建账号池" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "新增" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "创建账号池" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "租用" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "归还" })).toHaveCount(0)
   expect(api.requests.some((item) => item.includes("/leases"))).toBe(false)

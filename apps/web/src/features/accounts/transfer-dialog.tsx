@@ -1,8 +1,8 @@
 import { Alert, Button, Input, Modal, Space, Table, Tag } from "antd"
-import type { Key } from "react"
 import { type ReactNode, useMemo, useState } from "react"
+import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
 import { PageKey } from "../../lib/pages"
-import { BusinessLabelFilter } from "../labels/filter-row"
+import { BusinessLabelFilter, UNASSIGNED_VALUE } from "../labels/filter-row"
 import { hideMiddle, type TransferStatistic } from "./myt-account"
 
 type TransferDialogProps = {
@@ -10,7 +10,9 @@ type TransferDialogProps = {
   readonly onCancel: () => void
   readonly onCopy: (value: string) => void
   readonly onExport: (rows: readonly TransferStatistic[]) => void
+  readonly onCreate?: (() => void) | undefined
   readonly onMerge: (keys: readonly string[]) => void
+  readonly onRedeem?: ((code: string) => void) | undefined
   readonly onRevoke: (key: string, count: number) => void
   readonly onSplit: (key: string, count: number) => void
   readonly rows: readonly TransferStatistic[]
@@ -21,12 +23,15 @@ export const TransferDialog = ({
   onCancel,
   onCopy,
   onExport,
+  onCreate,
   onMerge,
+  onRedeem,
   onRevoke,
   onSplit,
   rows,
 }: TransferDialogProps): ReactNode => {
   const [keyFilter, setKeyFilter] = useState("")
+  const [redeemCode, setRedeemCode] = useState("")
   const [tagFilter, setTagFilter] = useState("")
   const [selectedKeys, setSelectedKeys] = useState<readonly string[]>([])
   const filtered = useMemo(() => {
@@ -34,10 +39,19 @@ export const TransferDialog = ({
     const tag = tagFilter.trim().toLowerCase()
     return rows.filter((row) => {
       const matchKey = key.length === 0 || row.transferKey.toLowerCase().includes(key)
-      const matchTag = tag.length === 0 || row.tags.toLowerCase().includes(tag)
+      const matchTag =
+        tagFilter === UNASSIGNED_VALUE
+          ? row.tags.trim().length === 0
+          : tag.length === 0 || row.tags.toLowerCase().includes(tag)
       return matchKey && matchTag
     })
   }, [keyFilter, rows, tagFilter])
+  const transferSelection = useFilteredRowSelection({
+    onChange: (keys) => setSelectedKeys(keys.map((key) => String(key))),
+    rowKey: "transferKey",
+    rows: filtered,
+    selectedKeys: selectedKeys,
+  })
 
   return (
     <Modal footer={null} onCancel={onCancel} open title="转移码统计" width="80%">
@@ -47,6 +61,11 @@ export const TransferDialog = ({
         type="warning"
       />
       <Space className="statistic-toolbar" wrap>
+        {canWrite && onCreate !== undefined ? (
+          <Button onClick={onCreate} type="primary">
+            为选中账号生成
+          </Button>
+        ) : null}
         {canWrite ? (
           <Button
             disabled={selectedKeys.length < 2}
@@ -55,6 +74,24 @@ export const TransferDialog = ({
           >
             合并转移码
           </Button>
+        ) : null}
+        {canWrite && onRedeem !== undefined ? (
+          <>
+            <Input
+              allowClear
+              aria-label="兑换转移码"
+              onChange={(event) => setRedeemCode(event.target.value)}
+              placeholder="输入转移码兑换到当前分组"
+              style={{ width: 260 }}
+              value={redeemCode}
+            />
+            <Button
+              disabled={redeemCode.trim().length === 0}
+              onClick={() => onRedeem(redeemCode.trim())}
+            >
+              兑换
+            </Button>
+          </>
         ) : null}
         <Button disabled={filtered.length === 0} onClick={() => onExport(filtered)}>
           导出 CSV
@@ -70,6 +107,7 @@ export const TransferDialog = ({
       </Space>
       <BusinessLabelFilter
         page={PageKey.Accounts}
+        blankLabel="未分组"
         title="筛选包含分组"
         value={tagFilter}
         onChange={setTagFilter}
@@ -126,10 +164,7 @@ export const TransferDialog = ({
         dataSource={filtered}
         pagination={false}
         rowKey="transferKey"
-        rowSelection={{
-          onChange: (keys: readonly Key[]) => setSelectedKeys(keys.map((key) => String(key))),
-          selectedRowKeys: [...selectedKeys],
-        }}
+        rowSelection={transferSelection}
         scroll={{ x: "max-content" }}
         size="small"
       />

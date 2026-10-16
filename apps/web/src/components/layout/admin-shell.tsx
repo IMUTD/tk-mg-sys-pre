@@ -13,6 +13,7 @@ import {
   FundOutlined,
   GiftOutlined,
   GlobalOutlined,
+  HighlightOutlined,
   HistoryOutlined,
   HomeOutlined,
   InboxOutlined,
@@ -36,7 +37,7 @@ import {
 } from "@ant-design/icons"
 import type { MenuDataItem } from "@ant-design/pro-components"
 import { ProLayout, SettingDrawer } from "@ant-design/pro-components"
-import type { ComponentProps, ReactNode } from "react"
+import { type ComponentProps, type ReactNode, useEffect, useState } from "react"
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom"
 
 import { APP_NAME, APP_OVERVIEW_LABEL, layoutBackgroundImages } from "../../app/product"
@@ -94,11 +95,7 @@ const navigation: readonly NavigationItem[] = [
         path: "/operations/task-records",
       },
       { icon: <GlobalOutlined aria-hidden />, label: "代理管理", path: "/operations/proxies" },
-      {
-        icon: <SettingOutlined aria-hidden />,
-        label: "配置中心",
-        path: "/operations/configuration",
-      },
+      { icon: <PlaySquareOutlined aria-hidden />, label: "视频数据", path: "/studio/video-pool" },
     ],
   },
   {
@@ -121,21 +118,32 @@ const navigation: readonly NavigationItem[] = [
         label: "行为中心",
         path: "/engineering/behaviors",
       },
+      {
+        icon: <SettingOutlined aria-hidden />,
+        label: "配置中心",
+        path: "/operations/configuration",
+      },
+    ],
+  },
+  {
+    icon: <HighlightOutlined aria-hidden />,
+    label: "制作中心",
+    path: "/production",
+    children: [
+      { icon: <VideoCameraOutlined aria-hidden />, label: "视频制作", path: "/studio/video" },
+      { icon: <FileImageOutlined aria-hidden />, label: "图片制作", path: "/studio/image" },
+      { icon: <FontSizeOutlined aria-hidden />, label: "文本制作", path: "/studio/text" },
     ],
   },
   {
     icon: <FolderOpenOutlined aria-hidden />,
     label: "资源中心",
-    path: "/studio",
+    path: "/resources",
     children: [
-      { icon: <VideoCameraOutlined aria-hidden />, label: "视频制作", path: "/studio/video" },
-      { icon: <FileImageOutlined aria-hidden />, label: "图片制作", path: "/studio/image" },
-      { icon: <FontSizeOutlined aria-hidden />, label: "文本制作", path: "/studio/text" },
       { icon: <InboxOutlined aria-hidden />, label: "文本池", path: "/studio/text-pool" },
-      { icon: <PlaySquareOutlined aria-hidden />, label: "视频池", path: "/studio/video-pool" },
-      { icon: <FolderOpenOutlined aria-hidden />, label: "视频资源", path: "/studio/video-resources" },
-      { icon: <FileProtectOutlined aria-hidden />, label: "备份资源", path: "/studio/backup-resources" },
+      { icon: <VideoCameraOutlined aria-hidden />, label: "视频池", path: "/studio/share-video" },
       { icon: <PictureOutlined aria-hidden />, label: "图片池", path: "/studio/image-pool" },
+      { icon: <FileProtectOutlined aria-hidden />, label: "备份池", path: "/studio/backup-resources" },
       { icon: <DatabaseOutlined aria-hidden />, label: "注册池", path: "/studio/registration" },
     ],
   },
@@ -185,8 +193,26 @@ const titleForPath = (path: string, user: SessionUser): string => {
   if (item?.label === "工程中心") return "私有云储存"
   if (item?.label === "营销中心") return "营销面板"
   if (item?.label === "积分商场") return "积分记录"
-  if (item?.label === "资源中心") return "视频制作"
+  if (item?.label === "制作中心") return "视频制作"
+  if (item?.label === "资源中心") return "文本池"
   return item?.label ?? "运营概览"
+}
+
+const defaultOpenMenuPaths = ["/operations", "/engineering", "/resources"]
+
+const parentMenuPath = (path: string): string | undefined => {
+  for (const item of navigation) {
+    if (item.children?.some((child) => path === child.path || path.startsWith(`${child.path}/`))) {
+      return item.path
+    }
+  }
+  return undefined
+}
+
+const openMenuKeysForPath = (path: string): string[] => {
+  const current = parentMenuPath(path)
+  if (current === undefined || defaultOpenMenuPaths.includes(current)) return [...defaultOpenMenuPaths]
+  return [...defaultOpenMenuPaths, current]
 }
 
 type ProLayoutRoute = NonNullable<ComponentProps<typeof ProLayout>["route"]>
@@ -240,6 +266,13 @@ export const AdminShell = ({ user }: AdminShellProps): ReactNode => {
     settingsOpen,
   } = useUiPreferences()
   const pageTitle = titleForPath(location.pathname, user)
+  const [openMenuKeys, setOpenMenuKeys] = useState(() => openMenuKeysForPath(location.pathname))
+
+  useEffect(() => {
+    const current = parentMenuPath(location.pathname)
+    if (current === undefined) return
+    setOpenMenuKeys((keys) => (keys.includes(current) ? keys : [...keys, current]))
+  }, [location.pathname])
 
   return (
     <div className={preferences.layout === "mix" ? "admin-shell admin-shell-mix" : "admin-shell"}>
@@ -270,8 +303,14 @@ export const AdminShell = ({ user }: AdminShellProps): ReactNode => {
         logo={<img alt="logo" src={brandLogo} />}
         menu={{
           autoClose: false,
-          defaultOpenAll: true,
+          defaultOpenAll: false,
           locale: false,
+        }}
+        menuProps={{
+          onOpenChange: (keys) => {
+            setOpenMenuKeys(keys.map(String))
+          },
+          ...(preferences.siderCollapsed ? {} : { openKeys: openMenuKeys }),
         }}
         menuHeaderRender={
           preferences.layout === "mix"
@@ -298,7 +337,6 @@ export const AdminShell = ({ user }: AdminShellProps): ReactNode => {
           <p className="breadcrumb">
             {APP_NAME} <span>/</span> {pageTitle}
           </p>
-          {pageTitle === "盒子管理" || pageTitle === "行为中心" ? null : <h1>{pageTitle}</h1>}
         </div>
         <Outlet />
       </ProLayout>

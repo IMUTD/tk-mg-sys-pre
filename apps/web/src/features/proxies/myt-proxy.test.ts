@@ -4,6 +4,7 @@ import {
   applyCheckResult,
   batchUpdateByTags,
   createSeedProxies,
+  emptyProxy,
   emptyProxyQuery,
   expirePresetOptions,
   filterProxies,
@@ -31,6 +32,14 @@ describe("myt-proxy", () => {
     expect(socks.every((item) => item.type === "2")).toBe(true)
     expect(search.map((item) => item.remark)).toEqual(["华东代理"])
     expect(expiring.map((item) => item.remark)).toEqual(["临时线路"])
+  })
+
+  it("requires every selected remark and keeps blank remarks on 未备注", () => {
+    const now = "2026-10-15 12:00:00"
+    const named = (id: number, remark: string) => ({ ...emptyProxy(id, now), remark })
+    const proxies = [named(1, "华东"), named(2, `华东${"\u001e"}备用`), named(3, "")]
+    expect(filterProxies(proxies, { ...emptyProxyQuery(), remarks: ["华东", "备用"] }).map((item) => item.id)).toEqual([2])
+    expect(filterProxies(proxies, { ...emptyProxyQuery(), unremarked: true }).map((item) => item.id)).toEqual([3])
   })
 
   it("imports SOCKS lines and V2 links without exposing secrets in CSV", () => {

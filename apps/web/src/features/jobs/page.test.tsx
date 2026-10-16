@@ -21,7 +21,6 @@ describe("jobs pages", () => {
     wrap(<TaskRecordsPage />)
     expect(screen.getByText("发布作品完成")).toBeVisible()
     await user.type(screen.getByLabelText("功能"), "账号检查")
-    await user.click(screen.getByRole("button", { name: "搜索" }))
     expect(screen.getByText("检查任务已创建并自动启动")).toBeVisible()
     expect(screen.queryByText("发布作品完成")).not.toBeInTheDocument()
   })

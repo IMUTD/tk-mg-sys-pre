@@ -27,13 +27,14 @@ import {
   registerBusinessLabels,
 } from "./business-labels"
 import { accountAnchorCatalog, type ChainAnchor, readAnchor, readStepSources } from "./account-anchor"
+import { refreshDeviceHosts } from "./dispatch/fill"
 import { type GuardCode, guardCatalog, normalizeGuards, xmlHasText } from "./guards"
 import { registerShareFiles } from "./share-files"
 
 const guardLabel = (code: string): string =>
   code === "ad" || code === "transcode" ? guardCatalog[code].label : code
 import { type SkillSpec, skillCatalog } from "./skills"
-import { agentSkillStep, isSharedVideoSkill, sharedVideoCommand } from "./video-share"
+import { agentSkillStep, isCatalogPullSkill, isSharedVideoSkill, sharedPullCommand, sharedVideoCommand, stageShareAction, stageShareCode, stageShareReady, transferShareCode, transferShareReady } from "./video-share"
 
 const unassignedGroup = "00000000-0000-4000-8000-000000000001"
 const noBatch = new Set([
@@ -132,6 +133,14 @@ type AgentDevice = {
   readonly externalId: string
   readonly groupId: string
   readonly host: string
+}
+
+const fileBrowserFromHost = (host: string): string => {
+  const trimmed = host.trim()
+  if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(trimmed) || trimmed.startsWith("127.")) return ""
+  const parts = trimmed.split(".")
+  if (parts.some((part) => Number(part) > 255)) return ""
+  return `http://${trimmed}:18791`
 }
 
 const boxPitIndexes = async (host: string): Promise<number[] | null> => {
@@ -427,6 +436,8 @@ const writeLog = async (
 type ClaimRow = {
   readonly afterMs: number
   readonly apiPort: number
+  readonly backupHost: string | null
+  readonly deviceId: string
   readonly externalId: string
   readonly groupId: string
   readonly guardCode: string | null
@@ -442,8 +453,103 @@ type ClaimRow = {
   readonly role: string
   readonly rpaPort: number
   readonly sequence: number
+  readonly sources: unknown
   readonly stepId: string
   readonly taskId: string
+}
+
+const failStage = async (tx: TransactionSql, row: ClaimRow): Promise<void> => {
+  await tx`
+    update execution_task_step
+    set status = 'failed', finished_at = now(), error_code = 'stage_failed'
+    where id = ${row.stepId}::uuid and status = 'pending'`
+  await tx`
+    update execution_task
+    set status = 'failed', updated_at = now(), error_code = 'stage_failed'
+    where id = ${row.taskId}::uuid and status in ('queued', 'dispatching')`
+}
+
+const stageShareClaim = async (
+  tx: TransactionSql,
+  row: ClaimRow,
+): Promise<{ readonly kind: "keep" } | { readonly kind: "stop" } | { readonly kind: "rewrite"; readonly skill: string }> => {
+  if (row.kind !== stageShareCode) return { kind: "keep" }
+  const path = (row.parameters["路径"] ?? "").trim()
+  const sourceHost = (row.parameters["源主机"] ?? "").trim()
+  if (!stageShareReady(row.parameters)) {
+    await failStage(tx, row)
+    return { kind: "stop" }
+  }
+  const source = await tx<{ deviceId: string; groupId: string; sha256: string; size: string }[]>`
+    select d.id::text as "deviceId", d.group_id::text as "groupId", e.sha256, e.size_bytes::text as size
+    from device d
+    left join box_share_entry e on e.device_id = d.id and e.kind = 'file'
+      and e.bucket || '/' || e.relative_path = ${path}
+    where d.group_id = ${row.groupId}::uuid and d.host = ${sourceHost} and d.enabled
+    order by e.sha256 desc nulls last
+    limit 1`
+  const found = source[0]
+  const local = await tx<{ sha256: string }[]>`
+    select sha256 from box_share_entry
+    where device_id = ${row.deviceId}::uuid and kind = 'file'
+      and bucket || '/' || relative_path = ${path}
+    limit 1`
+  const moveKey = `stage:${row.taskId}:${row.stepId}`
+  const move = await tx<{ status: string }[]>`
+    select status from execution_task
+    where group_id = ${row.groupId}::uuid and idempotency_key = ${moveKey}`
+  const action = stageShareAction({
+    localHost: row.host,
+    localSha: local[0]?.sha256 ?? "",
+    moveStatus: move[0]?.status ?? null,
+    path,
+    size: Number(found?.size ?? 0),
+    sourceHost,
+    sourceSha: found?.sha256 ?? "",
+  })
+  if (action.action === "fail") {
+    await failStage(tx, row)
+    return { kind: "stop" }
+  }
+  if (action.action === "pull") return { kind: "rewrite", skill: action.skill }
+  if (found === undefined) {
+    await failStage(tx, row)
+    return { kind: "stop" }
+  }
+  const requester = await tx<{ id: string }[]>`
+    select requester_id::text as id from execution_task where id = ${row.taskId}::uuid`
+  if (requester[0] === undefined) {
+    await failStage(tx, row)
+    return { kind: "stop" }
+  }
+  const input = {
+    files: JSON.stringify([
+      { bucket: action.bucket, path: action.relative, sha256: action.sha256, size: action.size },
+    ]),
+    targetDeviceId: row.deviceId,
+    targetDirectory: action.targetDirectory,
+    targetHost: row.host,
+  }
+  const taskId = randomUUID()
+  const fingerprint = hashToken(moveKey)
+  await tx`
+    insert into execution_task (
+      id, group_id, requester_id, device_id, idempotency_key, fingerprint, name, executor_key, parameters, status
+    ) values (
+      ${taskId}::uuid, ${found.groupId}::uuid, ${requester[0].id}::uuid, ${found.deviceId}::uuid,
+      ${moveKey}, ${fingerprint}, 'MoveShare', 'box-agent', ${tx.json([{ input, skill: "MoveShare" }])}, 'queued'
+    ) on conflict (group_id, idempotency_key) do nothing`
+  await tx`
+    insert into execution_task_step (
+      id, task_id, group_id, sequence, command_idempotency_key, fingerprint, kind, target, parameters, status, guards, after_ms
+    )
+    select ${randomUUID()}::uuid, t.id, t.group_id, 0, ${`${moveKey}:0`}, ${fingerprint},
+      'MoveShare', ${tx.json({ indexNum: 0 })}, ${tx.json(input)}, 'pending', ${tx.json([])}, 0
+    from execution_task t
+    where t.group_id = ${found.groupId}::uuid and t.idempotency_key = ${moveKey}
+      and not exists (select 1 from execution_task_step s where s.task_id = t.id)`
+  await tx`select pg_notify('agent_task', ${found.deviceId})`
+  return { kind: "stop" }
 }
 
 const claimOnce = async (sql: Sql, device: AgentDevice): Promise<ClaimRow | null> => {
@@ -458,9 +564,20 @@ const claimOnce = async (sql: Sql, device: AgentDevice): Promise<ClaimRow | null
         select t.id as "taskId", t.group_id as "groupId", s.id as "stepId", s.kind, s.sequence,
           s.parameters, s.after_ms as "afterMs", s.instance_id as "instanceId", s.guards, s.phase, s.role,
           s.guard_code as "guardCode", s.parent_step_id::text as "parentStepId",
-          d.external_id as "externalId", d.host,
+          d.id::text as "deviceId", d.external_id as "externalId", d.host,
            coalesce(di.instance_index, (s.target->>'indexNum')::int) as "indexNum", coalesce(di.api_port, 0) as "apiPort",
-          coalesce(di.rpa_port, 0) as "rpaPort", di.label
+          coalesce(di.rpa_port, 0) as "rpaPort", di.label,
+          (
+            select ds.sources from operation_dispatch_item item
+            join operation_dispatch_step ds on ds.item_id = item.id and ds.sequence = s.sequence
+            where item.execution_task_id = t.id
+            limit 1
+          ) as sources,
+          (
+            select backup.host from operation_account account
+            left join device backup on backup.id = account.backup_device_id
+            where account.id = t.account_id
+          ) as "backupHost"
         from execution_task t
         join execution_task_step s on s.task_id = t.id and s.group_id = t.group_id
         join device d on d.id = t.device_id
@@ -484,16 +601,25 @@ const claimOnce = async (sql: Sql, device: AgentDevice): Promise<ClaimRow | null
               and l.released_at is null
               and (l.instance_id is null or s.instance_id is null or l.instance_id = s.instance_id)
               and not (
-                s.kind in ('ScanShare', 'MoveShare') and l.instance_id is not null
+                s.kind in ('ScanShare', 'MoveShare', 'TransferShare') and l.instance_id is not null
               )
               and not (
                 s.instance_id is not null
                 and exists (
                   select 1 from execution_task_step box_step
                   where box_step.task_id = l.task_id
-                    and box_step.kind in ('ScanShare', 'MoveShare')
+                    and box_step.kind in ('ScanShare', 'MoveShare', 'TransferShare')
                 )
               )
+          )
+          and not (
+            s.kind = 'StageShare'
+            and exists (
+              select 1 from execution_task move
+              where move.group_id = t.group_id
+                and move.idempotency_key = 'stage:' || t.id::text || ':' || s.id::text
+                and move.status in ('queued', 'dispatching', 'running')
+            )
           )
         order by t.created_at
         for update of t skip locked
@@ -501,6 +627,33 @@ const claimOnce = async (sql: Sql, device: AgentDevice): Promise<ClaimRow | null
       `
       const row = rows[0]
       if (row === undefined) return null
+      const staged = await stageShareClaim(tx, row)
+      if (staged.kind === "stop") return null
+      const claimKind = staged.kind === "rewrite" ? staged.skill : row.kind
+      const refreshed = refreshDeviceHosts(row.parameters ?? {}, row.sources, {
+        backupHost: row.backupHost ?? "",
+        deviceHost: row.host,
+      })
+      const parameters = { ...refreshed.parameters }
+      if (row.kind === transferShareCode) {
+        const targetHost = (parameters["目标主机"] ?? "").trim()
+        const found = await tx<{ id: string }[]>`
+          select dest.id::text as id
+          from device dest
+          join device source on source.id = ${device.deviceId}::uuid
+          where dest.host = ${targetHost}
+            and dest.enabled and not dest.assignment_pending
+            and dest.group_id <> ${unassignedGroup}::uuid
+            and dest.assignee_user_id = source.assignee_user_id
+        `
+        parameters["目标盒子"] = found[0]?.id ?? ""
+      }
+      if (refreshed.changed || parameters["目标盒子"] !== refreshed.parameters["目标盒子"]) {
+        await tx`
+          update execution_task_step set parameters = ${tx.json(parameters)}
+          where id = ${row.stepId}::uuid
+        `
+      }
       const lease = randomUUID()
       await tx`
         update execution_task_step set status = 'claimed', started_at = now(), submit_started_at = now() where id = ${row.stepId}::uuid
@@ -526,7 +679,7 @@ const claimOnce = async (sql: Sql, device: AgentDevice): Promise<ClaimRow | null
           ${row.instanceId}::uuid, ${lease}, ${device.externalId}, now() + interval '45 seconds', now()
         )
       `
-      return row
+      return { ...row, kind: claimKind, parameters }
     })
   } catch (error) {
     if (isUniqueViolation(error)) return null
@@ -1381,9 +1534,14 @@ export const registerBoxLink = (
       select d.id, d.external_id as "externalId", d.host, d.name, d.model, d.version, d.firmware,
         d.memory, d.disk, d.disk_pct as "diskPct", d.enabled, d.status,
         d.last_seen_at as "lastSeenAt", d.updated_at as "updatedAt", d.group_id as "groupId",
-        r.id as "remarkId", r.name as "remarkName", g.id as "boxGroupId", g.name as "boxGroupName"
+        d.sequence_no as "sequenceNo", g.id as "boxGroupId", g.name as "boxGroupName",
+        coalesce((
+          select json_agg(json_build_object('id', r.id, 'name', r.name) order by r.name)
+          from device_remark dr
+          join box_remark r on r.id = dr.label_id
+          where dr.device_id = d.id
+        ), '[]'::json) as remarks
       from device d
-      left join box_remark r on r.id = d.remark_id
       left join box_group g on g.id = d.box_group_id
        where d.enabled = true and d.external_id is not null and d.assignment_pending = false
         and d.group_id <> ${unassignedGroup}::uuid
@@ -1448,12 +1606,22 @@ export const registerBoxLink = (
     if (user === null) return context.json({ error: "authentication_required" }, 401)
     const administratorId = await administratorFor(sql, user)
     if (administratorId === null) return context.json({ error: "not_found" }, 404)
-    const removed = await sql`
-      delete from business_label where scope = 'device' and kind = 'remark' and id = ${context.req.param("id")}::uuid and administrator_id = ${administratorId}::uuid
-      returning id
-    `
-    if (removed.length === 0) return context.json({ error: "not_found" }, 404)
-    return context.body(null, 204)
+    const id = context.req.param("id")
+    return sql.begin(async (tx) => {
+      const identity = await tx<{ name: string }[]>`
+        select name from business_label where scope = 'device' and kind = 'remark'
+          and id = ${id}::uuid and administrator_id = ${administratorId}::uuid`
+      if (identity[0] === undefined) return context.json({ error: "not_found" }, 404)
+      await lockBusinessLabel(tx, administratorId, "device", "remark", identity[0].name)
+      const rows = await tx<{ name: string }[]>`
+        select name from business_label where scope = 'device' and kind = 'remark'
+          and id = ${id}::uuid and administrator_id = ${administratorId}::uuid for update`
+      if (rows[0] === undefined) return context.json({ error: "not_found" }, 404)
+      const used = await tx`select 1 from device_remark where label_id = ${id}::uuid limit 1`
+      if (used.length > 0) return context.json({ error: "label_in_use" }, 409)
+      await tx`delete from business_label where id = ${id}::uuid`
+      return context.body(null, 204)
+    })
   })
 
   app.post("/api/box-groups", async (context) => {
@@ -1491,7 +1659,8 @@ export const registerBoxLink = (
         select name from business_label where scope = 'device' and kind = 'group'
           and id = ${context.req.param("id")}::uuid and administrator_id = ${administratorId}::uuid for update`
       if (rows[0] === undefined) return context.json({ error: "not_found" }, 404)
-      if (await businessGroupInUse(tx, administratorId, "device", rows[0].name))
+      const used = await tx`select 1 from device where box_group_id = ${context.req.param("id")}::uuid limit 1`
+      if (used.length > 0 || (await businessGroupInUse(tx, administratorId, "device", rows[0].name)))
         return context.json({ error: "label_in_use" }, 409)
       await tx`delete from business_label where id = ${context.req.param("id")}::uuid`
       return context.body(null, 204)
@@ -1499,7 +1668,8 @@ export const registerBoxLink = (
   })
 
   app.post("/api/devices/labels", async (context) => {
-    return sql.begin(async (sql) => {
+    try {
+      return await sql.begin(async (sql) => {
       const user = await userFromRequest(sql, context.req.raw)
       if (user === null) return context.json({ error: "authentication_required" }, 401)
       const administratorId = await administratorFor(sql, user)
@@ -1507,16 +1677,39 @@ export const registerBoxLink = (
         boxGroupId?: string | null
         deviceIds?: string[]
         remarkId?: string | null
+        remarkIds?: string[]
+        remarkMode?: "add" | "replace"
+        sequenceNo?: number | null
       } | null
       const deviceIds = body?.deviceIds ?? []
       if (administratorId === null || deviceIds.length === 0 || body === null)
         return context.json({ error: "invalid_label" }, 400)
-      const setsRemark = Object.hasOwn(body, "remarkId")
+      const setsRemarkIds = Object.hasOwn(body, "remarkIds")
+      const setsRemarkId = Object.hasOwn(body, "remarkId")
+      const remarkIds = setsRemarkIds
+        ? (body.remarkIds ?? [])
+        : setsRemarkId
+          ? body.remarkId === null || body.remarkId === undefined
+            ? []
+            : [body.remarkId]
+          : undefined
+      const remarkMode = body.remarkMode === "add" && setsRemarkIds ? "add" : "replace"
       const setsGroup = Object.hasOwn(body, "boxGroupId")
-      if (setsRemark && body.remarkId !== null && body.remarkId !== undefined) {
-        const found =
-          await sql`select id from box_remark where id = ${body.remarkId}::uuid and administrator_id = ${administratorId}::uuid`
-        if (found.length === 0) return context.json({ error: "not_found" }, 404)
+      const setsSequence = Object.hasOwn(body, "sequenceNo")
+      if (
+        setsSequence &&
+        body.sequenceNo !== null &&
+        (typeof body.sequenceNo !== "number" ||
+          !Number.isInteger(body.sequenceNo) ||
+          body.sequenceNo < 1 ||
+          body.sequenceNo > 999)
+      )
+        return context.json({ error: "invalid_label" }, 400)
+      if (remarkIds !== undefined && remarkIds.length > 0) {
+        const found = await sql<{ id: string }[]>`
+          select id from box_remark
+          where administrator_id = ${administratorId}::uuid and id = any(${remarkIds}::uuid[])`
+        if (found.length !== new Set(remarkIds).size) return context.json({ error: "not_found" }, 404)
       }
       if (setsGroup && body.boxGroupId !== null && body.boxGroupId !== undefined) {
         const found =
@@ -1530,11 +1723,20 @@ export const registerBoxLink = (
       for update
     `
       if (owned.length !== deviceIds.length) return context.json({ error: "not_found" }, 404)
-      if (setsRemark) {
+      if (remarkIds !== undefined && remarkMode === "replace") {
+        await sql`delete from device_remark where device_id = any(${deviceIds}::uuid[])`
+      }
+      if (remarkIds !== undefined && remarkIds.length > 0) {
         await sql`
-        update device set remark_id = ${body.remarkId ?? null}::uuid, updated_at = now()
-        where id = any(${deviceIds}::uuid[])
-      `
+          insert into device_remark (device_id, label_id)
+          select device_id, label_id
+          from unnest(${deviceIds}::uuid[]) as device_id
+          cross join unnest(${remarkIds}::uuid[]) as label_id
+          on conflict do nothing
+        `
+      }
+      if (remarkIds !== undefined && (remarkMode === "replace" || remarkIds.length > 0)) {
+        await sql`update device set updated_at = now() where id = any(${deviceIds}::uuid[])`
       }
       if (setsGroup) {
         await sql`
@@ -1542,8 +1744,30 @@ export const registerBoxLink = (
         where id = any(${deviceIds}::uuid[])
       `
       }
+      if (setsSequence) {
+        if (body.sequenceNo !== null && deviceIds.length > 1)
+          return context.json({ error: "duplicate_sequence" }, 409)
+        if (body.sequenceNo !== null) {
+          const taken = await sql`
+            select id from device
+            where assignee_user_id = ${administratorId}::uuid
+              and sequence_no = ${body.sequenceNo}::integer
+              and not (id = any(${deviceIds}::uuid[]))
+            limit 1
+          `
+          if (taken.length > 0) return context.json({ error: "duplicate_sequence" }, 409)
+        }
+        await sql`
+          update device set sequence_no = ${body.sequenceNo}::integer, updated_at = now()
+          where id = any(${deviceIds}::uuid[])
+        `
+      }
       return context.json({ ok: true })
     })
+    } catch (error) {
+      if (isUniqueViolation(error)) return context.json({ error: "duplicate_sequence" }, 409)
+      throw error
+    }
   })
 
   app.get("/api/devices/:deviceId/slots", async (context) => {
@@ -1565,7 +1789,13 @@ export const registerBoxLink = (
         and not (di.label = '' and di.status = 'unknown' and di.container_id = '')
       order by di.instance_index
     `
-    return context.json(rows)
+    return context.json(
+      rows.map((row) => {
+        const host = String(row.host ?? "")
+        const current = fileBrowserFromHost(host)
+        return { ...row, fileBrowserUrl: current.length > 0 ? current : row.fileBrowserUrl }
+      }),
+    )
   })
 
   app.post("/api/devices/:deviceId/watch", async (context) => {
@@ -1653,8 +1883,12 @@ export const registerBoxLink = (
       if (
         steps.some(
           (step) =>
-            isSharedVideoSkill(step.skill ?? "") &&
-            sharedVideoCommand(step.skill ?? "", step.input ?? {}) === null,
+            ((isSharedVideoSkill(step.skill ?? "") &&
+              sharedVideoCommand(step.skill ?? "", step.input ?? {}) === null) ||
+              (isCatalogPullSkill(step.skill ?? "") &&
+                sharedPullCommand(step.skill ?? "", step.input ?? {}) === null) ||
+              (step.skill === transferShareCode && !transferShareReady(step.input ?? {})) ||
+              (step.skill === stageShareCode && !stageShareReady(step.input ?? {}))),
         )
       ) {
         return context.json({ error: "video_path_rejected" }, 400)

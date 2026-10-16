@@ -168,8 +168,29 @@ export const registerBusinessLabels = (
       const label = rows[0]
       if (label === undefined) return context.json({ error: "not_found" }, 404)
       if (
+        scope === "device" &&
+        (
+          await tx`select 1 from device where box_group_id = ${id.data}::uuid
+            union all select 1 from device_remark where label_id = ${id.data}::uuid
+            limit 1`
+        ).length > 0
+      )
+        return context.json({ error: "label_in_use" }, 409)
+      if (
         label.kind === "group" &&
         (await businessGroupInUse(tx, administratorId, scope, label.name))
+      )
+        return context.json({ error: "label_in_use" }, 409)
+      if (
+        label.kind === "remark" &&
+        scope === "account" &&
+        (await accountRemarkInUse(tx, administratorId, label.name))
+      )
+        return context.json({ error: "label_in_use" }, 409)
+      if (
+        label.kind === "remark" &&
+        scope === "proxy" &&
+        (await proxyRemarkInUse(tx, administratorId, label.name))
       )
         return context.json({ error: "label_in_use" }, 409)
       await tx`delete from business_label where id = ${id.data}::uuid`
@@ -177,6 +198,40 @@ export const registerBusinessLabels = (
     })
   })
   app.route("/api/labels", routes)
+}
+
+const accountRemarkInUse = async (
+  sql: Sql | TransactionSql,
+  administratorId: string,
+  name: string,
+): Promise<boolean> => {
+  const rows = await sql`
+    select 1 from operation_account a
+    join user_group ug on ug.group_id = a.group_id
+    where ug.user_id = ${administratorId}::uuid and exists (
+      select 1
+      from unnest(string_to_array(btrim(coalesce(a.note, '')), ${"\u001e"})) as part(name)
+      where btrim(name) = ${name}
+    )
+    limit 1`
+  return rows.length > 0
+}
+
+const proxyRemarkInUse = async (
+  sql: Sql | TransactionSql,
+  administratorId: string,
+  name: string,
+): Promise<boolean> => {
+  const rows = await sql`
+    select 1 from operation_proxy a
+    join user_group ug on ug.group_id = a.group_id
+    where ug.user_id = ${administratorId}::uuid and exists (
+      select 1
+      from unnest(string_to_array(btrim(coalesce(a.note, '')), ${"\u001e"})) as part(name)
+      where btrim(name) = ${name}
+    )
+    limit 1`
+  return rows.length > 0
 }
 
 export const businessGroupInUse = async (

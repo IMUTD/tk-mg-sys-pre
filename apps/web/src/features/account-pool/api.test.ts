@@ -79,7 +79,7 @@ describe("account-pool API", () => {
       failure = error
     }
     expect(failure).toBeInstanceOf(HTTPError)
-    expect(await poolRequestError(failure)).toBe("账号池编码已存在")
+    expect(await poolRequestError(failure)).toBe("这个名字的账号池已经存在")
     expect(fetch).toHaveBeenCalledTimes(1)
   })
 })

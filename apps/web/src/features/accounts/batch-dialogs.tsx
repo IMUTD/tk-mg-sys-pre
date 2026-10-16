@@ -1,6 +1,7 @@
 import { Alert, Button, Checkbox, Form, Input, Modal, Radio, Select } from "antd"
-import { type ReactNode, useMemo } from "react"
+import { type ReactNode, useEffect, useMemo, useState } from "react"
 import { PageKey } from "../../lib/pages"
+import { createLabelsApi, type LabelKind } from "../labels/api"
 import { BusinessLabelFilter } from "../labels/filter-row"
 import {
   type AccountBackType,
@@ -15,6 +16,7 @@ import {
 
 type SelectDialogProps = {
   readonly extra?: ReactNode
+  readonly kind?: LabelKind
   readonly label: string
   readonly onCancel: () => void
   readonly onOk: () => void
@@ -25,8 +27,67 @@ type SelectDialogProps = {
   onChange(value: string): void
 }
 
+export const CreatableGroupSelect = ({
+  allowClear = false,
+  ariaLabel,
+  kind = "group",
+  onChange,
+  options,
+  placeholder,
+  value,
+}: {
+  readonly allowClear?: boolean
+  readonly ariaLabel: string
+  readonly kind?: LabelKind
+  readonly onChange: (value: string) => void
+  readonly options: readonly { label: string; value: string }[]
+  readonly placeholder: string
+  readonly value: string
+}): ReactNode => {
+  const [search, setSearch] = useState("")
+  const [catalog, setCatalog] = useState<readonly string[]>([])
+  useEffect(() => {
+    let active = true
+    void createLabelsApi()
+      .list(PageKey.Accounts, "account")
+      .then((result) => {
+        if (!active) return
+        setCatalog((kind === "remark" ? result.remarks : result.groups).map((item) => item.name))
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [kind])
+  const names = [...new Set([...options.map((item) => item.value), ...catalog])]
+  const typed = search.trim()
+  const choices = typed.length > 0 && !names.includes(typed) ? [typed, ...names] : names
+  return (
+    <Select
+      allowClear={allowClear}
+      aria-label={ariaLabel}
+      filterOption={(input, option) => {
+        const label = typeof option?.label === "string" ? option.label : ""
+        return label.toLowerCase().includes(input.trim().toLowerCase())
+      }}
+      onChange={(next: string | null) => {
+        onChange(next ?? "")
+        setSearch("")
+      }}
+      onSearch={setSearch}
+      options={choices.map((name) => ({ label: name, value: name }))}
+      placeholder={placeholder}
+      searchValue={search}
+      showSearch
+      value={value.length === 0 ? null : value}
+      virtual={false}
+    />
+  )
+}
+
 const SelectDialog = ({
   extra,
+  kind = "group",
   label,
   onCancel,
   onChange,
@@ -55,14 +116,13 @@ const SelectDialog = ({
     {extra}
     <Form layout="vertical" size="small">
       <Form.Item label={label} required>
-        <Select
-          aria-label={label}
+        <CreatableGroupSelect
+          ariaLabel={label}
+          kind={kind}
           onChange={onChange}
-          options={[...options]}
+          options={options}
           placeholder={placeholder}
-          showSearch
-          value={value.length === 0 ? null : value}
-          virtual={false}
+          value={value}
         />
       </Form.Item>
     </Form>
@@ -119,14 +179,12 @@ export const MoveTagDialog = ({
         />
       </Form.Item>
       <Form.Item label="新的分组" required>
-        <Select
-          aria-label="新的分组"
-          onChange={(value: string) => onChange(oldTags, value)}
+        <CreatableGroupSelect
+          ariaLabel="新的分组"
+          onChange={(value) => onChange(oldTags, value)}
           options={tags.map((tag) => ({ label: tag, value: tag }))}
           placeholder="请选择,新建分组请输入后点击"
-          showSearch
-          value={newTag.length === 0 ? null : newTag}
-          virtual={false}
+          value={newTag}
         />
       </Form.Item>
     </Form>
@@ -296,6 +354,33 @@ export const TagBucketDialog = ({
       {mode === "add" ? "为选中或当前筛选账号添加标签" : "从选中或当前筛选账号移除标签"}
     </div>
   </Modal>
+)
+
+export const EditRemarkDialog = ({
+  onCancel,
+  onChange,
+  onOk,
+  remarks,
+  value,
+}: {
+  readonly onCancel: () => void
+  readonly onChange: (value: string) => void
+  readonly onOk: () => void
+  readonly remarks: readonly string[]
+  readonly value: string
+}): ReactNode => (
+  <SelectDialog
+    extra={<Alert message="将已选账号设置为该用户备注" showIcon type="info" />}
+    kind="remark"
+    label="用户备注"
+    onCancel={onCancel}
+    onChange={onChange}
+    onOk={onOk}
+    options={remarks.map((remark) => ({ label: remark, value: remark }))}
+    placeholder="请选择,新建备注请输入后点击"
+    title="批量修改用户备注"
+    value={value}
+  />
 )
 
 export const EditTagDialog = ({

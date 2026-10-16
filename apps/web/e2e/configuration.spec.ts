@@ -76,5 +76,5 @@ test("hides configuration content from an operator", async ({ page }) => {
 
   await page.goto("/operations/configuration")
 
-  await expect(page.getByRole("heading", { level: 1, name: "运营概览" })).toBeVisible()
+  await expect(page.getByText("哈蜜瓜云控 / 运营概览")).toBeVisible()
 })

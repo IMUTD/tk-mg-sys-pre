@@ -10,8 +10,15 @@ export const OperationAccountAppSchema = z.enum([
   "instagram",
   "twitter",
 ])
-export const OperationAccountStatusSchema = z.enum(["ready", "suspended", "disabled"])
-export const OperationAccountBackupTypeSchema = z.enum(["local", "private_cloud"])
+export const OperationAccountStatusSchema = z.enum([
+  "ready",
+  "suspended",
+  "disabled",
+  "expired",
+  "hidden",
+  "unregistered",
+])
+export const OperationAccountBackupTypeSchema = z.enum(["local", "private_cloud", "cloud", "full"])
 export const FavoriteAccountTag = "收藏"
 
 const AccountSchema = z.object({
@@ -40,6 +47,7 @@ const AccountSchema = z.object({
   hasTransferKey: z.boolean().optional().default(false),
   id: z.string().uuid(),
   identifier: z.string().optional().default(""),
+  instanceIndex: z.number().int().nullable().optional().default(null),
   instanceLabel: z.string().nullable().optional().default(null),
   name: z.string(),
   note: z.string().optional().default(""),
@@ -146,6 +154,72 @@ export interface AccountsApi {
     mode: AccountTagBatchMode,
     tags?: readonly string[],
   ): Promise<{ readonly affected: number }>
+  setGroup(groupId: string, ids: readonly string[], tag: string): Promise<{ readonly affected: number }>
+  setNote(groupId: string, ids: readonly string[], note: string): Promise<{ readonly affected: number }>
+  setRegion(groupId: string, ids: readonly string[], region: string): Promise<{ readonly affected: number }>
+  setFavorite(
+    groupId: string,
+    ids: readonly string[],
+    starred: boolean,
+  ): Promise<{ readonly affected: number }>
+  moveGroupTags(
+    groupId: string,
+    oldTags: readonly string[],
+    newTag: string,
+  ): Promise<{ readonly affected: number }>
+  statistics(groupId: string): Promise<
+    readonly {
+      readonly available: number
+      readonly banned: number
+      readonly online: number
+      readonly tag: string
+      readonly total: number
+      readonly transferred: number
+    }[]
+  >
+  deleteByTag(
+    groupId: string,
+    tag: string,
+    bannedOnly: boolean,
+    confirm?: string,
+  ): Promise<{ readonly affected: number }>
+  resetBanned(groupId: string, tag: string): Promise<{ readonly affected: number }>
+  listTransfers(groupId: string): Promise<
+    readonly {
+      readonly accountIds: readonly string[]
+      readonly code: string
+      readonly count: number
+      readonly tags: string
+    }[]
+  >
+  createTransfer(
+    groupId: string,
+    ids: readonly string[],
+    code?: string,
+  ): Promise<{ readonly code: string; readonly count: number }>
+  revokeTransfer(groupId: string, code: string): Promise<{ readonly affected: number }>
+  splitTransfer(
+    groupId: string,
+    code: string,
+    size: number,
+  ): Promise<{ readonly codes: readonly string[] }>
+  mergeTransfers(
+    groupId: string,
+    codes: readonly string[],
+    code?: string,
+  ): Promise<{ readonly code: string; readonly count: number }>
+  redeemTransfer(groupId: string, code: string): Promise<{ readonly affected: number }>
+  backup(groupId: string, input: AccountWriteInput): Promise<OperationAccount>
+  start(
+    groupId: string,
+    accountId: string,
+    input: {
+      readonly deviceId: string
+      readonly deviceInstanceId: string
+      readonly proxyId: string | null
+    },
+  ): Promise<{ readonly updated: boolean }>
+  exportByIds(groupId: string, ids: readonly string[]): Promise<string>
 }
 
 const groupPath = (groupId: string): string =>
@@ -181,14 +255,17 @@ const searchParams = (input: AccountListInput): URLSearchParams => {
 export const accountRequestError = async (error: unknown): Promise<string> => {
   if (error instanceof HTTPError) {
     try {
-      const payload: unknown = await error.response.json()
-      if (
-        typeof payload === "object" &&
-        payload !== null &&
-        "error" in payload &&
-        payload.error === "operation_entity_active"
-      ) {
-        return "账号正在被租约或任务占用，无法删除"
+      const payload = z.object({ error: z.string() }).safeParse(await error.response.json())
+      if (payload.success) {
+        const messages: Readonly<Record<string, string>> = {
+          confirm_required: "需要输入“确认全部删除”",
+          invalid_account_binding: "设备、机位或代理不属于当前分组",
+          invalid_transfer: "转移码无效",
+          not_found: "账号不存在",
+          operation_entity_active: "账号正在被租约或任务占用",
+          transfer_conflict: "转移失败，目标分组已有相同账号",
+        }
+        return messages[payload.data.error] ?? `请求失败：${payload.data.error}`
       }
     } catch {
       return error instanceof Error ? error.message : "操作失败，请稍后重试"
@@ -245,5 +322,105 @@ export const createAccountsApi = (apiBaseUrl = "/api"): AccountsApi => {
       BatchResultSchema.parse(
         await client.post(`${groupPath(groupId)}/batch/tags`, { json: { ids, mode, tags } }).json(),
       ),
+    setGroup: async (groupId, ids, tag) =>
+      BatchResultSchema.parse(
+        await client.post(`${groupPath(groupId)}/batch/group`, { json: { ids, tag } }).json(),
+      ),
+    setNote: async (groupId, ids, note) =>
+      BatchResultSchema.parse(
+        await client.post(`${groupPath(groupId)}/batch/note`, { json: { ids, note } }).json(),
+      ),
+    setRegion: async (groupId, ids, region) =>
+      BatchResultSchema.parse(
+        await client.post(`${groupPath(groupId)}/batch/region`, { json: { ids, region } }).json(),
+      ),
+    setFavorite: async (groupId, ids, starred) =>
+      BatchResultSchema.parse(
+        await client.post(`${groupPath(groupId)}/batch/favorite`, { json: { ids, starred } }).json(),
+      ),
+    moveGroupTags: async (groupId, oldTags, newTag) =>
+      BatchResultSchema.parse(
+        await client
+          .post(`${groupPath(groupId)}/batch/tags/move`, { json: { newTag, oldTags } })
+          .json(),
+      ),
+    statistics: async (groupId) =>
+      z
+        .array(
+          z.object({
+            available: z.number().int(),
+            banned: z.number().int(),
+            online: z.number().int(),
+            tag: z.string(),
+            total: z.number().int(),
+            transferred: z.number().int(),
+          }),
+        )
+        .parse(await client.get(`${groupPath(groupId)}/statistics`).json()),
+    deleteByTag: async (groupId, tag, bannedOnly, confirm) =>
+      BatchResultSchema.parse(
+        await client
+          .post(`${groupPath(groupId)}/statistics/delete`, {
+            json: { bannedOnly, confirm, tag },
+          })
+          .json(),
+      ),
+    resetBanned: async (groupId, tag) =>
+      BatchResultSchema.parse(
+        await client
+          .post(`${groupPath(groupId)}/statistics/reset-banned`, { json: { tag } })
+          .json(),
+      ),
+    listTransfers: async (groupId) =>
+      z
+        .array(
+          z.object({
+            accountIds: z.array(z.string().uuid()),
+            code: z.string(),
+            count: z.number().int(),
+            tags: z.string(),
+          }),
+        )
+        .parse(await client.get(`${groupPath(groupId)}/transfers`).json()),
+    createTransfer: async (groupId, ids, code) =>
+      z
+        .object({ code: z.string(), count: z.number().int() })
+        .parse(
+          await client.post(`${groupPath(groupId)}/transfers`, { json: { code, ids } }).json(),
+        ),
+    revokeTransfer: async (groupId, code) =>
+      BatchResultSchema.parse(
+        await client.post(`${groupPath(groupId)}/transfers/revoke`, { json: { code } }).json(),
+      ),
+    splitTransfer: async (groupId, code, size) =>
+      z
+        .object({ codes: z.array(z.string()) })
+        .parse(
+          await client.post(`${groupPath(groupId)}/transfers/split`, { json: { code, size } }).json(),
+        ),
+    mergeTransfers: async (groupId, codes, code) =>
+      z
+        .object({ code: z.string(), count: z.number().int() })
+        .parse(
+          await client
+            .post(`${groupPath(groupId)}/transfers/merge`, { json: { code, codes } })
+            .json(),
+        ),
+    redeemTransfer: async (groupId, code) =>
+      BatchResultSchema.parse(
+        await client.post(`${groupPath(groupId)}/transfers/redeem`, { json: { code } }).json(),
+      ),
+    backup: async (groupId, input) =>
+      AccountSchema.parse(await client.post(`${groupPath(groupId)}/backups`, { json: input }).json()),
+    start: async (groupId, accountId, input) =>
+      z
+        .object({ updated: z.boolean() })
+        .parse(
+          await client
+            .post(`${groupPath(groupId)}/${encodeURIComponent(accountId)}/start`, { json: input })
+            .json(),
+        ),
+    exportByIds: async (groupId, ids) =>
+      client.post(`${groupPath(groupId)}/export`, { json: { ids } }).text(),
   }
 }

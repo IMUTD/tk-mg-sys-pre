@@ -118,55 +118,22 @@ test("real account-pool writes, refresh persistence, rounds, exports and adminis
     created.push(Pool.parse(await copyResponse.json()).id)
     await expect(form).not.toBeVisible()
 
-    await page.getByRole("button", { name: "创建账号池", exact: true }).click()
-    const creator = page.getByRole("dialog", { name: "创建账号池" })
-    for (const [name, local] of [
-      ["本地备份", true],
-      ["全量备份", true],
-      ["全量备份(私有云)", false],
-      ["私有云备份", false],
-    ] as const) {
-      await creator.getByText(name, { exact: true }).click()
-      await expect(creator.getByRole("radio", { name, exact: true })).toBeChecked()
-      if (local) {
-        await creator.getByLabel("创建设备", { exact: true }).click()
-        await page
-          .getByRole("option", { name: `${device.host}-${device.name}`, exact: true })
-          .click()
-      }
-      await creator
-        .getByRole("group", { name: "创建账号分组", exact: true })
-        .getByRole("button", { name: local ? /验收-本地账号/ : /验收-云端账号/ })
-        .click()
-      await expect(
-        creator.getByRole("button", {
-          name: `新建所有(${local ? 4 : 5})`,
-          exact: true,
-        }),
-      ).toBeEnabled()
-    }
-    await expect(creator.getByLabel("选择账号 SIMPOOL-9")).toHaveCount(0)
-    await expect(creator.getByLabel("选择账号 SIMPOOL-10")).toHaveCount(0)
-    await expect(creator.getByLabel("选择账号 SIMPOOL-11")).toHaveCount(0)
-    await creator.getByLabel("选择账号 SIMPOOL-5", { exact: true }).check()
+    await expect(page.getByRole("button", { name: "创建账号池", exact: true })).toHaveCount(0)
+    await page.getByRole("button", { name: "新增", exact: true }).click()
+    const creator = page.getByRole("dialog", { name: "新增账号池" })
+    await creator.getByRole("group", { name: "账号状态", exact: true }).getByRole("button", { name: "正常", exact: true }).click()
     const selected = page.waitForResponse(
       (response) => response.url().endsWith(root) && response.request().method() === "POST",
     )
-    await creator.getByRole("button", { name: "新建选中(1)", exact: true }).click()
+    await creator.getByRole("button", { name: "确认", exact: true }).click()
     const selectedResponse = await selected
     expect(selectedResponse.status()).toBe(201)
     const selectedPool = Pool.parse(await selectedResponse.json())
     created.push(selectedPool.id)
-    expect(selectedPool.count).toBe(1)
+    expect(selectedPool.key).toBe("账号状态=正常")
     await expect(creator).not.toBeVisible()
     await page.reload()
     await expect(page.getByText(selectedPool.key, { exact: true })).toBeVisible()
-    row = page.getByRole("row").filter({ hasText: selectedPool.key })
-    await row.getByRole("button", { name: "账号列表", exact: true }).click()
-    const accounts = page.getByRole("dialog", { name: "账号列表" })
-    await expect(accounts.getByText("SIMPOOL-5", { exact: true })).toBeVisible()
-    await page.keyboard.press("Escape")
-    await expect(accounts).not.toBeVisible()
 
     const other = await browser.newContext({
       baseURL: test.info().project.use.baseURL,

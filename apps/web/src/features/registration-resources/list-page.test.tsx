@@ -22,12 +22,13 @@ describe("RegistrationResourceListPage", () => {
     expect(await screen.findByRole("cell", { name: "xxx12143@gmail.com" })).toBeVisible()
     expect(screen.getByLabelText("搜索")).toBeVisible()
     expect(screen.getByLabelText("备注筛选")).toBeVisible()
-    expect(screen.getByLabelText("标签")).toBeVisible()
+    expect(screen.getByLabelText("账号分组")).toBeVisible()
     expect(screen.getByLabelText("状态")).toBeVisible()
     expect(screen.getByLabelText("结果")).toBeVisible()
-    expect(screen.getByRole("button", { name: "搜索" })).toBeVisible()
-    expect(screen.getByRole("button", { name: "导入资源" })).toBeVisible()
+    expect(screen.queryByRole("button", { name: "搜索" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "导入资源" })).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "智能导入" })).toBeVisible()
+    expect(screen.getByRole("button", { name: "批量分配（0）" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "重置状态" })).toBeVisible()
     expect(screen.getByRole("button", { name: "统计" })).toBeVisible()
     expect(screen.getByRole("columnheader", { name: "智能解析" })).toBeVisible()
@@ -44,6 +45,7 @@ describe("RegistrationResourceListPage", () => {
     // Then
     expect(screen.getByRole("button", { name: "智能导入" })).toBeEnabled()
     expect(screen.queryByRole("button", { name: "统计" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "批量分配（0）" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "导入资源" })).not.toBeInTheDocument()
   })
 
@@ -79,7 +81,6 @@ describe("RegistrationResourceListPage", () => {
 
     // When
     await user.type(screen.getByLabelText("搜索"), "31123456")
-    await user.click(screen.getByRole("button", { name: "搜索" }))
     expect(await screen.findByRole("cell", { name: "31123456" })).toBeVisible()
     expect(screen.queryByRole("cell", { name: "xxx12143@gmail.com" })).not.toBeInTheDocument()
     await user.click(screen.getByLabelText("选择 31123456"))

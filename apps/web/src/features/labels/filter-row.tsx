@@ -1,6 +1,6 @@
 import { PlusOutlined } from "@ant-design/icons"
-import { Alert, App, Button, Input, Modal, Tag, Tooltip } from "antd"
-import { type ReactNode, useEffect, useState } from "react"
+import { Alert, App, Button, Input, Tag, Tooltip } from "antd"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 
 import {
   type BusinessLabel,
@@ -13,6 +13,16 @@ import {
 } from "./api"
 import "./labels.css"
 
+export const UNASSIGNED_VALUE = "\u0000unassigned"
+
+export const usageLabel = (name: string, count: number): string =>
+  count > 0 ? `${name}(${count})` : name
+
+export const unionLabelNames = (...groups: readonly (readonly string[])[]): string[] =>
+  [...new Set(groups.flat().map((name) => name.trim()).filter((name) => name.length > 0))].sort(
+    (left, right) => left.localeCompare(right, "zh-CN"),
+  )
+
 export type LabelOption = {
   readonly value: string
   readonly label: string
@@ -22,33 +32,71 @@ export type LabelOption = {
 type LabelRowProps = {
   readonly title: string
   readonly kind?: LabelKind
+  readonly tone?: "remark" | "group" | "status"
   readonly options: readonly LabelOption[]
   readonly selected: readonly string[]
   readonly onChange: (values: string[]) => void
   readonly multiple?: boolean
   readonly allowClear?: boolean
-  readonly onAdd?: () => void
+  readonly system?: boolean
+  readonly onAdd?: (name: string) => void | Promise<void>
   readonly onRemove?: (value: string) => void
+  readonly unassigned?: { readonly value: string; readonly label: string }
 }
 
 export const LabelFilterRow = ({
   title,
   kind = "group",
+  tone,
   options,
   selected,
   onChange,
   multiple = false,
   allowClear = true,
+  system = false,
   onAdd,
   onRemove,
+  unassigned,
 }: LabelRowProps): ReactNode => {
+  const rowTone = tone ?? kind
+  const [adding, setAdding] = useState(false)
+  const [draft, setDraft] = useState("")
+  const closed = useRef(false)
+  const finish = (next: string) => {
+    if (closed.current || onAdd === undefined) return
+    const trimmed = next.trim()
+    if (trimmed.length === 0) {
+      closed.current = true
+      setAdding(false)
+      setDraft("")
+      return
+    }
+    closed.current = true
+    void Promise.resolve(onAdd(trimmed))
+      .then(() => {
+        setAdding(false)
+        setDraft("")
+      })
+      .catch(() => {
+        closed.current = false
+      })
+  }
   const choose = (value: string): void => {
-    if (selected.includes(value)) {
-      if (allowClear) onChange(selected.filter((item) => item !== value))
-    } else onChange(multiple ? [...selected, value] : [value])
+    if (unassigned !== undefined && value === unassigned.value) {
+      onChange(selected.includes(value) ? [] : [value])
+      return
+    }
+    const rest =
+      unassigned === undefined ? selected : selected.filter((item) => item !== unassigned.value)
+    if (rest.includes(value)) {
+      if (allowClear) onChange(rest.filter((item) => item !== value))
+    } else onChange(multiple ? [...rest, value] : [value])
   }
   return (
-    <fieldset aria-label={title} className={`classification-row tone-${kind}`}>
+    <fieldset
+      aria-label={title}
+      className={`classification-row tone-${rowTone}${system ? " tone-system" : ""}`}
+    >
       <span className="classification-title">{title}</span>
       {allowClear ? (
         <Tag
@@ -67,9 +115,29 @@ export const LabelFilterRow = ({
           全部
         </Tag>
       ) : null}
+      {unassigned === undefined ? null : (
+        <Tag
+          role="button"
+          tabIndex={0}
+          aria-label={unassigned.label}
+          aria-pressed={selected.includes(unassigned.value)}
+          className={selected.includes(unassigned.value) ? "classification-selected" : ""}
+          onClick={() => choose(unassigned.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault()
+              choose(unassigned.value)
+            }
+          }}
+        >
+          {unassigned.label}
+        </Tag>
+      )}
       {options.map((item) => (
         <Tag
-          color={kind === "remark" ? "blue" : "orange"}
+          {...(system || rowTone === "status"
+            ? {}
+            : { color: rowTone === "remark" ? ("blue" as const) : ("orange" as const) })}
           key={item.value}
           role="button"
           aria-label={item.label}
@@ -94,7 +162,26 @@ export const LabelFilterRow = ({
           {item.label}
         </Tag>
       ))}
-      {onAdd === undefined ? null : (
+      {onAdd === undefined ? null : adding ? (
+        <Input
+          aria-label={`添加${title}`}
+          autoFocus
+          className="classification-add-input"
+          maxLength={40}
+          onBlur={() => finish(draft)}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              closed.current = true
+              setDraft("")
+              setAdding(false)
+            }
+          }}
+          onPressEnter={() => finish(draft)}
+          size="small"
+          value={draft}
+        />
+      ) : (
         <Tooltip title={`添加${title}`}>
           <Button
             aria-label={`添加${title}`}
@@ -102,7 +189,11 @@ export const LabelFilterRow = ({
             icon={<PlusOutlined />}
             size="small"
             type="text"
-            onClick={onAdd}
+            onClick={() => {
+              closed.current = false
+              setDraft("")
+              setAdding(true)
+            }}
           />
         </Tooltip>
       )}
@@ -118,6 +209,9 @@ type BusinessFilterProps = {
   readonly options?: readonly LabelOption[]
   readonly canWrite?: boolean
   readonly canDelete?: boolean
+  readonly blankLabel?: string
+  readonly closable?: boolean
+  readonly system?: boolean
   readonly validateName?: (name: string) => string | null
 } & (
   | {
@@ -140,6 +234,9 @@ export const BusinessLabelFilter = (props: BusinessFilterProps): ReactNode => {
     options = [],
     canWrite = false,
     canDelete = false,
+    blankLabel,
+    closable = false,
+    system = false,
   } = props
   const scope = props.scope ?? labelScopeForPage(page)
   const { message, modal } = App.useApp()
@@ -147,9 +244,6 @@ export const BusinessLabelFilter = (props: BusinessFilterProps): ReactNode => {
   const [catalog, setCatalog] = useState<readonly BusinessLabel[]>([])
   const [allowDelete, setAllowDelete] = useState(false)
   const [error, setError] = useState(false)
-  const [open, setOpen] = useState(false)
-  const [name, setName] = useState("")
-  const [saving, setSaving] = useState(false)
   const selected = props.multiple === true ? props.value : props.value === "" ? [] : [props.value]
   const change = (values: string[]): void => {
     if (props.multiple === true) props.onChange(values)
@@ -189,29 +283,26 @@ export const BusinessLabelFilter = (props: BusinessFilterProps): ReactNode => {
     items.set(item.name, {
       value: item.name,
       label: existing?.label ?? item.name,
-      removable: canDelete && allowDelete && existing === undefined,
+      removable: canDelete && allowDelete && (closable || existing === undefined),
     })
   }
-  for (const value of selected) if (!items.has(value)) items.set(value, { value, label: value })
+  for (const value of selected) {
+    if (value === UNASSIGNED_VALUE || items.has(value)) continue
+    items.set(value, { value, label: value })
+  }
 
-  const save = async (): Promise<void> => {
-    const value = name.trim()
-    if (saving || value.length === 0) return
+  const save = async (value: string): Promise<void> => {
     const invalid = props.validateName?.(value)
     if (invalid) {
       message.error(invalid)
-      return
+      throw new Error(invalid)
     }
-    setSaving(true)
     try {
       await api.create(page, kind, value, scope)
-      setOpen(false)
-      setName("")
       labelsChanged()
     } catch (failure) {
       message.error(await labelError(failure))
-    } finally {
-      setSaving(false)
+      throw failure
     }
   }
 
@@ -224,23 +315,17 @@ export const BusinessLabelFilter = (props: BusinessFilterProps): ReactNode => {
         selected={selected}
         onChange={change}
         multiple={props.multiple === true}
-        {...(canWrite
-          ? {
-              onAdd: () => {
-                setName("")
-                setOpen(true)
-              },
-            }
-          : {})}
+        system={system}
+        {...(blankLabel === undefined
+          ? {}
+          : { unassigned: { value: UNASSIGNED_VALUE, label: blankLabel } })}
+        {...(canWrite ? { onAdd: save } : {})}
         onRemove={(value) => {
           const item = catalog.find((label) => label.name === value)
           if (item === undefined) return
           modal.confirm({
             title: `删除${title}`,
-            content:
-              scope === "device"
-                ? `确认删除“${value}”？盒子上的对应分类也会清除。`
-                : `确认删除“${value}”？仍被业务数据使用的分类不能删除。`,
+            content: `确认删除“${value}”？仍被业务数据使用的分类不能删除。`,
             okText: "删除",
             cancelText: "取消",
             onOk: async () => {
@@ -257,23 +342,6 @@ export const BusinessLabelFilter = (props: BusinessFilterProps): ReactNode => {
         }}
       />
       {error ? <Alert type="error" showIcon message="分类加载失败" /> : null}
-      <Modal
-        title={`添加${title}`}
-        open={open}
-        okText="添加"
-        cancelText="取消"
-        confirmLoading={saving}
-        onCancel={() => setOpen(false)}
-        onOk={() => void save()}
-      >
-        <Input
-          aria-label="分类名称"
-          maxLength={40}
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          onPressEnter={() => void save()}
-        />
-      </Modal>
     </>
   )
 }

@@ -32,7 +32,7 @@ describe("ConfigListPage", () => {
     expect(screen.getByLabelText("用户名")).toBeVisible()
     expect(screen.getByLabelText("密码筛选")).toBeVisible()
     expect(screen.getByLabelText("备注")).toBeVisible()
-    expect(screen.getByRole("button", { name: "搜索" })).toBeVisible()
+    expect(screen.queryByRole("button", { name: "搜索" })).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "新增" })).toBeVisible()
     expect(screen.getByRole("button", { name: "修改" })).toBeVisible()
     expect(screen.queryByRole("button", { name: "查看审计日志" })).not.toBeInTheDocument()
@@ -104,7 +104,6 @@ describe("ConfigListPage", () => {
     await screen.findByText("代理账号")
 
     await user.type(screen.getByLabelText("key"), "proxy")
-    await user.click(screen.getByRole("button", { name: "搜索" }))
 
     expect(screen.getByText("代理账号")).toBeVisible()
     expect(screen.queryByText("冰拓打码")).not.toBeInTheDocument()

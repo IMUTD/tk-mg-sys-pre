@@ -323,6 +323,76 @@
       "when": 1794998400000,
       "tag": "0045_operation_dispatch",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1795084800000,
+      "tag": "0046_account_desk",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1795171200000,
+      "tag": "0047_registration_pool",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1795257600000,
+      "tag": "0048_account_unregistered",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1795344000000,
+      "tag": "0049_account_pool_desk",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1795430400000,
+      "tag": "0050_account_remark_label",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1795516800000,
+      "tag": "0051_device_remarks",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1795603200000,
+      "tag": "0052_device_sequence_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1795689600000,
+      "tag": "0053_device_host_not_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1795776000000,
+      "tag": "0054_account_remark_segments",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1795862400000,
+      "tag": "0055_proxy_remark_segments",
+      "breakpoints": true
     }
   ]
 }

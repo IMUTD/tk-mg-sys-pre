@@ -20,20 +20,33 @@ const TextSchema = z.object({
   tag: z.string().trim().min(1).max(80).optional(),
 })
 
+const SetSchema = z.object({
+  by: z.enum(["group", "remark", "tag"]),
+  name: z.string().trim().min(1).max(80),
+})
+
+const FileSchema = z.object({
+  deviceId: z.string().uuid(),
+  directory: z.string().trim().max(512),
+  mode: z.enum(["random", "sequence"]),
+  sequence: z.number().int().min(0).max(99),
+  source: z.enum(["pool.backup", "pool.image", "pool.video"]),
+})
+
 const CreateSchema = z
   .object({
-    accountIds: z.array(z.string().uuid()).max(500).optional(),
-    accountNote: z.string().trim().max(200).optional(),
+    accounts: SetSchema.optional(),
     boxIds: z.array(z.string().uuid()).max(100).optional(),
+    boxes: SetSchema.optional(),
     chainId: z.string().uuid(),
+    files: z.array(FileSchema).max(100).optional(),
     pitIndexes: z.array(z.number().int().min(1).max(5)).max(5).optional(),
+    poolId: z.string().uuid().optional(),
+    proxies: SetSchema.optional(),
     proxyTag: z.string().trim().min(1).max(80).nullable().optional(),
     texts: z.array(TextSchema).max(100).optional(),
   })
-  .refine(
-    (value) =>
-      (value.accountIds?.length ?? 0) > 0 || (value.accountNote?.trim().length ?? 0) > 0,
-  )
+  .refine((value) => value.poolId !== undefined || value.accounts !== undefined)
 
 const StartSchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(50),
@@ -47,10 +60,16 @@ const ClearSchema = z
   .refine((value) => value.deviceIds.length > 0 || value.unassigned === true)
 
 const selectionFrom = (input: z.infer<typeof CreateSchema>): DispatchSelection => ({
-  accountIds: input.accountIds ?? [],
-  accountNote: input.accountNote?.trim() ?? "",
+  accountIds: [],
+  accountNote: "",
+  accounts: input.accounts ?? null,
   boxIds: input.boxIds ?? [],
+  boxes: input.boxes ?? null,
+  files: input.files ?? [],
   pitIndexes: input.pitIndexes ?? [],
+  poolId: input.poolId ?? "",
+  proxies: input.proxies ?? null,
+  proxyIds: [],
   proxyTag: input.proxyTag ?? null,
   texts: input.texts ?? [],
 })
@@ -174,6 +193,25 @@ export const registerDispatchRoutes = (
     const administratorId = await administratorFor(sql, authorization.principal.userId)
     return context.json(await repository.options(authorization.groupId, administratorId))
   })
+  app.get("/api/groups/:groupId/dispatches/directories", async (context) => {
+    const authorization = await authorizeOperationRequest(
+      context,
+      authService,
+      auditRepository,
+      "dispatch.directories",
+      Permission.OperationsRead,
+      PageKey.Tasks,
+    )
+    if (hasOperationAuthorizationFailure(authorization)) return authorization.response
+    const deviceId = context.req.query("deviceId") ?? ""
+    const source = context.req.query("source") ?? ""
+    if (!/^[0-9a-f-]{36}$/i.test(deviceId) || (source !== "pool.video" && source !== "pool.image" && source !== "pool.backup")) {
+      return context.json({ error: "invalid_dispatch_request" }, 400)
+    }
+    return context.json({
+      directories: await repository.directories(authorization.groupId, deviceId, source),
+    })
+  })
   app.get("/api/groups/:groupId/dispatches", async (context) => {
     const authorization = await authorizeOperationRequest(
       context,
@@ -208,6 +246,7 @@ export const registerDispatchRoutes = (
       selectionFrom(input),
     )
     if (created.kind === "missing_chain") return context.json({ error: "not_found" }, 404)
+    if (created.kind === "missing_pool") return context.json({ error: "pool_not_found" }, 404)
     if (created.kind === "no_accounts") return context.json({ error: "no_accounts" }, 400)
     await writeAuditEvent(auditRepository, {
       action: "dispatch.create",

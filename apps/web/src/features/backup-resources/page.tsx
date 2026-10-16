@@ -1,6 +1,6 @@
 import { App, Button, Collapse, Empty, Input, Modal, Select, Space, Table, Tag, type TableColumnsType } from "antd"
-import type { Key } from "react"
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
+import { filteredRowSelection } from "../../components/tables/filtered-selection"
 
 type ShareFile = {
   id: string
@@ -159,16 +159,12 @@ export const BackupResourcesPage = (): ReactNode => {
                       dataSource={dir.files}
                       pagination={false}
                       rowKey="id"
-                      rowSelection={{
-                        onChange: (keys: readonly Key[]) => {
-                          const mine = new Set(dir.files.map((file) => file.id))
-                          setSelected((current) => [
-                            ...current.filter((id) => !mine.has(id)),
-                            ...keys.map(String),
-                          ])
-                        },
-                        selectedRowKeys: selected.filter((id) => dir.files.some((file) => file.id === id)),
-                      }}
+                      rowSelection={filteredRowSelection({
+                        onChange: (keys) => setSelected(keys.map(String)),
+                        rowKey: "id",
+                        rows: dir.files,
+                        selectedKeys: selected,
+                      })}
                       size="small"
                     />
                   ),

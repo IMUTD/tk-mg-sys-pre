@@ -6,6 +6,7 @@ import {
   Navigate,
   Route,
   Routes,
+  useLocation,
   useSearchParams,
 } from "react-router-dom"
 
@@ -42,7 +43,6 @@ import { ConfigListPage } from "../features/settings/list-page"
 import { StoragePage } from "../features/storage/page"
 import { StudioPage } from "../features/studio/page"
 import { VideoPoolPage } from "../features/video-pool/page"
-import { BackupResourcesPage } from "../features/backup-resources/page"
 import { VideoResourcesPage } from "../features/video-resources/page"
 import type { SessionUser } from "../lib/api/auth-api"
 import { assertNever } from "../lib/assert-never"
@@ -59,14 +59,41 @@ const pageFlags = (user: SessionUser, path: string) => ({
   canWrite: canViewPage(user.scope.role, path, user.scope.pages),
 })
 
+const SharedPoolRedirect = (): ReactNode => {
+  const [params] = useSearchParams()
+  const tab = params.get("tab")
+  if (tab === "image") return <Navigate replace to="/studio/image-pool" />
+  if (tab === "backup") return <Navigate replace to="/studio/backup-resources" />
+  if (tab === "registration") return <Navigate replace to="/studio/registration" />
+  return <Navigate replace to="/studio/share-video" />
+}
+
+const OperationsRegistrationRedirect = (): ReactNode => {
+  const [params] = useSearchParams()
+  const search = params.toString()
+  return (
+    <Navigate
+      replace
+      to={search.length === 0 ? PageKey.StudioRegistration : `${PageKey.StudioRegistration}?${search}`}
+    />
+  )
+}
+
 const RegistrationResourcesPage = (): ReactNode => {
   const { session } = useAuth()
+  const { pathname } = useLocation()
+  const [searchParams] = useSearchParams()
+  const page =
+    pathname === PageKey.OperationsRegistration
+      ? PageKey.OperationsRegistration
+      : PageKey.StudioRegistration
   switch (session.kind) {
     case "authenticated":
       return (
         <RegistrationResourceListPage
-          canDelete={pageFlags(session.user, PageKey.StudioRegistration).canDelete}
-          canWrite={pageFlags(session.user, PageKey.StudioRegistration).canWrite}
+          canDelete={pageFlags(session.user, page).canDelete}
+          canWrite={pageFlags(session.user, page).canWrite}
+          groupId={deviceGroupId(session.user.scope.groupIds, searchParams.get("groupId"))}
         />
       )
     case "loading":
@@ -297,15 +324,19 @@ const AuthenticatedRoutes = (): ReactNode => (
       />
       <Route
         path="/studio/video-resources"
-        element={guarded(PageKey.StudioVideoResources, <VideoResourcesPage />)}
+        element={<SharedPoolRedirect />}
+      />
+      <Route
+        path="/studio/share-video"
+        element={guarded(PageKey.StudioShareVideo, <VideoResourcesPage view="video" />)}
       />
       <Route
         path="/studio/backup-resources"
-        element={guarded(PageKey.StudioBackupResources, <BackupResourcesPage />)}
+        element={guarded(PageKey.StudioBackupResources, <VideoResourcesPage view="backup" />)}
       />
       <Route
         path="/studio/image-pool"
-        element={guarded(PageKey.StudioImagePool, <StudioPage kind="image-pool" />)}
+        element={guarded(PageKey.StudioImagePool, <VideoResourcesPage view="image" />)}
       />
       <Route
         path="/studio/registration"
@@ -338,6 +369,7 @@ const AuthenticatedRoutes = (): ReactNode => (
         path="/operations/account-pool"
         element={guarded(PageKey.AccountPool, <AccountPoolPage />)}
       />
+      <Route path="/operations/registration" element={<OperationsRegistrationRedirect />} />
       <Route path="/operations/tasks" element={guarded(PageKey.Tasks, <TasksPage />)} />
       <Route
         path="/operations/task-records"

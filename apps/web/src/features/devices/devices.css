@@ -317,6 +317,40 @@
   margin: 0;
 }
 
+.devices-page .sequence-stepper {
+  width: 72px;
+}
+
+.devices-page .sequence-stepper .ant-input-number {
+  padding-inline: 0;
+  width: 32px;
+}
+
+.devices-page .sequence-stepper .ant-input-number-input {
+  padding-inline: 0;
+  text-align: center;
+}
+
+.devices-page .sequence-stepper .ant-btn {
+  padding-inline: 0;
+  width: 20px;
+}
+
+.devices-page .box-editable-tag {
+  cursor: text;
+  margin-inline-end: 0;
+}
+
+.devices-page .box-editable-tag.is-empty {
+  background: transparent;
+  border-style: dashed;
+  color: #8c8c8c;
+}
+
+.devices-page .box-edit-input {
+  width: 108px;
+}
+
 @media (max-width: 760px) {
   .device-edit-form,
   .instance-edit-form {

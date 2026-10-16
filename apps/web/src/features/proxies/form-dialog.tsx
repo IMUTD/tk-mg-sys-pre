@@ -1,6 +1,8 @@
 import { App, Button, Form, Input, Modal, Radio, Select, Switch } from "antd"
 import { type ReactNode, useState } from "react"
 
+import { RemarkSelect } from "../labels/remark-tags"
+
 import {
   extraModeLabel,
   genCurlCmd,
@@ -66,6 +68,10 @@ export const ProxyFormDialog = ({
       message.error("请填写端口")
       return
     }
+    if (remark.length > 2000) {
+      message.error("备注总长度不能超过 2000")
+      return
+    }
     onSubmit({
       ...record,
       extra: extra.trim(),
@@ -128,11 +134,7 @@ export const ProxyFormDialog = ({
           />
         </Form.Item>
         <Form.Item label="备注">
-          <Input
-            aria-label="备注"
-            onChange={(event) => setRemark(event.target.value)}
-            value={remark}
-          />
+          <RemarkSelect ariaLabel="备注" onChange={setRemark} value={remark} />
         </Form.Item>
         {showHttpFields ? (
           <>

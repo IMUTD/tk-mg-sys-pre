@@ -46,7 +46,7 @@ test("filters paginated audit events without mutation controls", async ({ page }
 
   // When
   await page.goto("/work-logs")
-  await expect(page.getByRole("heading", { level: 1, name: "工作日志" })).toBeVisible()
+  await expect(page.getByText("哈蜜瓜云控 / 工作日志")).toBeVisible()
   await page.getByLabel("操作筛选").fill("member.update")
   await page.getByRole("button", { name: "查询" }).click()
 

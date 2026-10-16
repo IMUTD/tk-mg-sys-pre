@@ -27,6 +27,30 @@ const SourceSchema = z.object({
   username: z.string(),
   videoPlays: z.array(z.number()),
 })
+const DeskQuerySchema = z.object({
+  app: z.string(),
+  backType: z.string(),
+  deviceId: z.string().uuid().nullable(),
+  followerGT: z.string(),
+  followingGT: z.string(),
+  identity: z.string(),
+  proxyId: z.string().uuid().nullable(),
+  quick: z.array(z.string()),
+  region: z.array(z.string()),
+  status: z.string(),
+  tag: z.string(),
+  tagBucket: z.array(z.string()),
+  transferKey: z.string(),
+  ungrouped: z.boolean().default(false),
+  unremarked: z.boolean().default(false),
+  untagged: z.boolean().default(false),
+  userRemark: z.string().default(""),
+  userRemarks: z.array(z.string()).default([]),
+})
+const DeskFilterSchema = z.object({
+  kind: z.literal("desk"),
+  query: DeskQuerySchema,
+})
 export const FilterSchema = z.object({
   backType: z.enum(["1", "2", "3", "4", "5"]),
   deviceId: z.string().uuid().nullable(),
@@ -43,6 +67,7 @@ const PoolSchema = z.object({
   displayId: z.number().int(),
   groupId: z.string().uuid(),
   createdByUserId: z.string().uuid(),
+  createdByName: z.string(),
   key: z.string(),
   remark: z.string(),
   backType: z.enum(["1", "2", "3", "4", "5"]),
@@ -51,7 +76,7 @@ const PoolSchema = z.object({
   deviceLabel: z.string(),
   times: z.number().int(),
   count: z.number().int(),
-  filterCondition: FilterSchema.nullable(),
+  filterCondition: z.union([DeskFilterSchema, FilterSchema]).nullable(),
   createdAt: z.coerce.date(),
   updatedAt: z.coerce.date(),
   expiresAt: z.coerce.date(),
@@ -90,6 +115,7 @@ export type SourceFilter = z.infer<typeof FilterSchema>
 export type StoredPool = z.infer<typeof PoolSchema>
 export type StoredPoolDetails = z.infer<typeof DetailsSchema>
 export type StoredPoolDevice = z.infer<typeof DevicesSchema>["items"][number]
+export type DeskPoolQuery = z.infer<typeof DeskQuerySchema>
 export type PoolWrite = {
   readonly accountIds?: readonly string[] | undefined
   readonly filter: SourceFilter
@@ -118,6 +144,10 @@ export const createAccountPoolsApi = () => {
       ),
     create: async (groupId: string, input: PoolWrite) =>
       PoolSchema.parse(await client.post(root(groupId), { json: input }).json()),
+    createDesk: async (groupId: string, query: DeskPoolQuery, name = "") =>
+      PoolSchema.parse(
+        await client.post(root(groupId), { json: { desk: query, name } }).json(),
+      ),
     details: async (groupId: string, id: string) =>
       DetailsSchema.parse(await client.get(`${root(groupId)}/${id}`).json()),
     remove: async (groupId: string, ids: readonly string[]) => {
@@ -135,7 +165,7 @@ export const poolRequestError = async (error: unknown): Promise<string> => {
       .catch(() => null)
     const code = body !== null && typeof body === "object" && "error" in body ? body.error : ""
     const errors: Record<string, string> = {
-      account_pool_key_conflict: "账号池编码已存在",
+      account_pool_key_conflict: "这个名字的账号池已经存在",
       account_pool_invalid_source: "账号或设备已变化，请刷新后重试",
       account_pool_empty: "没有可加入的账号",
       account_pool_not_found: "账号池不存在或无权访问",

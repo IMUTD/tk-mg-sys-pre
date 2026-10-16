@@ -16,7 +16,7 @@ test("isolates an operator to assigned groups and denies administrator routes", 
   await page.goto("/operations/configuration")
 
   // Then
-  await expect(page.getByRole("heading", { level: 1, name: "运营概览" })).toBeVisible()
+  await expect(page.getByText("哈蜜瓜云控 / 运营概览")).toBeVisible()
   await expect(page.getByRole("link", { name: "配置中心" })).toHaveCount(0)
   await expect(page.getByRole("link", { name: "工作日志" })).toHaveCount(0)
 })
@@ -52,7 +52,8 @@ test("opens the 云大师 account pool without claiming a lease", async ({ page 
   await page.goto("/operations/account-pool")
 
   await expect(page.getByText("1107发布")).toBeVisible()
-  await expect(page.getByRole("button", { name: "创建账号池" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "新增" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "创建账号池" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "租用" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "归还" })).toHaveCount(0)
 })
@@ -101,5 +102,5 @@ test("shows private-cloud storage cards without posting NAS credentials", async 
   await expect(page.getByLabel("测试云机")).toBeVisible()
 
   await page.goto("/work-logs")
-  await expect(page.getByRole("heading", { level: 1, name: "工作日志" })).toBeVisible()
+  await expect(page.getByText("哈蜜瓜云控 / 工作日志")).toBeVisible()
 })

@@ -1,3 +1,6 @@
+import { type FilterMode, combineChecks } from "../../components/tables/operation-controls"
+import { formatRemarks, splitRemarks } from "../labels/remark-list"
+
 export const PROXY_TYPE_OPTIONS = [
   { label: "V2", value: "0" },
   { label: "HTTP", value: "1" },
@@ -111,12 +114,14 @@ export type ProxyQuery = {
   favorite: boolean
   id: string
   noTag: boolean
+  remarks: readonly string[]
   save: string
   search: string
   tag: string
   tun: string
   turboNode: string
   type: string
+  unremarked: boolean
 }
 
 export type ProxyCheckItem = {
@@ -196,9 +201,11 @@ export const emptyProxyQuery = (): ProxyQuery => ({
   favorite: false,
   id: "",
   noTag: false,
+  remarks: [],
   save: "",
   search: "",
   tag: "",
+  unremarked: false,
   tun: "",
   turboNode: "",
   type: "",
@@ -322,7 +329,8 @@ export const verificationPageUrl = (result: ProxyCheckResult): string | null => 
 
 export const turboNodeLabel = (proxy: MytProxy): string => {
   const kind = proxy.type === "0" ? "[V2]" : proxy.type === "1" ? "[HTTP]" : "[SOCKS5]"
-  const remark = proxy.remark.length > 0 ? `-${proxy.remark}` : ""
+  const remarkText = formatRemarks(proxy.remark)
+  const remark = remarkText.length > 0 ? `-${remarkText}` : ""
   return `${kind}-[${proxy.id}] ${proxy.ip}:${proxy.port}${remark}`
 }
 
@@ -339,7 +347,7 @@ export const uniqueTagOptions = (
   }
   return [...counts.entries()]
     .sort(([left], [right]) => left.localeCompare(right, "zh-CN"))
-    .map(([tag, count]) => ({ label: `${tag} (${count})`, value: tag }))
+    .map(([tag, count]) => ({ label: `${tag}(${count})`, value: tag }))
 }
 
 export const staticProxyCount = (proxies: readonly MytProxy[]): number =>
@@ -349,32 +357,33 @@ export const staticProxyCount = (proxies: readonly MytProxy[]): number =>
 const includesIgnoreCase = (value: string, query: string): boolean =>
   value.toLowerCase().includes(query.toLowerCase())
 
-export const filterProxies = (proxies: readonly MytProxy[], query: ProxyQuery): MytProxy[] =>
+export const filterProxies = (
+  proxies: readonly MytProxy[],
+  query: ProxyQuery,
+  mode: FilterMode = "and",
+): MytProxy[] =>
   proxies.filter((item) => {
-    if (query.id.length > 0 && String(item.id) !== query.id.trim()) return false
-    if (query.tag.length > 0 && item.tag !== query.tag) return false
-    if (query.type.length > 0 && item.type !== query.type) return false
-    if (query.save === "true" && !item.save) return false
-    if (query.save === "false" && item.save) return false
-    if (query.tun === "true" && !item.tun) return false
-    if (query.tun === "false" && item.tun) return false
-    if (query.turboNode.length > 0 && item.turboNode !== Number(query.turboNode)) return false
-    if (query.expiredTime.length > 0) {
-      if (
-        item.expiredTime === null ||
-        new Date(item.expiredTime.replace(" ", "T")).getTime() >
-          new Date(query.expiredTime.replace(" ", "T")).getTime()
-      )
-        return false
-    }
-    if (query.noTag && item.tag.length > 0) return false
-    if (query.favorite && !item.favorite) return false
-    if (query.search.trim().length > 0) {
-      const keyword = query.search.trim()
-      const haystack = [item.ip, item.port, item.remark, item.tag]
-      if (!haystack.some((field) => includesIgnoreCase(field, keyword))) return false
-    }
-    return true
+    const remarkParts = splitRemarks(item.remark)
+    const keyword = query.search.trim()
+    return combineChecks(mode, [
+      query.id.length > 0 ? String(item.id) === query.id.trim() : null,
+      query.noTag ? item.tag.length === 0 : query.tag.length > 0 ? item.tag === query.tag : null,
+      query.type.length > 0 ? item.type === query.type : null,
+      query.save === "true" ? item.save : query.save === "false" ? !item.save : null,
+      query.tun === "true" ? item.tun : query.tun === "false" ? !item.tun : null,
+      query.turboNode.length > 0 ? item.turboNode === Number(query.turboNode) : null,
+      query.expiredTime.length > 0
+        ? item.expiredTime !== null &&
+          new Date(item.expiredTime.replace(" ", "T")).getTime() <=
+            new Date(query.expiredTime.replace(" ", "T")).getTime()
+        : null,
+      query.unremarked ? remarkParts.length === 0 : null,
+      ...(query.unremarked ? [] : query.remarks.map((name) => remarkParts.includes(name))),
+      query.favorite ? item.favorite : null,
+      keyword.length > 0
+        ? [item.ip, item.port, item.remark, item.tag].some((field) => includesIgnoreCase(field, keyword))
+        : null,
+    ])
   })
 
 export const isStructuredResult = (value: unknown): value is ProxyCheckResult =>
@@ -645,7 +654,7 @@ export const proxiesToCsv = (proxies: readonly MytProxy[]): string => {
       item.turbo || item.turboNode !== null ? "开启" : "关闭",
       item.safe ? "开启" : "关闭",
       String(item.bindNumber),
-      item.remark,
+      formatRemarks(item.remark),
       expireDate(item.expiredTime),
       item.updateTime,
       item.password.length > 0 || item.credentialState === "configured" ? "已配置" : "无",

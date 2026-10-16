@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { Alert, Button, Card, Input, Select, Space, Typography } from "antd"
-import { type ReactNode, useMemo, useState } from "react"
+import { type ReactNode, useMemo, useRef, useState } from "react"
 import { LabelFilterRow } from "../labels/filter-row"
 import type { ManagedRecord, OperationsDataApi } from "./api"
 import { type CreateField, ManagementDialog } from "./management-dialog"
@@ -47,6 +47,9 @@ export const ManagementPage = ({
   const [status, setStatus] = useState("")
   const [page, setPage] = useState(1)
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set())
+  const selectedIdsRef = useRef(selectedIds)
+  selectedIdsRef.current = selectedIds
+  const [selectingAll, setSelectingAll] = useState(false)
   const [dialogRecord, setDialogRecord] = useState<ManagedRecord | null | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
   const input = useMemo(
@@ -75,15 +78,68 @@ export const ManagementPage = ({
       setError(errorMessage(requestError))
     }
   }
+  const selectAllRecords = async (): Promise<void> => {
+    setSelectingAll(true)
+    setError(null)
+    try {
+      const ids = new Set<string>()
+      let pageNo = 1
+      for (;;) {
+        const result = await api.list({
+          groupId,
+          page: pageNo,
+          pageSize: 100,
+          ...(query.length === 0 ? {} : { query }),
+          ...(status.length === 0 ? {} : { status }),
+        })
+        for (const item of result.items) ids.add(item.id)
+        if (ids.size >= result.total || result.items.length === 0 || pageNo >= 50) break
+        pageNo += 1
+      }
+      setSelectedIds(ids)
+    } catch (requestError) {
+      setError(errorMessage(requestError))
+    } finally {
+      setSelectingAll(false)
+    }
+  }
+  const retainMatching = (nextQuery: string, nextStatus: string): void => {
+    const chosen = selectedIdsRef.current
+    if (chosen.size === 0) return
+    void (async () => {
+      try {
+        const ids = new Set<string>()
+        let pageNo = 1
+        for (;;) {
+          const result = await api.list({
+            groupId,
+            page: pageNo,
+            pageSize: 100,
+            ...(nextQuery.length === 0 ? {} : { query: nextQuery }),
+            ...(nextStatus.length === 0 ? {} : { status: nextStatus }),
+          })
+          for (const item of result.items) ids.add(item.id)
+          if (ids.size >= result.total || result.items.length === 0 || pageNo >= 50) break
+          pageNo += 1
+        }
+        setSelectedIds(new Set([...chosen].filter((id) => ids.has(id))))
+      } catch (requestError) {
+        setError(errorMessage(requestError))
+        setSelectedIds(new Set())
+      }
+    })()
+  }
   const search = (): void => {
     setQuery(draftQuery)
     setPage(1)
+    retainMatching(draftQuery, status)
   }
   const reset = (): void => {
     setDraftQuery("")
     setQuery("")
     setStatus("")
     setPage(1)
+    retainMatching("", "")
   }
   return (
     <section className="module-page">
@@ -124,8 +180,10 @@ export const ManagementPage = ({
             allowClear
             aria-label={`${title}状态`}
             onChange={(value: string | null) => {
-              setStatus(value ?? "")
+              const nextStatus = value ?? ""
+              setStatus(nextStatus)
               setPage(1)
+              retainMatching(query, nextStatus)
             }}
             options={statusOptions.map((option) => ({
               label: option.label,
@@ -169,7 +227,9 @@ export const ManagementPage = ({
           nameTitle={nameTitle}
           onEdit={setDialogRecord}
           onPageChange={setPage}
+          onSelectAll={() => void selectAllRecords()}
           onSelectedChange={setSelectedIds}
+          selectingAll={selectingAll}
           page={records.data}
           selectedIds={selectedIds}
           statusOptions={statusOptions}

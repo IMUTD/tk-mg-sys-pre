@@ -18,6 +18,9 @@
 .classification-row.tone-group .classification-title {
   color: #d46b08;
 }
+.classification-row.tone-status .classification-title {
+  color: #389e0d;
+}
 .classification-row .ant-tag {
   cursor: pointer;
   max-width: 100%;
@@ -32,7 +35,48 @@
   flex: 0 0 24px;
   width: 24px;
 }
+.classification-add-input {
+  width: 108px;
+}
 .classification-row [role="button"]:focus-visible {
-  outline: 2px solid #1677ff;
+  outline: 2px solid var(--ant-color-primary, #1677ff);
   outline-offset: 2px;
+}
+.classification-row.tone-system .classification-title,
+.classification-row.tone-system .ant-tag {
+  color: var(--ant-color-primary, #1677ff);
+}
+.classification-row.tone-system .ant-tag {
+  background: var(--ant-color-primary-bg, #e6f4ff);
+  border-color: var(--ant-color-primary-border, #91caff);
+}
+.classification-row.tone-system .classification-selected {
+  box-shadow: 0 0 0 2px var(--ant-color-primary, #1677ff);
+}
+
+.editable-text-tag {
+  cursor: text;
+  margin-inline-end: 0;
+}
+
+.editable-text-tag.is-empty {
+  background: transparent;
+  border-style: dashed;
+  color: #8c8c8c;
+}
+
+.editable-text-input {
+  width: 108px;
+}
+
+.label-choice-danger {
+  color: #cf1322;
+}
+
+.remark-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
 }

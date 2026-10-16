@@ -16,6 +16,11 @@ export const accountAnchorFields = [
   { label: "备份盒子", source: "account.backup_device" },
   { label: "文本池", source: "pool.text" },
   { label: "视频池", source: "pool.video" },
+  { label: "视频盒子", source: "pool.video_host" },
+  { label: "图片池", source: "pool.image" },
+  { label: "图片盒子", source: "pool.image_host" },
+  { label: "备份池", source: "pool.backup" },
+  { label: "备份文件盒子", source: "pool.backup_host" },
 ] as const
 
 const fieldSources = new Set<string>(accountAnchorFields.map((item) => item.source))

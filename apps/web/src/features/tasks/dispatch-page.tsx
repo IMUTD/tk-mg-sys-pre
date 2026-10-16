@@ -1,7 +1,18 @@
 import { PlayCircleOutlined, PlusOutlined } from "@ant-design/icons"
 import { App, Button, Space, Table, type TableColumnsType, Tag } from "antd"
-import type { Key, ReactNode } from "react"
+import type { ReactNode } from "react"
 import { useEffect, useState } from "react"
+import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
+import {
+  type SelectionScope,
+  SelectionScopeSwitch,
+  pageSlice,
+  useClientPagination,
+} from "../../components/tables/operation-controls"
+import { PageKey } from "../../lib/pages"
+import { createAccountsApi } from "../accounts/api"
+import { createLabelsApi, labelsChanged } from "../labels/api"
+import { EditableTextTag } from "../labels/editable-text-tag"
 
 import { createDispatchApi, type DispatchAccount, type DispatchRow } from "./dispatch-api"
 import { DispatchForm } from "./dispatch-form"
@@ -28,6 +39,7 @@ const statusColor = (status: string): string => {
 export const DispatchListPage = ({ canWrite, groupId }: DispatchPageProps): ReactNode => {
   const { message } = App.useApp()
   const [rows, setRows] = useState<readonly DispatchRow[]>([])
+  const [selectionScope, setSelectionScope] = useState<SelectionScope>("all")
   const [selected, setSelected] = useState<readonly string[]>([])
   const [creating, setCreating] = useState(false)
   const [starting, setStarting] = useState(false)
@@ -65,6 +77,43 @@ export const DispatchListPage = ({ canWrite, groupId }: DispatchPageProps): Reac
       .finally(() => setStarting(false))
   }
 
+  const dispatchPaging = useClientPagination(groupId)
+  const dispatchSelection = useFilteredRowSelection({
+    onChange: (keys) => setSelected(keys.map((key) => String(key))),
+    pageKeys: pageSlice(rows, dispatchPaging.current, dispatchPaging.pageSize).map((item) => item.id),
+    rowKey: "id",
+    rows,
+    selectedKeys: selected,
+    selectionScope,
+  })
+
+  const saveAccountNote = (account: DispatchAccount, note: string): void => {
+    const apply = (value: string): void => {
+      setRows((current) =>
+        current.map((row) => ({
+          ...row,
+          accounts: row.accounts.map((item) => (item.id === account.id ? { ...item, note: value } : item)),
+        })),
+      )
+    }
+    if (groupId.length === 0 || account.accountId.length === 0) {
+      apply(note)
+      return
+    }
+    void createAccountsApi()
+      .setNote(groupId, [account.accountId], note)
+      .then(() => {
+        apply(note)
+        const value = note.trim()
+        if (value.length === 0) return
+        void createLabelsApi()
+          .create(PageKey.Accounts, "remark", value)
+          .then(() => labelsChanged())
+          .catch(() => undefined)
+      })
+      .catch((error: unknown) => message.error(error instanceof Error ? error.message : "保存失败"))
+  }
+
   const columns: TableColumnsType<DispatchRow> = [
     { dataIndex: "name", title: "任务", width: 180 },
     {
@@ -83,7 +132,23 @@ export const DispatchListPage = ({ canWrite, groupId }: DispatchPageProps): Reac
   ]
   const accountColumns: TableColumnsType<DispatchAccount> = [
     { dataIndex: "identifier", title: "账号" },
-    { dataIndex: "note", title: "备注", width: 140 },
+    {
+      render: (_value: unknown, item: DispatchAccount) =>
+        canWrite ? (
+          <EditableTextTag
+            color="blue"
+            emptyLabel="备注"
+            name={item.note.length === 0 ? null : item.note}
+            onCommit={(name) => saveAccountNote(item, name)}
+            onRemove={() => saveAccountNote(item, "")}
+            removeLabel={`移除备注 ${item.note}`}
+          />
+        ) : (
+          item.note
+        ),
+      title: "备注",
+      width: 160,
+    },
     {
       render: (_value: unknown, item: DispatchAccount) => item.deviceName || item.deviceHost || "-",
       title: "盒子",
@@ -100,6 +165,18 @@ export const DispatchListPage = ({ canWrite, groupId }: DispatchPageProps): Reac
       width: 140,
     },
     {
+      render: (_value: unknown, item: DispatchAccount) =>
+        item.videoPath.length === 0 ? "-" : `${item.videoPath} @ ${item.videoHost}`,
+      title: "视频",
+      width: 220,
+    },
+    {
+      render: (_value: unknown, item: DispatchAccount) =>
+        item.backupPath.length === 0 ? "-" : `${item.backupPath} @ ${item.backupHost}`,
+      title: "备份",
+      width: 220,
+    },
+    {
       render: (_value: unknown, item: DispatchAccount) => (
         <Tag color={statusColor(item.status)}>{statusLabel(item.status, item.missing)}</Tag>
       ),
@@ -112,6 +189,7 @@ export const DispatchListPage = ({ canWrite, groupId }: DispatchPageProps): Reac
     <section className="module-page tasks-page">
       <div className="resource-crud-toolbar">
         <Space wrap>
+          <SelectionScopeSwitch onChange={setSelectionScope} scope={selectionScope} />
           {canWrite ? (
             <Button icon={<PlusOutlined aria-hidden />} onClick={() => setCreating(true)} type="primary">
               新增
@@ -144,12 +222,9 @@ export const DispatchListPage = ({ canWrite, groupId }: DispatchPageProps): Reac
             />
           ),
         }}
-        pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 条` }}
+        pagination={{ ...dispatchPaging.pagination, total: rows.length }}
         rowKey="id"
-        rowSelection={{
-          onChange: (keys: readonly Key[]) => setSelected(keys.map((key) => String(key))),
-          selectedRowKeys: [...selected],
-        }}
+        rowSelection={dispatchSelection}
         size="small"
       />
       {creating ? (

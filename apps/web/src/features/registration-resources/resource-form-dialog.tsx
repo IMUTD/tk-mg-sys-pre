@@ -1,6 +1,9 @@
 import { App, Button, Form, Input, Modal, Radio, Select } from "antd"
 import { type ReactNode, useState } from "react"
 
+import { splitRemarks } from "../labels/remark-list"
+import { RemarkSelect } from "../labels/remark-tags"
+
 import {
   buildParsedData,
   FIELD_TYPE_OPTIONS,
@@ -61,6 +64,14 @@ export const ResourceFormDialog = ({
       message.error("分组名称不能包含 + 符号")
       return
     }
+    if (splitRemarks(remark).some((name) => name.includes("+"))) {
+      message.error("备注名称不能包含 + 符号")
+      return
+    }
+    if (remark.length > 200) {
+      message.error("备注总长度不能超过 200")
+      return
+    }
     onSubmit({
       ...record,
       data,
@@ -100,11 +111,7 @@ export const ResourceFormDialog = ({
           <Input aria-label="分组" onChange={(event) => setTag(event.target.value)} value={tag} />
         </Form.Item>
         <Form.Item label="备注">
-          <Input
-            aria-label="备注"
-            onChange={(event) => setRemark(event.target.value)}
-            value={remark}
-          />
+          <RemarkSelect ariaLabel="备注" onChange={setRemark} value={remark} />
         </Form.Item>
         <Form.Item label="分配状态">
           <Radio.Group

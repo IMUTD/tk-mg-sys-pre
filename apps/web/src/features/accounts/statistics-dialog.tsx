@@ -1,6 +1,6 @@
 import { Button, Modal, Progress, Space, Table, Tag } from "antd"
-import type { Key } from "react"
 import { type ReactNode, useMemo, useState } from "react"
+import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
 import { PageKey } from "../../lib/pages"
 import { BusinessLabelFilter } from "../labels/filter-row"
 import { type AccountTagStatistic, bannedRate } from "./myt-account"
@@ -38,6 +38,12 @@ export const AccountStatisticsDialog = ({
       ? [...rows]
       : rows.filter((row) => row.tag.toLowerCase().includes(text))
   }, [keyword, rows])
+  const statisticsSelection = useFilteredRowSelection({
+    onChange: (keys) => setSelectedTags(keys.map((key) => String(key))),
+    rowKey: "tag",
+    rows: filtered,
+    selectedKeys: selectedTags,
+  })
   const selectedCount = selectedTags.reduce((sum, tag) => {
     const row = rows.find((item) => item.tag === tag)
     return sum + (row?.available ?? 0)
@@ -142,10 +148,7 @@ export const AccountStatisticsDialog = ({
           showTotal: (total) => `共 ${total} 个分组`,
         }}
         rowKey="tag"
-        rowSelection={{
-          onChange: (keys: readonly Key[]) => setSelectedTags(keys.map((key) => String(key))),
-          selectedRowKeys: [...selectedTags],
-        }}
+        rowSelection={statisticsSelection}
         scroll={{ x: "max-content" }}
         size="small"
         summary={() => {

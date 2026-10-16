@@ -7,14 +7,18 @@ import {
   assertNoActiveAccountResourceAllocations,
   assertNoActiveTaskClaims,
 } from "../../lib/operation-claim-guard"
+import { type AccountDesk, createAccountDesk } from "./desk"
 
 export const OperationAccountIdSchema = z.string().uuid().brand<"OperationAccountId">()
 export type OperationAccountId = z.infer<typeof OperationAccountIdSchema>
 
 export const OperationAccountStatus = {
   Disabled: "disabled",
+  Expired: "expired",
+  Hidden: "hidden",
   Ready: "ready",
   Suspended: "suspended",
+  Unregistered: "unregistered",
 } as const
 export type OperationAccountStatus =
   (typeof OperationAccountStatus)[keyof typeof OperationAccountStatus]
@@ -22,6 +26,9 @@ export const OperationAccountStatusSchema = z.enum([
   OperationAccountStatus.Ready,
   OperationAccountStatus.Suspended,
   OperationAccountStatus.Disabled,
+  OperationAccountStatus.Expired,
+  OperationAccountStatus.Hidden,
+  OperationAccountStatus.Unregistered,
 ])
 
 export const OperationAccountApp = {
@@ -41,6 +48,8 @@ export const OperationAccountAppSchema = z.enum([
 ])
 
 export const OperationAccountBackupType = {
+  Cloud: "cloud",
+  Full: "full",
   Local: "local",
   PrivateCloud: "private_cloud",
 } as const
@@ -49,6 +58,8 @@ export type OperationAccountBackupType =
 export const OperationAccountBackupTypeSchema = z.enum([
   OperationAccountBackupType.Local,
   OperationAccountBackupType.PrivateCloud,
+  OperationAccountBackupType.Cloud,
+  OperationAccountBackupType.Full,
 ])
 
 export const FavoriteAccountTag = "收藏"
@@ -76,6 +87,7 @@ export type OperationAccount = {
   readonly hasTransferKey: boolean
   readonly id: OperationAccountId
   readonly identifier: string
+  readonly instanceIndex: number | null
   readonly instanceLabel: string | null
   readonly name: string
   readonly note: string
@@ -157,9 +169,20 @@ export type AccountListFilter = {
   readonly online?: boolean | undefined
   readonly page: number
   readonly pageSize: number
+  readonly ids?: readonly string[] | undefined
+  readonly instanceIndex?: number | undefined
+  readonly minFollower?: number | undefined
+  readonly minFollowing?: number | undefined
+  readonly note?: string | undefined
   readonly query?: string | undefined
+  readonly region?: string | undefined
   readonly status?: OperationAccountStatus | undefined
   readonly tag?: string | undefined
+  readonly tagMode?: "all" | "any" | undefined
+  readonly transferKey?: string | undefined
+  readonly tags?: readonly string[] | undefined
+  readonly transferKeyHash?: string | undefined
+  readonly uids?: readonly string[] | undefined
 }
 
 export type AccountPage = {
@@ -171,7 +194,7 @@ export type AccountPage = {
 
 export type AccountTagBatchMode = "add" | "replace" | "clear" | "remove"
 
-export interface AccountRepository {
+export interface AccountRepository extends AccountDesk {
   assignProxy(
     groupId: GroupId,
     ids: readonly OperationAccountId[],
@@ -241,6 +264,7 @@ type AccountRow = {
   readonly groupId: string
   readonly id: string
   readonly identifier: string
+  readonly instanceIndex: number | null
   readonly instanceLabel: string | null
   readonly name: string
   readonly note: string
@@ -263,7 +287,7 @@ const listColumns = (client: Sql) => client`
   a.device_id as "deviceId", a.device_instance_id as "deviceInstanceId", a.proxy_id as "proxyId",
   a.backup_type as "backupType", a.backup_key as "backupKey", a.backup_slot as "backupSlot",
   a.deleted, a.deleted_at as "deletedAt", a.created_at as "createdAt", a.updated_at as "updatedAt",
-  d.name as "deviceName", i.label as "instanceLabel", p.name as "proxyName"
+  d.name as "deviceName", i.instance_index as "instanceIndex", i.label as "instanceLabel", p.name as "proxyName"
 `
 
 const toCount = (value: number | string | null): number | null => {
@@ -304,6 +328,7 @@ const toStored = (row: AccountRow): StoredOperationAccount => {
     hasTransferKey: row.encryptedTransferKey.length > 0,
     id: OperationAccountIdSchema.parse(row.id),
     identifier: row.identifier,
+    instanceIndex: toCount(row.instanceIndex),
     instanceLabel: row.instanceLabel,
     name: row.name,
     note: row.note,
@@ -356,7 +381,23 @@ const filteredFrom = (client: Sql, filter: Omit<AccountListFilter, "page" | "pag
       ${filter.hasTotp === undefined ? client`` : filter.hasTotp ? client`and length(a.encrypted_totp) > 0` : client`and length(a.encrypted_totp) = 0`}
       ${filter.hasProxy === undefined ? client`` : filter.hasProxy ? client`and a.proxy_id is not null` : client`and a.proxy_id is null`}
       ${filter.noUsername === true ? client`and a.identifier = ''` : client``}
-      ${filter.favorite === true ? client`and ${FavoriteAccountTag} = any(a.tags)` : client``}
+      ${filter.favorite === true ? client`and a.favorite is not null` : client``}
+      ${filter.favorite === false ? client`and a.favorite is null` : client``}
+      ${filter.ids === undefined ? client`` : client`and a.id = any(${filter.ids}::uuid[])`}
+      ${filter.instanceIndex === undefined ? client`` : client`and i.instance_index = ${filter.instanceIndex}`}
+      ${filter.minFollower === undefined ? client`` : client`and a.follower >= ${filter.minFollower}`}
+      ${filter.minFollowing === undefined ? client`` : client`and a.following >= ${filter.minFollowing}`}
+      ${filter.note === undefined || filter.note.length === 0 ? client`` : client`and a.note ilike ${`%${escapeLike(filter.note)}%`} escape '\\'`}
+      ${filter.region === undefined || filter.region.length === 0 ? client`` : client`and a.region ilike ${`%${escapeLike(filter.region)}%`} escape '\\'`}
+      ${filter.transferKeyHash === undefined ? client`` : client`and a.transfer_key_hash = ${filter.transferKeyHash}`}
+      ${filter.uids === undefined || filter.uids.length === 0 ? client`` : client`and a.platform_uid = any(${filter.uids}::text[])`}
+      ${
+        filter.tags === undefined || filter.tags.length === 0
+          ? client``
+          : filter.tagMode === "any"
+            ? client`and a.tags && ${filter.tags}::text[]`
+            : client`and a.tags @> ${filter.tags}::text[]`
+      }
       ${
         query === undefined
           ? client``
@@ -472,6 +513,7 @@ export const createPostgresAccountRepository = (client: Sql): AccountRepository 
     }
   }
   return {
+    ...createAccountDesk(client),
     assignProxy: async (groupId, ids, proxyId) => {
       if (ids.length === 0) return 0
       if (proxyId !== null) await resolveBinding(client, groupId, null, null, proxyId)

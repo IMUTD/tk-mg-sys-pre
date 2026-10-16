@@ -1,3 +1,5 @@
+import { type FilterMode, combineChecks } from "../../components/tables/operation-controls"
+
 export const CONFIG_KEY_OPTIONS = [
   {
     defaultUrl: "https://www.bingtop.com/ocr/upload/",
@@ -99,15 +101,20 @@ export const applyConfigKey = (record: MytConfig, key: ConfigKey): MytConfig => 
   }
 }
 
-export const filterConfigs = (configs: readonly MytConfig[], query: ConfigQuery): MytConfig[] =>
+export const filterConfigs = (
+  configs: readonly MytConfig[],
+  query: ConfigQuery,
+  mode: FilterMode = "and",
+): MytConfig[] =>
   configs
-    .filter(
-      (item) =>
-        contains(item.name, query.name) &&
-        contains(item.key, query.key) &&
-        contains(item.username, query.username) &&
-        contains(item.password, query.password) &&
-        contains(item.remark, query.remark),
+    .filter((item) =>
+      combineChecks(mode, [
+        query.name.length > 0 ? contains(item.name, query.name) : null,
+        query.key.length > 0 ? contains(item.key, query.key) : null,
+        query.username.length > 0 ? contains(item.username, query.username) : null,
+        query.password.length > 0 ? contains(item.password, query.password) : null,
+        query.remark.length > 0 ? contains(item.remark, query.remark) : null,
+      ]),
     )
     .slice()
     .sort((left, right) => right.id - left.id)

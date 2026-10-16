@@ -4,38 +4,54 @@ import {
   EditOutlined,
   PlayCircleOutlined,
   PlusOutlined,
-  SearchOutlined,
   StarFilled,
   StarOutlined,
 } from "@ant-design/icons"
 import {
   App,
+  AutoComplete,
   Avatar,
   Button,
   Card,
-  Checkbox,
   Dropdown,
   Input,
-  Select,
+  Popover,
   Space,
   Table,
   Tag,
   Tooltip,
 } from "antd"
-import type { Key } from "react"
 import { type ReactNode, useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 
 import "./accounts.css"
+import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
+import {
+  type FilterMode,
+  type SelectionScope,
+  FilterModeSwitch,
+  SelectionScopeSwitch,
+  combineChecks,
+  pageSlice,
+  useClientPagination,
+} from "../../components/tables/operation-controls"
 import { PageKey } from "../../lib/pages"
-import { BusinessLabelFilter } from "../labels/filter-row"
+import { createDevicesApi } from "../devices/api"
+import { createLabelsApi, labelsChanged } from "../labels/api"
+import { BatchAssignDialog, batchClearOption, type BatchAssignResult } from "../labels/batch-assign-dialog"
+import { addRemarks, splitRemarks } from "../labels/remark-list"
+import { RemarkTags } from "../labels/remark-tags"
+import { BusinessLabelFilter, LabelFilterRow, UNASSIGNED_VALUE, unionLabelNames, usageLabel } from "../labels/filter-row"
+import { EditableTextTag } from "../labels/editable-text-tag"
 import { accountRequestError, createAccountsApi, type OperationAccount } from "./api"
+import { createProxiesApi } from "../proxies/api"
 import {
   AssignProxyDialog,
   BackupDialog,
   CheckTaskDialog,
   EditProxyDialog,
   EditRegionDialog,
+  EditRemarkDialog,
   EditTagDialog,
   MoveTagDialog,
   PlayStatsDialog,
@@ -48,6 +64,7 @@ import {
   ACCOUNT_EXPORT_LIMIT,
   type AccountBackType,
   type AccountDevice,
+  type AccountProxy,
   type AccountQuery,
   type AccountQuickFilter,
   APP_OPTIONS,
@@ -67,6 +84,7 @@ import {
   deleteAccountsByTag,
   editSelectedProxy,
   editSelectedRegion,
+  editSelectedRemark,
   editSelectedTag,
   emptyAccountQuery,
   filterAccounts,
@@ -84,7 +102,6 @@ import {
   resetBannedStatus,
   restoreAccounts,
   revokeTransferKey,
-  SEQ_EMOJI,
   STATUS_OPTIONS,
   shortDate,
   splitTransferKey,
@@ -165,6 +182,44 @@ const emptyBackup = (): BackupForm => ({
   username: "",
 })
 
+const deviceOptionLabel = (device: AccountDevice): string => `${device.name} - ${device.ip}`
+
+const proxyGroupName = (proxy: AccountProxy | null): string => proxy?.tags?.[0]?.trim() ?? ""
+
+const accountDeviceName = (device: AccountDevice | null, proxy: AccountProxy | null): string => {
+  const parts = [
+    proxy === null ? "" : String(proxy.id),
+    proxyGroupName(proxy),
+    device?.sequenceNo === undefined ? "" : String(device.sequenceNo),
+    device?.boxGroupName?.trim() ?? "",
+  ].filter((part) => part.length > 0)
+  return parts.length === 0 ? "-" : parts.join("-")
+}
+
+const accountDeviceDetail = (device: AccountDevice | null, proxy: AccountProxy | null): string => {
+  const text = (value: string | number | null | undefined): string =>
+    value === null || value === undefined || String(value).trim().length === 0 ? "无" : String(value)
+  return [
+    `代理编号: ${text(proxy?.id)}`,
+    `代理分组: ${text(proxyGroupName(proxy))}`,
+    `盒子序号: ${text(device?.sequenceNo)}`,
+    `盒子分组: ${text(device?.boxGroupName)}`,
+    `IP: ${text(device?.ip)}`,
+    `序列号: ${text(device?.serial)}`,
+  ].join("\n")
+}
+
+const resourceIdForText = (
+  text: string,
+  options: readonly { readonly id: number; readonly label: string }[],
+): string => {
+  const matched = options.find((item) => item.label === text)
+  return matched === undefined ? "" : String(matched.id)
+}
+
+const labelIncludes = (label: string, keyword: string): boolean =>
+  label.toLowerCase().includes(keyword.trim().toLowerCase())
+
 export const AccountsListPage = ({
   canDelete,
   canWrite,
@@ -173,10 +228,16 @@ export const AccountsListPage = ({
   const allowDelete = canDelete === true
   const { message, modal } = App.useApp()
   const [draft, setDraft] = useState<AccountQuery>(emptyAccountQuery)
+  const [filterMode, setFilterMode] = useState<FilterMode>("and")
+  const [selectionScope, setSelectionScope] = useState<SelectionScope>("all")
   const [query, setQuery] = useState<AccountQuery>(emptyAccountQuery)
+  const [deviceText, setDeviceText] = useState("")
+  const [proxyText, setProxyText] = useState("")
   const [accounts, setAccounts] = useState<MytAccount[]>(() => createSeedAccounts())
-  const [devices] = useState<AccountDevice[]>(() => createSeedAccountDevices())
-  const [proxies] = useState(() => createSeedAccountProxies())
+  const [devices, setDevices] = useState<AccountDevice[]>(() => createSeedAccountDevices())
+  const [proxies, setProxies] = useState(() => createSeedAccountProxies())
+  const [instanceIds, setInstanceIds] = useState<Readonly<Record<string, string>>>({})
+  const [reloadKey, setReloadKey] = useState(0)
   const [selectedIds, setSelectedIds] = useState<readonly number[]>([])
   const [editRecord, setEditRecord] = useState<MytAccount | null>(null)
   const [recycleOpen, setRecycleOpen] = useState(false)
@@ -185,6 +246,8 @@ export const AccountsListPage = ({
   const [moveTagOpen, setMoveTagOpen] = useState(false)
   const [assignOpen, setAssignOpen] = useState(false)
   const [editTagOpen, setEditTagOpen] = useState(false)
+  const [editRemarkOpen, setEditRemarkOpen] = useState(false)
+  const [batchAssignOpen, setBatchAssignOpen] = useState(false)
   const [editProxyOpen, setEditProxyOpen] = useState(false)
   const [editRegionOpen, setEditRegionOpen] = useState(false)
   const [tagBucketOpen, setTagBucketOpen] = useState<"add" | "remove" | null>(null)
@@ -206,6 +269,7 @@ export const AccountsListPage = ({
     proxyTags: readonly string[]
   }>({ accountTags: [], assignMode: "average", proxyId: null, proxyTags: [] })
   const [editTagValue, setEditTagValue] = useState("")
+  const [editRemarkValue, setEditRemarkValue] = useState("")
   const [editProxyValue, setEditProxyValue] = useState<number | null>(null)
   const [editRegionValue, setEditRegionValue] = useState("")
   const [tagBucketValue, setTagBucketValue] = useState<string[]>([])
@@ -219,14 +283,145 @@ export const AccountsListPage = ({
   })
 
   const live = useMemo(() => filterAccounts(accounts, emptyAccountQuery()), [accounts])
-  const filtered = useMemo(() => filterAccounts(accounts, query), [accounts, query])
+  const groupCounts = new Map<string, number>()
+  const bucketCounts = new Map<string, number>()
+  const remarkCounts = new Map<string, number>()
+  let ungroupedAccounts = 0
+  let untaggedAccounts = 0
+  let unremarkedAccounts = 0
+  for (const account of live) {
+    const tag = account.tag.trim()
+    if (tag.length === 0) ungroupedAccounts += 1
+    else groupCounts.set(tag, (groupCounts.get(tag) ?? 0) + 1)
+    if (account.tagBucket.length === 0) untaggedAccounts += 1
+    for (const item of account.tagBucket) bucketCounts.set(item, (bucketCounts.get(item) ?? 0) + 1)
+    const remarkParts = splitRemarks(account.remark)
+    if (remarkParts.length === 0) unremarkedAccounts += 1
+    for (const remark of remarkParts) remarkCounts.set(remark, (remarkCounts.get(remark) ?? 0) + 1)
+  }
+  const usedCounts = proxyUsedCounts(accounts)
+  const filtered = useMemo(() => {
+    const deviceKeyword = deviceText.trim()
+    const proxyKeyword = proxyText.trim()
+    const cardActive = [
+      query.app,
+      query.backType,
+      query.deviceId,
+      query.followerGT,
+      query.followingGT,
+      query.identity,
+      query.proxyId,
+      query.remark,
+      query.status,
+      query.tag,
+      query.transferKey,
+      query.uidQuery,
+      query.userRemark,
+      query.username,
+    ].some((value) => value.length > 0) ||
+      query.quick.length > 0 ||
+      query.region.length > 0 ||
+      query.tagBucket.length > 0 ||
+      query.userRemarks.length > 0 ||
+      query.ungrouped ||
+      query.unremarked ||
+      query.untagged
+    return accounts.filter((account) => {
+      if (account.deleted) return false
+      const deviceActive = deviceKeyword.length > 0 && query.deviceId.length === 0
+      const proxyActive = proxyKeyword.length > 0 && query.proxyId.length === 0
+      const device = accountDevice(devices, account.deviceId)
+      const proxy = accountProxy(proxies, account.proxyId)
+      return combineChecks(filterMode, [
+        cardActive ? filterAccounts([account], query, false, filterMode).length === 1 : null,
+        deviceActive ? labelIncludes(device === null ? "" : deviceOptionLabel(device), deviceKeyword) : null,
+        proxyActive
+          ? labelIncludes(
+              proxy === null ? "" : formatProxyOptionLabel(proxy, usedCounts.get(proxy.id) ?? 0),
+              proxyKeyword,
+            )
+          : null,
+      ])
+    })
+  }, [accounts, deviceText, devices, filterMode, proxies, proxyText, query, usedCounts])
+  const accountPaging = useClientPagination(
+    JSON.stringify([filterMode, query, deviceText, proxyText]),
+  )
   const selected = accounts.filter((item) => selectedIds.includes(item.id) && !item.deleted)
   const tags = uniqueTags(accounts)
   const tagBuckets = uniqueTagBuckets(accounts)
+  const [catalogTags, setCatalogTags] = useState<readonly string[]>([])
+  const [catalogGroups, setCatalogGroups] = useState<readonly string[]>([])
+  const [catalogRemarks, setCatalogRemarks] = useState<readonly string[]>([])
+  useEffect(() => {
+    const api = createLabelsApi()
+    const load = (): void => {
+      void api
+        .list(PageKey.Accounts, "account-tag")
+        .then((result) => setCatalogTags(result.groups.map((item) => item.name)))
+        .catch(() => undefined)
+      void api
+        .list(PageKey.Accounts, "account")
+        .then((result) => {
+          setCatalogGroups(result.groups.map((item) => item.name))
+          setCatalogRemarks(result.remarks.map((item) => item.name))
+        })
+        .catch(() => undefined)
+    }
+    load()
+    window.addEventListener("business-labels-changed", load)
+    return () => window.removeEventListener("business-labels-changed", load)
+  }, [])
+  const tagChoices = [
+    ...new Set([...catalogTags, ...tagBuckets].filter((tag) => tag.trim().length > 0)),
+  ].sort((left, right) => left.localeCompare(right, "zh-CN"))
+  const remarks = [
+    ...new Set(accounts.flatMap((account) => (account.deleted ? [] : splitRemarks(account.remark)))),
+  ].sort((left, right) => left.localeCompare(right, "zh-CN"))
+  const regions = [
+    ...new Set(
+      accounts.flatMap((account) =>
+        account.deleted || account.region.trim().length === 0 ? [] : [account.region.trim()],
+      ),
+    ),
+  ].sort((left, right) => left.localeCompare(right))
   const statistics = accountStatistics(accounts)
   const transfers = transferStatistics(accounts)
-  const usedCounts = proxyUsedCounts(accounts)
   const nextId = Math.max(0, ...accounts.map((item) => item.id)) + 1
+  const recordIdsOf = (rows: readonly MytAccount[]): string[] =>
+    rows.flatMap((item) => (item.recordId === undefined ? [] : [item.recordId]))
+  const deviceRecordId = (id: number | null): string | null =>
+    id === null ? null : (devices.find((item) => item.id === id)?.recordId ?? null)
+  const proxyRecordId = (id: number | null): string | null =>
+    id === null ? null : (proxies.find((item) => item.id === id)?.recordId ?? null)
+  const instanceRecordId = (deviceId: number | null, seq: number | null): string | null =>
+    deviceId === null || seq === null ? null : (instanceIds[`${deviceId}:${seq}`] ?? null)
+  const groupTag = (tag: string): string => (tag === "未分组" ? "" : tag)
+  const rememberAccountGroup = (name: string): Promise<void> => {
+    const tag = name.trim()
+    if (tag.length === 0) return Promise.resolve()
+    return createLabelsApi()
+      .create(PageKey.Accounts, "group", tag)
+      .then(() => {
+        labelsChanged()
+      })
+      .catch(() => undefined)
+  }
+  const rememberAccountRemark = (name: string): Promise<void> => {
+    const parts = splitRemarks(name).filter((part) => !part.includes("+"))
+    if (parts.length === 0) return Promise.resolve()
+    return Promise.all(
+      parts.map((part) => createLabelsApi().create(PageKey.Accounts, "remark", part)),
+    )
+      .then(() => {
+        labelsChanged()
+      })
+      .catch(() => undefined)
+  }
+  const reloadAccounts = (): void => setReloadKey((current) => current + 1)
+  const reportError = (error: unknown): void => {
+    void accountRequestError(error).then((text) => message.error(text))
+  }
   const tagCountText = selected.length > 0 ? `(${selected.length})` : `(${filtered.length})`
   const tagOperationDisabled = selected.length === 0 && filtered.length > 5000
   const saveTags = async (mode: "add" | "remove" | "clear", tags: readonly string[]): Promise<void> => {
@@ -243,6 +438,167 @@ export const AccountsListPage = ({
     await createAccountsApi().updateTags(groupId, ids, mode, mode === "clear" ? [] : tags)
     setAccounts((current) => mutateTagBucket(current, deskIds, tags, mode, nowText()))
   }
+  const rememberAccountLabel = (kind: "group" | "remark", name: string, scope?: "account" | "account-tag"): void => {
+    const value = name.trim()
+    if (value.length === 0 || value.includes("+")) return
+    void createLabelsApi()
+      .create(PageKey.Accounts, kind === "remark" ? "remark" : "group", value, scope ?? "account")
+      .then(() => labelsChanged())
+      .catch(() => undefined)
+  }
+  const saveAccountGroup = (account: MytAccount, name: string): void => {
+    if (name.includes("+")) {
+      message.error("分组名称不能包含 + 符号")
+      return
+    }
+    const apply = (): void => {
+      setAccounts((current) =>
+        current.map((item) => (item.id === account.id ? { ...item, tag: name } : item)),
+      )
+    }
+    if (groupId.length === 0 || account.recordId === undefined) {
+      apply()
+      return
+    }
+    void createAccountsApi()
+      .setGroup(groupId, [account.recordId], name)
+      .then(() => {
+        apply()
+        rememberAccountLabel("group", name)
+      })
+      .catch(reportError)
+  }
+  const saveAccountTag = (account: MytAccount, previous: string | null, name: string): void => {
+    if (name.includes("+")) {
+      message.error("标签名称不能包含 + 符号")
+      return
+    }
+    const apply = (): void => {
+      setAccounts((current) =>
+        current.map((item) => {
+          if (item.id !== account.id) return item
+          const without = previous === null ? item.tagBucket : item.tagBucket.filter((tag) => tag !== previous)
+          return { ...item, tagBucket: name.length === 0 || without.includes(name) ? without : [...without, name] }
+        }),
+      )
+    }
+    if (groupId.length === 0 || account.recordId === undefined) {
+      apply()
+      return
+    }
+    const api = createAccountsApi()
+    const run = async (): Promise<void> => {
+      if (previous !== null && previous !== name) await api.updateTags(groupId, [account.recordId ?? ""], "remove", [previous])
+      if (name.length > 0 && name !== previous) await api.updateTags(groupId, [account.recordId ?? ""], "add", [name])
+      apply()
+      rememberAccountLabel("group", name, "account-tag")
+    }
+    void run().catch(reportError)
+  }
+  const saveAccountRemark = (account: MytAccount, name: string): void => {
+    if (splitRemarks(name).some((part) => part.includes("+"))) {
+      message.error("备注名称不能包含 + 符号")
+      return
+    }
+    if (name.length > 200) {
+      message.error("备注总长度不能超过 200")
+      return
+    }
+    const apply = (): void => {
+      setAccounts((current) =>
+        current.map((item) => (item.id === account.id ? { ...item, remark: name } : item)),
+      )
+    }
+    if (groupId.length === 0 || account.recordId === undefined) {
+      apply()
+      return
+    }
+    void createAccountsApi()
+      .setNote(groupId, [account.recordId], name)
+      .then(() => {
+        apply()
+        for (const part of splitRemarks(name)) rememberAccountLabel("remark", part)
+      })
+      .catch(reportError)
+  }
+  const applyAccountBatch = (choice: BatchAssignResult): void => {
+    const groupName = choice.group.kind === "set" ? (choice.group.values[0] ?? "") : ""
+    const remarkNames = choice.remarks.kind === "set" ? [...choice.remarks.values] : []
+    const tagNames = choice.tags.kind === "set" ? choice.tags.values : []
+    if (groupName.includes("+")) {
+      message.error("分组名称不能包含 + 符号")
+      return
+    }
+    if (remarkNames.some((name) => name.includes("+"))) {
+      message.error("备注名称不能包含 + 符号")
+      return
+    }
+    if (tagNames.some((name) => name.includes("+"))) {
+      message.error("标签名称不能包含 + 符号")
+      return
+    }
+    const targets = selected.filter((item) => !item.deleted)
+    if (
+      choice.remarks.kind === "set" &&
+      targets.some((item) => addRemarks(item.remark, remarkNames).length > 200)
+    ) {
+      message.error("备注总长度不能超过 200")
+      return
+    }
+    const recordIds = targets.flatMap((item) => (item.recordId === undefined ? [] : [item.recordId]))
+    const ids = new Set(targets.map((item) => item.id))
+    const apply = (): void => {
+      setAccounts((current) =>
+        current.map((item) => {
+          if (!ids.has(item.id)) return item
+          const tagBucket =
+            choice.tags.kind === "skip"
+              ? item.tagBucket
+              : choice.tags.kind === "clear"
+                ? []
+                : [...new Set([...item.tagBucket, ...choice.tags.values])]
+          return {
+            ...item,
+            ...(choice.group.kind === "skip" ? {} : { tag: groupName }),
+            ...(choice.remarks.kind === "skip"
+              ? {}
+              : { remark: choice.remarks.kind === "clear" ? "" : addRemarks(item.remark, remarkNames) }),
+            tagBucket,
+          }
+        }),
+      )
+      setBatchAssignOpen(false)
+      message.success("已分配")
+    }
+    if (groupId.length === 0 || recordIds.length === 0) {
+      apply()
+      return
+    }
+    const api = createAccountsApi()
+    const run = async (): Promise<void> => {
+      if (choice.group.kind !== "skip") {
+        await api.setGroup(groupId, recordIds, groupName)
+        rememberAccountLabel("group", groupName)
+      }
+      if (choice.remarks.kind !== "skip") {
+        const notes = new Map<string, string[]>()
+        for (const item of targets) {
+          if (item.recordId === undefined) continue
+          const note = choice.remarks.kind === "clear" ? "" : addRemarks(item.remark, remarkNames)
+          notes.set(note, [...(notes.get(note) ?? []), item.recordId])
+        }
+        for (const [note, ids] of notes) await api.setNote(groupId, ids, note)
+        for (const name of remarkNames) rememberAccountLabel("remark", name)
+      }
+      if (choice.tags.kind === "clear") await api.updateTags(groupId, recordIds, "clear")
+      if (choice.tags.kind === "set") {
+        await api.updateTags(groupId, recordIds, "add", choice.tags.values)
+        for (const name of choice.tags.values) rememberAccountLabel("group", name, "account-tag")
+      }
+      apply()
+    }
+    void run().catch(reportError)
+  }
 
   useEffect(() => {
     if (groupId.length === 0) return
@@ -251,6 +607,53 @@ export const AccountsListPage = ({
     setAccounts([])
     setSelectedIds([])
     const load = async () => {
+      const devicesApi = createDevicesApi()
+      const [deviceRows, proxyRows, transfers, ownedBoxes] = await Promise.all([
+        devicesApi.list(groupId),
+        createProxiesApi().list([groupId]),
+        api.listTransfers(groupId),
+        devicesApi.owned().catch(() => []),
+      ])
+      const ownedById = new Map(ownedBoxes.map((box) => [box.id, box]))
+      const nextDevices = deviceRows.map((device, index) => {
+        const owned = ownedById.get(device.id)
+        return {
+          id: index + 1,
+          ip: owned?.host ?? device.host,
+          name: device.name,
+          recordId: device.id,
+          serial: owned?.externalId ?? "",
+          ...(owned?.sequenceNo == null ? {} : { sequenceNo: owned.sequenceNo }),
+          ...(owned?.boxGroupName == null || owned.boxGroupName.length === 0
+            ? {}
+            : { boxGroupName: owned.boxGroupName }),
+        }
+      })
+      const nextInstances: Record<string, string> = {}
+      for (const [index, device] of deviceRows.entries()) {
+        for (const instance of device.instances) {
+          nextInstances[`${index + 1}:${instance.index}`] = instance.id
+        }
+      }
+      const nextProxies: AccountProxy[] = proxyRows.map((proxy) => ({
+        expiredTime: proxy.expiredTime ?? "",
+        id: proxy.id,
+        ip: proxy.ip,
+        port: Number(proxy.port) || 0,
+        ...(proxy.uuid === undefined ? {} : { recordId: proxy.uuid }),
+        remark: proxy.remark,
+        ...(proxy.apiTags === undefined ? {} : { tags: proxy.apiTags }),
+      }))
+      const deviceNumber = new Map(nextDevices.flatMap((item) => [[item.recordId, item.id] as const]))
+      const proxyNumber = new Map(
+        nextProxies.flatMap((item) =>
+          item.recordId === undefined ? [] : [[item.recordId, item.id] as const],
+        ),
+      )
+      const transferCode = new Map<string, string>()
+      for (const row of transfers) {
+        for (const id of row.accountIds) transferCode.set(id, row.code)
+      }
       const records: OperationAccount[] = []
       for (const deleted of [false, true]) {
         for (let page = 1; !stop; page += 1) {
@@ -259,7 +662,14 @@ export const AccountsListPage = ({
           if (result.items.length === 0 || page * result.pageSize >= result.total) break
         }
       }
-      const desk = records.map(toDeskAccount)
+      const desk = records.map(toDeskAccount).map((item) => ({
+        ...item,
+        deviceId:
+          item.recordDeviceId === undefined ? null : (deviceNumber.get(item.recordDeviceId) ?? null),
+        proxyId:
+          item.recordProxyId === undefined ? null : (proxyNumber.get(item.recordProxyId) ?? null),
+        transferKey: item.recordId === undefined ? "" : (transferCode.get(item.recordId) ?? ""),
+      }))
       const ids = desk.flatMap((item) => (item.recordId === undefined ? [] : [item.recordId]))
       const credentials = []
       for (let offset = 0; offset < ids.length && !stop; offset += 500) {
@@ -267,6 +677,9 @@ export const AccountsListPage = ({
       }
       const byId = new Map(credentials.map((item) => [item.id, item]))
       if (stop) return
+      setDevices(nextDevices)
+      setProxies(nextProxies)
+      setInstanceIds(nextInstances)
       setAccounts(
         desk.map((item) => {
           const credential = item.recordId === undefined ? undefined : byId.get(item.recordId)
@@ -280,19 +693,74 @@ export const AccountsListPage = ({
     return () => {
       stop = true
     }
-  }, [groupId, message.error])
+  }, [groupId, message.error, reloadKey])
+  useEffect(() => {
+    if (groupId.length === 0) return
+    let stop = false
+    const refreshBindings = async (): Promise<void> => {
+      const [ownedBoxes, proxyRows] = await Promise.all([
+        createDevicesApi().owned().catch(() => []),
+        createProxiesApi().list([groupId]).catch(() => []),
+      ])
+      if (stop) return
+      setDevices((current) =>
+        current.map((device) => {
+          const owned =
+            device.recordId === undefined
+              ? undefined
+              : ownedBoxes.find((box) => box.id === device.recordId)
+          if (owned === undefined) return device
+          return {
+            id: device.id,
+            ip: owned.host,
+            name: device.name,
+            serial: owned.externalId,
+            ...(device.recordId === undefined ? {} : { recordId: device.recordId }),
+            ...(owned.sequenceNo == null ? {} : { sequenceNo: owned.sequenceNo }),
+            ...(owned.boxGroupName == null || owned.boxGroupName.length === 0
+              ? {}
+              : { boxGroupName: owned.boxGroupName }),
+          }
+        }),
+      )
+      setProxies((current) =>
+        current.map((proxy) => {
+          const fresh = proxyRows.find((row) => row.uuid === proxy.recordId || row.id === proxy.id)
+          if (fresh === undefined) return proxy
+          return {
+            ...proxy,
+            ip: fresh.ip,
+            remark: fresh.remark,
+            ...(fresh.apiTags === undefined ? {} : { tags: fresh.apiTags }),
+          }
+        }),
+      )
+    }
+    const timer = window.setInterval(() => void refreshBindings(), 15_000)
+    window.addEventListener("business-labels-changed", refreshBindings)
+    const onVisible = (): void => {
+      if (document.visibilityState === "visible") void refreshBindings()
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    return () => {
+      stop = true
+      window.clearInterval(timer)
+      window.removeEventListener("business-labels-changed", refreshBindings)
+      document.removeEventListener("visibilitychange", onVisible)
+    }
+  }, [groupId])
 
   const applyQuery = (next = draft): void => {
     setDraft(next)
     setQuery(next)
-    setSelectedIds([])
   }
 
   const resetQuery = (): void => {
     const empty = emptyAccountQuery()
+    setDeviceText("")
+    setProxyText("")
     setDraft(empty)
     setQuery(empty)
-    setSelectedIds([])
   }
 
   const changeSelectQuery = (patch: Partial<AccountQuery>): void => {
@@ -430,154 +898,199 @@ export const AccountsListPage = ({
       proxyIds,
     }
   }, [assignForm, live, proxies])
+  const accountSelection = useFilteredRowSelection({
+    getCheckboxProps: (account: MytAccount) => ({
+      "aria-label": `选择 ${account.username || account.uid}`,
+    }),
+    onChange: (keys) => setSelectedIds(keys.map((key) => Number(key))),
+    pageKeys: pageSlice(filtered, accountPaging.current, accountPaging.pageSize).map((account) => account.id),
+    rowKey: "id",
+    rows: filtered,
+    selectedKeys: selectedIds,
+    selectionScope,
+  })
 
   return (
     <section className="module-page accounts-page">
-      <Card className="filter-bar" size="small">
+      <Card className="condition-panel filter-bar" size="small">
         <BusinessLabelFilter
           page={PageKey.Accounts}
           title="账号分组"
-          options={tags.map((tag) => ({ value: tag, label: tag }))}
-          value={draft.tag}
-          onChange={(tag) => changeSelectQuery({ tag })}
+          system
+          blankLabel={usageLabel("未分组", ungroupedAccounts)}
+          options={tags.map((tag) => ({ value: tag, label: usageLabel(tag, groupCounts.get(tag) ?? 0) }))}
+          value={draft.ungrouped ? UNASSIGNED_VALUE : draft.tag}
+          onChange={(tag) =>
+            changeSelectQuery(
+              tag === UNASSIGNED_VALUE ? { tag: "", ungrouped: true } : { tag, ungrouped: false },
+            )
+          }
           canWrite={canWrite}
           canDelete={allowDelete}
+          closable
         />
         <BusinessLabelFilter
           page={PageKey.Accounts}
-          title="标签"
+          title="账号标签"
           scope="account-tag"
-          options={tagBuckets.map((tag) => ({ value: tag, label: tag }))}
-          value={draft.tagBucket}
-          onChange={(tagBucket) => changeSelectQuery({ tagBucket })}
+          multiple
+          system
+          blankLabel={usageLabel("未标签", untaggedAccounts)}
+          options={tagBuckets.map((tag) => ({
+            value: tag,
+            label: usageLabel(tag, bucketCounts.get(tag) ?? 0),
+          }))}
+          value={draft.untagged ? [UNASSIGNED_VALUE] : draft.tagBucket}
+          onChange={(tagBucket) =>
+            changeSelectQuery(
+              tagBucket.includes(UNASSIGNED_VALUE)
+                ? { tagBucket: [], untagged: true }
+                : { tagBucket, untagged: false },
+            )
+          }
           canWrite={canWrite}
           canDelete={allowDelete}
+          closable
         />
-        <Space className="resource-filter-row" wrap>
-          <span className="filter-label">账号状态：</span>
-          <Select
-            allowClear
-            aria-label="账号状态"
-            onChange={(value: string | null) => changeSelectQuery({ status: value ?? "" })}
-            options={[...STATUS_OPTIONS]}
-            placeholder="账号状态"
-            style={{ width: 140 }}
-            value={draft.status.length === 0 ? null : draft.status}
-            virtual={false}
-          />
-          <span className="filter-label">APP类型：</span>
-          <Select
-            allowClear
-            aria-label="APP类型"
-            onChange={(value: string | null) => changeSelectQuery({ app: value ?? "" })}
-            options={[...APP_OPTIONS]}
-            placeholder="APP类型"
-            style={{ width: 140 }}
-            value={draft.app.length === 0 ? null : draft.app}
-            virtual={false}
-          />
-          <span className="filter-label">备份方式：</span>
-          <Select
-            allowClear
-            aria-label="备份方式"
-            onChange={(value: string | null) => changeSelectQuery({ backType: value ?? "" })}
-            options={[...BACK_TYPE_OPTIONS]}
-            placeholder="备份方式"
-            style={{ width: 140 }}
-            value={draft.backType.length === 0 ? null : draft.backType}
-            virtual={false}
-          />
-          <span className="filter-label">绑定设备：</span>
-          <Select
+        <BusinessLabelFilter
+          page={PageKey.Accounts}
+          title="用户备注"
+          kind="remark"
+          scope="account"
+          system
+          blankLabel={usageLabel("未备注", unremarkedAccounts)}
+          multiple
+          options={remarks.map((remark) => ({
+            value: remark,
+            label: usageLabel(remark, remarkCounts.get(remark) ?? 0),
+          }))}
+          value={draft.unremarked ? [UNASSIGNED_VALUE] : draft.userRemarks}
+          onChange={(userRemarks) =>
+            changeSelectQuery(
+              userRemarks.includes(UNASSIGNED_VALUE)
+                ? { userRemarks: [], unremarked: true }
+                : { userRemarks, unremarked: false },
+            )
+          }
+          canWrite={canWrite}
+          canDelete={allowDelete}
+          closable
+        />
+        <LabelFilterRow
+          title="账号状态"
+          system
+          options={STATUS_OPTIONS.map((option) => ({ label: option.label, value: option.value }))}
+          selected={draft.status.length === 0 ? [] : [draft.status]}
+          onChange={(values) => changeSelectQuery({ status: values[0] ?? "" })}
+        />
+        <LabelFilterRow
+          title="APP类型"
+          system
+          options={APP_OPTIONS.map((option) => ({ label: option.label, value: option.value }))}
+          selected={draft.app.length === 0 ? [] : [draft.app]}
+          onChange={(values) => changeSelectQuery({ app: values[0] ?? "" })}
+        />
+        <LabelFilterRow
+          title="备份方式"
+          system
+          options={BACK_TYPE_OPTIONS.map((option) => ({ label: option.label, value: option.value }))}
+          selected={draft.backType.length === 0 ? [] : [draft.backType]}
+          onChange={(values) => changeSelectQuery({ backType: values[0] ?? "" })}
+        />
+        <LabelFilterRow
+          title="快捷筛选"
+          system
+          multiple
+          options={QUICK_FILTER_OPTIONS.map((option) => ({
+            label: option.label,
+            value: option.value,
+          }))}
+          selected={[...draft.quick]}
+          onChange={(values) => changeSelectQuery({ quick: normalizeQuick(values) })}
+        />
+        <LabelFilterRow
+          title="归属地"
+          system
+          multiple
+          options={regions.map((region) => ({ label: region, value: region }))}
+          selected={[...draft.region]}
+          onChange={(region) => changeSelectQuery({ region })}
+        />
+        <Space className="condition-search resource-filter-row" wrap>
+          <span className="filter-label">搜索</span>
+          <AutoComplete
             allowClear
             aria-label="绑定设备"
-            onChange={(value: number | null) =>
-              changeSelectQuery({ deviceId: value === null ? "" : String(value) })
-            }
-            options={devices.map((device) => ({
-              label: `${device.name} - ${device.ip}`,
-              value: device.id,
-            }))}
+            filterOption={(input, option) => labelIncludes(String(option?.value ?? ""), input)}
+            onChange={(value) => {
+              const text = typeof value === "string" ? value : ""
+              setDeviceText(text)
+              changeSelectQuery({
+                deviceId: resourceIdForText(
+                  text,
+                  devices.map((device) => ({ id: device.id, label: deviceOptionLabel(device) })),
+                ),
+              })
+            }}
+            options={devices.map((device) => {
+              const label = deviceOptionLabel(device)
+              return { label, value: label }
+            })}
             placeholder="绑定设备"
-            showSearch
             style={{ width: 185 }}
-            value={draft.deviceId.length === 0 ? null : Number(draft.deviceId)}
-            virtual={false}
+            value={deviceText}
           />
-        </Space>
-        <Space className="resource-filter-row quick-filters" wrap>
-          <span className="filter-label">快捷筛选：</span>
-          <Checkbox.Group
-            onChange={(value) => changeSelectQuery({ quick: normalizeQuick(value.map(String)) })}
-            options={QUICK_FILTER_OPTIONS.map((option) => ({
-              label: option.label,
-              value: option.value,
-            }))}
-            value={[...draft.quick]}
-          />
-        </Space>
-        <Space className="resource-filter-row" wrap>
-          <span className="filter-label">绑定代理：</span>
-          <Select
+          <AutoComplete
             allowClear
             aria-label="绑定代理"
-            onChange={(value: number | null) =>
-              changeSelectQuery({ proxyId: value === null ? "" : String(value) })
-            }
-            options={proxies.map((proxy) => ({
-              label: formatProxyOptionLabel(proxy, usedCounts.get(proxy.id) ?? 0),
-              value: proxy.id,
-            }))}
-            placeholder="请选择代理"
+            filterOption={(input, option) => labelIncludes(String(option?.value ?? ""), input)}
+            onChange={(value) => {
+              const text = typeof value === "string" ? value : ""
+              setProxyText(text)
+              changeSelectQuery({
+                proxyId: resourceIdForText(
+                  text,
+                  proxies.map((proxy) => ({
+                    id: proxy.id,
+                    label: formatProxyOptionLabel(proxy, usedCounts.get(proxy.id) ?? 0),
+                  })),
+                ),
+              })
+            }}
+            options={proxies.map((proxy) => {
+              const label = formatProxyOptionLabel(proxy, usedCounts.get(proxy.id) ?? 0)
+              return { label, value: label }
+            })}
+            placeholder="绑定代理"
             style={{ width: 220 }}
-            value={draft.proxyId.length === 0 ? null : Number(draft.proxyId)}
-            virtual={false}
+            value={proxyText}
           />
-          <span className="filter-label">用户名</span>
-          <Input
-            allowClear
-            aria-label="用户名"
-            onChange={(event) => setDraft({ ...draft, username: event.target.value })}
-            onPressEnter={() => applyQuery()}
-            placeholder="用户名"
-            style={{ width: 160 }}
-            value={draft.username}
-          />
-          <span className="filter-label">UID</span>
-          <Input
-            allowClear
-            aria-label="UID"
-            onChange={(event) => setDraft({ ...draft, uidQuery: event.target.value })}
-            onPressEnter={() => applyQuery()}
-            placeholder="UID（逗号/空格分隔）"
-            style={{ width: 200 }}
-            value={draft.uidQuery}
-          />
-          <span className="filter-label">备注</span>
-          <Input
-            allowClear
-            aria-label="备注筛选"
-            onChange={(event) => setDraft({ ...draft, remark: event.target.value })}
-            onPressEnter={() => applyQuery()}
-            placeholder="备注"
-            style={{ width: 160 }}
-            value={draft.remark}
-          />
-          <span className="filter-label">归属地</span>
-          <Input
-            allowClear
-            aria-label="归属地"
-            onChange={(event) => setDraft({ ...draft, region: event.target.value })}
-            onPressEnter={() => applyQuery()}
-            placeholder="归属地(US,GB)"
-            style={{ width: 140 }}
-            value={draft.region}
-          />
+          <Popover
+            content={
+              <Input.TextArea
+                aria-label="用户名 / UID 内容"
+                autoSize={{ minRows: 8, maxRows: 16 }}
+                onChange={(event) => changeSelectQuery({ identity: event.target.value })}
+                placeholder="用户名或 UID，可用逗号、分号、空格或换行分隔"
+                style={{ width: 420 }}
+                value={draft.identity}
+              />
+            }
+            placement="bottomLeft"
+            trigger="click"
+          >
+            <Input
+              aria-label="用户名 / UID"
+              placeholder="用户名 / UID"
+              readOnly
+              style={{ width: 220, cursor: "pointer" }}
+              value={draft.identity}
+            />
+          </Popover>
           <Input
             allowClear
             aria-label="最少粉丝数"
-            onChange={(event) => setDraft({ ...draft, followerGT: event.target.value })}
-            onPressEnter={() => applyQuery()}
+            onChange={(event) => changeSelectQuery({ followerGT: event.target.value })}
             placeholder="最少粉丝数"
             style={{ width: 120 }}
             value={draft.followerGT}
@@ -585,8 +1098,7 @@ export const AccountsListPage = ({
           <Input
             allowClear
             aria-label="最少关注数"
-            onChange={(event) => setDraft({ ...draft, followingGT: event.target.value })}
-            onPressEnter={() => applyQuery()}
+            onChange={(event) => changeSelectQuery({ followingGT: event.target.value })}
             placeholder="最少关注数"
             style={{ width: 120 }}
             value={draft.followingGT}
@@ -594,20 +1106,18 @@ export const AccountsListPage = ({
           <Input
             allowClear
             aria-label="转移码"
-            onChange={(event) => setDraft({ ...draft, transferKey: event.target.value })}
-            onPressEnter={() => applyQuery()}
+            onChange={(event) => changeSelectQuery({ transferKey: event.target.value })}
             placeholder="转移码"
             style={{ width: 180 }}
             value={draft.transferKey}
           />
-          <Button icon={<SearchOutlined aria-hidden />} onClick={() => applyQuery()} type="primary">
-            搜索
-          </Button>
           <Button onClick={resetQuery}>重置</Button>
+          <FilterModeSwitch mode={filterMode} onChange={setFilterMode} />
         </Space>
       </Card>
       <div className="resource-crud-toolbar">
         <Space wrap>
+          <SelectionScopeSwitch onChange={setSelectionScope} scope={selectionScope} />
           {canWrite ? (
             <>
               <Button disabled={selected.length !== 1} onClick={openEditSelected}>
@@ -623,6 +1133,13 @@ export const AccountsListPage = ({
                   删除
                 </Button>
               ) : null}
+              <Button
+                disabled={selected.length === 0}
+                onClick={() => setBatchAssignOpen(true)}
+                type="primary"
+              >
+                批量分配（{selected.length}）
+              </Button>
             </>
           ) : null}
         </Space>
@@ -632,8 +1149,18 @@ export const AccountsListPage = ({
             icon={<DownloadOutlined aria-hidden />}
             onClick={() =>
               confirmExport(filtered.length, () => {
-                downloadCsv(accountsToCsv(filtered), "全部数据.csv")
-                message.success("导出成功")
+                if (groupId.length === 0) {
+                  downloadCsv(accountsToCsv(filtered), "全部数据.csv")
+                  message.success("导出成功")
+                  return
+                }
+                void createAccountsApi()
+                  .exportByIds(groupId, recordIdsOf(filtered))
+                  .then((csv) => {
+                    downloadCsv(csv, "全部数据.csv")
+                    message.success("导出成功")
+                  })
+                  .catch(reportError)
               })
             }
           >
@@ -645,6 +1172,7 @@ export const AccountsListPage = ({
               items: [
                 { key: "downloadSelected", label: "导出选中" },
                 { key: "editTag", label: "修改分组" },
+                { key: "editRemark", label: "修改备注" },
                 { key: "editProxy", label: "修改代理" },
                 { key: "editRegion", label: "修改归属地" },
                 { key: "showPlayStats", label: "查询播放量" },
@@ -653,8 +1181,18 @@ export const AccountsListPage = ({
               onClick: ({ key }) => {
                 if (key === "downloadSelected") {
                   confirmExport(selected.length, () => {
-                    downloadCsv(accountsToCsv(selected), "选中数据.csv")
-                    message.success("导出成功")
+                    if (groupId.length === 0) {
+                      downloadCsv(accountsToCsv(selected), "选中数据.csv")
+                      message.success("导出成功")
+                      return
+                    }
+                    void createAccountsApi()
+                      .exportByIds(groupId, recordIdsOf(selected))
+                      .then((csv) => {
+                        downloadCsv(csv, "选中数据.csv")
+                        message.success("导出成功")
+                      })
+                      .catch(reportError)
                   })
                   return
                 }
@@ -662,6 +1200,13 @@ export const AccountsListPage = ({
                   requireSelection(() => {
                     setEditTagValue("")
                     setEditTagOpen(true)
+                  })
+                  return
+                }
+                if (key === "editRemark") {
+                  requireSelection(() => {
+                    setEditRemarkValue("")
+                    setEditRemarkOpen(true)
                   })
                   return
                 }
@@ -825,25 +1370,53 @@ export const AccountsListPage = ({
           {
             key: "tagBucket",
             render: (_value: unknown, account: MytAccount) =>
-              account.tagBucket.map((tag) => (
-                <Tag
-                  color="success"
-                  key={tag}
-                  onClick={() => copyValue(tag)}
-                  style={{ cursor: "pointer" }}
-                >
-                  {tag}
-                </Tag>
-              )),
+              canWrite ? (
+                <Space size={4} wrap>
+                  {account.tagBucket.length === 0 ? (
+                    <EditableTextTag
+                      color="blue"
+                      emptyLabel="标签"
+                      name={null}
+                      onCommit={(name) => saveAccountTag(account, null, name)}
+                    />
+                  ) : (
+                    account.tagBucket.map((tag) => (
+                      <EditableTextTag
+                        color="blue"
+                        emptyLabel="标签"
+                        key={tag}
+                        name={tag}
+                        onCommit={(name) => saveAccountTag(account, tag, name)}
+                        onRemove={() => saveAccountTag(account, tag, "")}
+                        removeLabel={`移除标签 ${tag}`}
+                      />
+                    ))
+                  )}
+                </Space>
+              ) : (
+                account.tagBucket.map((tag) => (
+                  <Tag color="success" key={tag}>
+                    {tag}
+                  </Tag>
+                ))
+              ),
             title: "标签组",
           },
           {
             key: "tag",
-            render: (_value: unknown, account: MytAccount) => (
-              <Tag onClick={() => copyValue(account.tag)} style={{ cursor: "pointer" }}>
-                {account.tag}
-              </Tag>
-            ),
+            render: (_value: unknown, account: MytAccount) =>
+              canWrite ? (
+                <EditableTextTag
+                  color="orange"
+                  emptyLabel="分组"
+                  name={account.tag.length > 0 ? account.tag : null}
+                  onCommit={(name) => saveAccountGroup(account, name)}
+                  onRemove={() => saveAccountGroup(account, "")}
+                  removeLabel={`移除分组 ${account.tag}`}
+                />
+              ) : (
+                account.tag
+              ),
             title: "账号分组",
           },
           {
@@ -901,20 +1474,22 @@ export const AccountsListPage = ({
             width: 80,
           },
           {
-            dataIndex: "remark",
-            ellipsis: true,
             key: "remark",
-            render: (remark: string, account: MytAccount) => {
+            render: (_value: unknown, account: MytAccount) => {
               const label = account.extra.proxyLabel ?? ""
-              if (remark.length === 0 && label.length === 0) return "-"
               return (
                 <>
-                  {remark.length === 0 ? null : <div>{remark}</div>}
+                  <RemarkTags
+                    canWrite={canWrite}
+                    onChange={(name) => saveAccountRemark(account, name)}
+                    removeLabel={(name) => `移除备注 ${name}`}
+                    value={account.remark}
+                  />
                   {label.length === 0 ? null : <div className="muted">{label}</div>}
                 </>
               )
             },
-            title: "备注",
+            title: "用户备注",
           },
           {
             key: "device",
@@ -922,36 +1497,21 @@ export const AccountsListPage = ({
               const device = accountDevice(devices, account.deviceId)
               const proxy = accountProxy(proxies, account.proxyId)
               return (
-                <Tooltip
-                  title={
-                    <div>
-                      <div>代理:{proxy === null ? "" : `[${proxy.id}]-${proxy.remark}`}</div>
-                      {device === null ? null : (
-                        <>
-                          <div>IP:{device.ip}</div>
-                          <div>序列号:{device.serial}</div>
-                          <div>点击进入设备管理页面</div>
-                        </>
-                      )}
-                    </div>
-                  }
-                >
+                <Tooltip title={<span style={{ whiteSpace: "pre-line" }}>{accountDeviceDetail(device, proxy)}</span>}>
                   <div>
-                    {proxy === null ? null : (
-                      <div className="muted">{`代理:[${proxy.id}]-${proxy.remark}`}</div>
-                    )}
-                    {device === null ? null : (
-                      <Link to="/operations/devices" title="打开设备管理">
-                        {device.name}
-                        {account.deviceSeq === null
-                          ? ""
-                          : (SEQ_EMOJI[account.deviceSeq] ?? account.deviceSeq)}
-                      </Link>
+                    {device === null ? (
+                      accountDeviceName(device, proxy)
+                    ) : (
+                      <Link to="/operations/devices">{accountDeviceName(device, proxy)}</Link>
                     )}
                     {account.backType === "2" ? (
                       <span title="本地备份"> 本地</span>
                     ) : account.backType === "3" ? (
                       <span title="私有云备份"> 云</span>
+                    ) : account.backType === "4" ? (
+                      <span title="云端备份"> 云端</span>
+                    ) : account.backType === "5" ? (
+                      <span title="全量备份"> 全量</span>
                     ) : null}
                   </div>
                 </Tooltip>
@@ -969,14 +1529,25 @@ export const AccountsListPage = ({
                 icon={account.favorite ? <StarFilled /> : <StarOutlined />}
                 onClick={() => {
                   if (!canWrite) return
-                  setAccounts((current) =>
-                    current.map((item) =>
-                      item.id === account.id
-                        ? { ...item, favorite: !item.favorite, updateTime: nowText() }
-                        : item,
-                    ),
-                  )
-                  message.success("操作成功")
+                  const next = !account.favorite
+                  const apply = () => {
+                    setAccounts((current) =>
+                      current.map((item) =>
+                        item.id === account.id
+                          ? { ...item, favorite: next, updateTime: nowText() }
+                          : item,
+                      ),
+                    )
+                    message.success("操作成功")
+                  }
+                  if (groupId.length === 0 || account.recordId === undefined) {
+                    apply()
+                    return
+                  }
+                  void createAccountsApi()
+                    .setFavorite(groupId, [account.recordId], next)
+                    .then(apply)
+                    .catch(reportError)
                 }}
                 type={account.favorite ? "primary" : "default"}
               />
@@ -1038,19 +1609,9 @@ export const AccountsListPage = ({
         ]}
         dataSource={filtered}
         locale={{ emptyText: "暂无数据" }}
-        pagination={{
-          pageSize: 10,
-          showSizeChanger: true,
-          showTotal: (total) => `共 ${total} 条`,
-        }}
+        pagination={{ ...accountPaging.pagination, total: filtered.length }}
         rowKey="id"
-        rowSelection={{
-          getCheckboxProps: (account: MytAccount) => ({
-            "aria-label": `选择 ${account.username || account.uid}`,
-          }),
-          onChange: (keys: readonly Key[]) => setSelectedIds(keys.map((key) => Number(key))),
-          selectedRowKeys: [...selectedIds],
-        }}
+        rowSelection={accountSelection}
         scroll={{ x: "max-content" }}
         size="small"
       />
@@ -1068,12 +1629,14 @@ export const AccountsListPage = ({
               message.success("修改成功")
               setEditRecord(null)
             }
-            if (groupId.length === 0 || account.recordId === undefined) {
+            const recordId = account.recordId
+            if (groupId.length === 0 || recordId === undefined) {
               apply()
               return
             }
-            void createAccountsApi()
-              .update(groupId, account.recordId, accountWrite(account))
+            void rememberAccountGroup(account.tag)
+              .then(() => rememberAccountRemark(account.remark))
+              .then(() => createAccountsApi().update(groupId, recordId, accountWrite(account)))
               .then(apply)
               .catch(async (error: unknown) => message.error(await accountRequestError(error)))
           }}
@@ -1100,10 +1663,22 @@ export const AccountsListPage = ({
           onDeleteAll={(tag) => {
             const typed = window.prompt("此操作将删除该分组下所有账号，请输入“确认全部删除”后继续")
             if (typed !== "确认全部删除") return
-            const time = nowText()
             const removed = live.filter((item) => item.tag === tag).length
-            setAccounts((current) => deleteAccountsByTag(current, tag, false, time))
-            message.success(`删除成功,共删除${removed}个账号`)
+            const apply = () => {
+              setAccounts((current) => deleteAccountsByTag(current, tag, false, nowText()))
+              message.success(`删除成功,共删除${removed}个账号`)
+            }
+            if (groupId.length === 0) {
+              apply()
+              return
+            }
+            void createAccountsApi()
+              .deleteByTag(groupId, groupTag(tag), false, typed)
+              .then(() => {
+                message.success(`删除成功,共删除${removed}个账号`)
+                reloadAccounts()
+              })
+              .catch(reportError)
           }}
           onDeleteBanned={(tag) => {
             void modal.confirm({
@@ -1111,12 +1686,22 @@ export const AccountsListPage = ({
               content: "此操作将删除该分组下所有封号账号, 是否继续?",
               okText: "确定",
               onOk: () => {
-                const time = nowText()
-                const removed = live.filter(
-                  (item) => item.tag === tag && item.status === "1",
-                ).length
-                setAccounts((current) => deleteAccountsByTag(current, tag, true, time))
-                message.success(`删除成功, 共删除${removed}个封号账号`)
+                const removed = live.filter((item) => item.tag === tag && item.status === "1").length
+                const apply = () => {
+                  setAccounts((current) => deleteAccountsByTag(current, tag, true, nowText()))
+                  message.success(`删除成功, 共删除${removed}个封号账号`)
+                }
+                if (groupId.length === 0) {
+                  apply()
+                  return
+                }
+                return createAccountsApi()
+                  .deleteByTag(groupId, groupTag(tag), true)
+                  .then(() => {
+                    message.success(`删除成功, 共删除${removed}个封号账号`)
+                    reloadAccounts()
+                  })
+                  .catch(reportError)
               },
               title: "提示",
             })
@@ -1127,8 +1712,21 @@ export const AccountsListPage = ({
               content: "此操作将重置账号封号状态,是否继续?",
               okText: "确定",
               onOk: () => {
-                setAccounts((current) => resetBannedStatus(current, tag, nowText()))
-                message.success("重置成功")
+                const apply = () => {
+                  setAccounts((current) => resetBannedStatus(current, tag, nowText()))
+                  message.success("重置成功")
+                }
+                if (groupId.length === 0) {
+                  apply()
+                  return
+                }
+                return createAccountsApi()
+                  .resetBanned(groupId, groupTag(tag))
+                  .then(() => {
+                    message.success("重置成功")
+                    reloadAccounts()
+                  })
+                  .catch(reportError)
               },
               title: "提示",
             })
@@ -1139,6 +1737,24 @@ export const AccountsListPage = ({
       {transferOpen ? (
         <TransferDialog
           canWrite={canWrite}
+          onCreate={
+            groupId.length === 0
+              ? undefined
+              : () => {
+                  const ids = recordIdsOf(selected)
+                  if (ids.length === 0) {
+                    message.warning("请先选择账号")
+                    return
+                  }
+                  void createAccountsApi()
+                    .createTransfer(groupId, ids)
+                    .then((result) => {
+                      message.success(`已生成转移码 ${result.code}`)
+                      reloadAccounts()
+                    })
+                    .catch(reportError)
+                }
+          }
           onCancel={() => setTransferOpen(false)}
           onCopy={copyValue}
           onExport={(rows) => {
@@ -1154,8 +1770,21 @@ export const AccountsListPage = ({
               message.error("转移码必须为32位十六进制字符")
               return
             }
-            setAccounts((current) => mergeTransferKeys(current, keys, next, nowText()))
-            message.success("合并成功")
+            const apply = () => {
+              setAccounts((current) => mergeTransferKeys(current, keys, next, nowText()))
+              message.success("合并成功")
+            }
+            if (groupId.length === 0) {
+              apply()
+              return
+            }
+            void createAccountsApi()
+              .mergeTransfers(groupId, keys, next)
+              .then(() => {
+                message.success("合并成功")
+                reloadAccounts()
+              })
+              .catch(reportError)
           }}
           onRevoke={(key, count) => {
             void modal.confirm({
@@ -1164,8 +1793,18 @@ export const AccountsListPage = ({
               okText: "确定",
               onOk: () => {
                 const affected = live.filter((item) => item.transferKey === key).length
-                setAccounts((current) => revokeTransferKey(current, key, nowText()))
-                message.success(`撤销成功，共撤销 ${affected} 个账号的转移码`)
+                const apply = () => {
+                  setAccounts((current) => revokeTransferKey(current, key, nowText()))
+                  message.success(`撤销成功，共撤销 ${affected} 个账号的转移码`)
+                }
+                if (groupId.length === 0) {
+                  apply()
+                  return
+                }
+                return createAccountsApi()
+                  .revokeTransfer(groupId, key)
+                  .then(apply)
+                  .catch(reportError)
               },
               title: "撤销转移码确认",
             })
@@ -1184,9 +1823,35 @@ export const AccountsListPage = ({
             }
             const chunks = Math.ceil(count / size)
             const keys = Array.from({ length: chunks }, () => createTransferKey())
-            setAccounts((current) => splitTransferKey(current, key, size, keys, nowText()))
-            message.success(`拆分成功，共生成 ${keys.length} 个新转移码`)
+            const apply = () => {
+              setAccounts((current) => splitTransferKey(current, key, size, keys, nowText()))
+              message.success(`拆分成功，共生成 ${keys.length} 个新转移码`)
+            }
+            if (groupId.length === 0) {
+              apply()
+              return
+            }
+            void createAccountsApi()
+              .splitTransfer(groupId, key, size)
+              .then((result) => {
+                message.success(`拆分成功，共生成 ${result.codes.length} 个新转移码`)
+                reloadAccounts()
+              })
+              .catch(reportError)
           }}
+          onRedeem={
+            groupId.length === 0
+              ? undefined
+              : (code) => {
+                  void createAccountsApi()
+                    .redeemTransfer(groupId, code)
+                    .then((result) => {
+                      message.success(`兑换成功，共转入 ${result.affected} 个账号`)
+                      reloadAccounts()
+                    })
+                    .catch(reportError)
+                }
+          }
           rows={transfers}
         />
       ) : null}
@@ -1201,9 +1866,21 @@ export const AccountsListPage = ({
           }}
           onOk={() => {
             const moved = live.filter((item) => moveOldTags.includes(item.tag)).length
-            setAccounts((current) => moveAccountTags(current, moveOldTags, moveNewTag, nowText()))
-            message.success(`移动成功,共移动${moved}个账号`)
-            setMoveTagOpen(false)
+            const apply = () => {
+              setAccounts((current) => moveAccountTags(current, moveOldTags, moveNewTag, nowText()))
+              message.success(`移动成功,共移动${moved}个账号`)
+              setMoveTagOpen(false)
+            }
+            if (groupId.length === 0) {
+              apply()
+              return
+            }
+            void rememberAccountGroup(moveNewTag)
+              .then(() =>
+                createAccountsApi().moveGroupTags(groupId, moveOldTags.map(groupTag), moveNewTag),
+              )
+              .then(apply)
+              .catch(reportError)
           }}
           tags={tags}
         />
@@ -1221,17 +1898,46 @@ export const AccountsListPage = ({
               message.warning("请选择代理分组或目标代理")
               return
             }
-            setAccounts((current) =>
-              assignProxies(
-                current,
-                assignForm.accountTags,
-                assignPreview.proxyIds,
-                assignForm.assignMode,
-                nowText(),
+            const apply = () => {
+              setAccounts((current) =>
+                assignProxies(
+                  current,
+                  assignForm.accountTags,
+                  assignPreview.proxyIds,
+                  assignForm.assignMode,
+                  nowText(),
+                ),
+              )
+              message.success(`分配成功,共分配${assignPreview.accountCount}个账号`)
+              setAssignOpen(false)
+            }
+            if (groupId.length === 0) {
+              apply()
+              return
+            }
+            const next = assignProxies(
+              accounts,
+              assignForm.accountTags,
+              assignPreview.proxyIds,
+              assignForm.assignMode,
+              nowText(),
+            )
+            const groups = new Map<string, string[]>()
+            for (const account of next) {
+              const previous = accounts.find((item) => item.id === account.id)
+              if (previous === undefined || previous.proxyId === account.proxyId) continue
+              if (account.recordId === undefined || account.proxyId === null) continue
+              const proxyId = proxyRecordId(account.proxyId)
+              if (proxyId === null) continue
+              groups.set(proxyId, [...(groups.get(proxyId) ?? []), account.recordId])
+            }
+            void Promise.all(
+              [...groups.entries()].map(([proxyId, ids]) =>
+                createAccountsApi().assignProxy(groupId, ids, proxyId),
               ),
             )
-            message.success(`分配成功,共分配${assignPreview.accountCount}个账号`)
-            setAssignOpen(false)
+              .then(apply)
+              .catch(reportError)
           }}
           proxyCount={assignPreview.proxyCount}
           proxyId={assignForm.proxyId}
@@ -1246,12 +1952,50 @@ export const AccountsListPage = ({
           onCancel={() => setEditTagOpen(false)}
           onChange={setEditTagValue}
           onOk={() => {
-            setAccounts((current) => editSelectedTag(current, selectedIds, editTagValue, nowText()))
-            message.success(`修改成功,共修改${selected.length}个账号`)
-            setEditTagOpen(false)
+            const apply = () => {
+              setAccounts((current) => editSelectedTag(current, selectedIds, editTagValue, nowText()))
+              message.success(`修改成功,共修改${selected.length}个账号`)
+              setEditTagOpen(false)
+            }
+            if (groupId.length === 0) {
+              apply()
+              return
+            }
+            void rememberAccountGroup(editTagValue)
+              .then(() =>
+                createAccountsApi().setGroup(groupId, recordIdsOf(selected), editTagValue.trim()),
+              )
+              .then(apply)
+              .catch(reportError)
           }}
           tags={tags}
           value={editTagValue}
+        />
+      ) : null}
+      {editRemarkOpen ? (
+        <EditRemarkDialog
+          onCancel={() => setEditRemarkOpen(false)}
+          onChange={setEditRemarkValue}
+          onOk={() => {
+            const remark = editRemarkValue.trim()
+            const apply = () => {
+              setAccounts((current) =>
+                editSelectedRemark(current, selectedIds, remark, nowText()),
+              )
+              message.success(`修改成功,共修改${selected.length}个账号`)
+              setEditRemarkOpen(false)
+            }
+            if (groupId.length === 0) {
+              apply()
+              return
+            }
+            void rememberAccountRemark(remark)
+              .then(() => createAccountsApi().setNote(groupId, recordIdsOf(selected), remark))
+              .then(apply)
+              .catch(reportError)
+          }}
+          remarks={remarks}
+          value={editRemarkValue}
         />
       ) : null}
       {editProxyOpen ? (
@@ -1259,11 +2003,26 @@ export const AccountsListPage = ({
           onCancel={() => setEditProxyOpen(false)}
           onChange={setEditProxyValue}
           onOk={() => {
-            setAccounts((current) =>
-              editSelectedProxy(current, selectedIds, editProxyValue, nowText()),
-            )
-            message.success(`修改成功,共修改${selected.length}个账号`)
-            setEditProxyOpen(false)
+            const apply = () => {
+              setAccounts((current) =>
+                editSelectedProxy(current, selectedIds, editProxyValue, nowText()),
+              )
+              message.success(`修改成功,共修改${selected.length}个账号`)
+              setEditProxyOpen(false)
+            }
+            if (groupId.length === 0) {
+              apply()
+              return
+            }
+            const proxyId = proxyRecordId(editProxyValue)
+            if (editProxyValue !== null && proxyId === null) {
+              message.error("所选代理尚未入库")
+              return
+            }
+            void createAccountsApi()
+              .assignProxy(groupId, recordIdsOf(selected), proxyId)
+              .then(apply)
+              .catch(reportError)
           }}
           proxies={proxies}
           usedCounts={usedCounts}
@@ -1279,11 +2038,21 @@ export const AccountsListPage = ({
               message.error("请输入 2 到 3 位国家简称，如 US、GB、DE")
               return
             }
-            setAccounts((current) =>
-              editSelectedRegion(current, selectedIds, editRegionValue, nowText()),
-            )
-            message.success(`修改成功,共修改${selected.length}个账号`)
-            setEditRegionOpen(false)
+            const apply = () => {
+              setAccounts((current) =>
+                editSelectedRegion(current, selectedIds, editRegionValue, nowText()),
+              )
+              message.success(`修改成功,共修改${selected.length}个账号`)
+              setEditRegionOpen(false)
+            }
+            if (groupId.length === 0) {
+              apply()
+              return
+            }
+            void createAccountsApi()
+              .setRegion(groupId, recordIdsOf(selected), editRegionValue.trim())
+              .then(apply)
+              .catch(reportError)
           }}
           value={editRegionValue}
         />
@@ -1303,7 +2072,7 @@ export const AccountsListPage = ({
                 message.error(await accountRequestError(error))
               })
           }}
-          options={tagBuckets}
+          options={tagChoices}
           tags={tagBucketValue}
         />
       )}
@@ -1330,9 +2099,53 @@ export const AccountsListPage = ({
               tag: backupForm.tag,
               username: backupForm.username,
             })
-            setAccounts((current) => [created, ...current])
-            message.success("正在执行:backup")
-            if (backupForm.closeAfter) setBackupOpen(false)
+            const finish = (account: MytAccount) => {
+              setAccounts((current) => [account, ...current])
+              message.success("正在执行:backup")
+              if (backupForm.closeAfter) setBackupOpen(false)
+            }
+            if (groupId.length === 0) {
+              finish(created)
+              return
+            }
+            const deviceId = deviceRecordId(backupForm.deviceId)
+            const deviceInstanceId = instanceRecordId(backupForm.deviceId, backupForm.deviceSeq)
+            if (deviceId === null || deviceInstanceId === null) {
+              message.error("所选设备或机位尚未入库")
+              return
+            }
+            const knownApps = ["tiktok", "youtube", "facebook", "instagram", "twitter"] as const
+            const app = knownApps.find((item) => item === backupForm.app) ?? "tiktok"
+            const backupType =
+              backupForm.backType === "3"
+                ? "private_cloud"
+                : backupForm.backType === "4"
+                  ? "cloud"
+                  : backupForm.backType === "5"
+                    ? "full"
+                    : "local"
+            void createAccountsApi()
+              .backup(groupId, {
+                app,
+                backupType,
+                deviceId,
+                deviceInstanceId,
+                identifier: backupForm.username,
+                name: backupForm.username,
+                proxyId: proxyRecordId(backupForm.proxyId),
+                secret: backupForm.password,
+                tags: backupForm.tag.trim().length === 0 ? [] : [backupForm.tag.trim()],
+              })
+              .then((saved) => {
+                finish({
+                  ...created,
+                  recordDeviceId: deviceId,
+                  recordId: saved.id,
+                  recordInstanceId: deviceInstanceId,
+                  recordProxyId: proxyRecordId(backupForm.proxyId) ?? undefined,
+                })
+              })
+              .catch(reportError)
           }}
           proxies={proxies}
           tags={tags}
@@ -1350,8 +2163,46 @@ export const AccountsListPage = ({
               message.error("请选择设备和机位")
               return
             }
-            message.success(`正在执行:restore-${restoreAccount.uid}`)
-            if (restoreForm.closeAfter) setRestoreAccount(null)
+            const finish = () => {
+              const deviceId = deviceRecordId(restoreForm.deviceId)
+              const instanceId = instanceRecordId(restoreForm.deviceId, restoreForm.deviceSeq)
+              setAccounts((current) =>
+                current.map((item) =>
+                  item.id === restoreAccount.id
+                    ? {
+                        ...item,
+                        deviceId: restoreForm.deviceId,
+                        deviceSeq: restoreForm.deviceSeq,
+                        proxyId: restoreForm.proxyId,
+                        recordDeviceId: deviceId ?? undefined,
+                        recordInstanceId: instanceId ?? undefined,
+                        recordProxyId: proxyRecordId(restoreForm.proxyId) ?? undefined,
+                        updateTime: nowText(),
+                      }
+                    : item,
+                ),
+              )
+              message.success(`正在执行:restore-${restoreAccount.uid}`)
+              if (restoreForm.closeAfter) setRestoreAccount(null)
+            }
+            if (groupId.length === 0 || restoreAccount.recordId === undefined) {
+              finish()
+              return
+            }
+            const deviceId = deviceRecordId(restoreForm.deviceId)
+            const deviceInstanceId = instanceRecordId(restoreForm.deviceId, restoreForm.deviceSeq)
+            if (deviceId === null || deviceInstanceId === null) {
+              message.error("所选设备或机位尚未入库")
+              return
+            }
+            void createAccountsApi()
+              .start(groupId, restoreAccount.recordId, {
+                deviceId,
+                deviceInstanceId,
+                proxyId: proxyRecordId(restoreForm.proxyId),
+              })
+              .then(finish)
+              .catch(reportError)
           }}
           proxies={proxies}
           title={`启动账号[${restoreAccount.uid}]`}
@@ -1415,6 +2266,24 @@ export const AccountsListPage = ({
           updateVideoData={checkTask.updateVideoData}
         />
       )}
+      <BatchAssignDialog
+        groupOptions={[
+          batchClearOption("清除分组"),
+          ...unionLabelNames(catalogGroups, tags).map((name) => ({ label: name, value: name })),
+        ]}
+        onCancel={() => setBatchAssignOpen(false)}
+        onSubmit={applyAccountBatch}
+        open={batchAssignOpen}
+        remarkOptions={[
+          batchClearOption("清除备注"),
+          ...unionLabelNames(catalogRemarks, remarks).map((name) => ({ label: name, value: name })),
+        ]}
+        tagOptions={[
+          batchClearOption("清除标签"),
+          ...tagChoices.map((name) => ({ label: name, value: name })),
+        ]}
+        selectedCount={selected.length}
+      />
     </section>
   )
 }

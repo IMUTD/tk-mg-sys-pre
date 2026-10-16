@@ -1,6 +1,6 @@
 import { App, Button, Card, Input, Space, Table, type TableColumnsType } from "antd"
-import type { Key } from "react"
 import { type ReactNode, useMemo, useState } from "react"
+import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
 
 import {
   createSeedVideos,
@@ -10,7 +10,7 @@ import {
   type VideoWork,
 } from "./catalog"
 import "../mall/mall.css"
-import { LabelFilterRow } from "../labels/filter-row"
+import { LabelFilterRow, UNASSIGNED_VALUE } from "../labels/filter-row"
 
 const columns: TableColumnsType<VideoWork> = [
   { dataIndex: "uid", title: "UID/作品ID", width: 140 },
@@ -44,6 +44,12 @@ export const VideoPoolPage = ({ canDelete = false }: VideoPoolPageProps): ReactN
   const [videos, setVideos] = useState(createSeedVideos)
   const [selectedIds, setSelectedIds] = useState<readonly number[]>([])
   const rows = filterVideos(videos, query)
+  const videoSelection = useFilteredRowSelection({
+    onChange: (keys) => setSelectedIds(keys.map((key) => Number(key))),
+    rowKey: "id",
+    rows,
+    selectedKeys: selectedIds,
+  })
   const groups = useMemo(
     () => [...new Set(videos.map((item) => item.group))].map((value) => ({ label: value, value })),
     [videos],
@@ -70,13 +76,17 @@ export const VideoPoolPage = ({ canDelete = false }: VideoPoolPageProps): ReactN
       <Card size="small">
         <LabelFilterRow
           title="账号分组"
-          options={groups}
-          selected={draft.group === "" ? [] : [draft.group]}
+          options={groups.filter((item) => item.value.trim().length > 0)}
+          selected={draft.ungrouped ? [UNASSIGNED_VALUE] : draft.group === "" ? [] : [draft.group]}
+          unassigned={{ value: UNASSIGNED_VALUE, label: "未分组" }}
           onChange={(groups) => {
-            const next = { ...draft, group: groups[0] ?? "" }
+            const value = groups[0] ?? ""
+            const next =
+              value === UNASSIGNED_VALUE
+                ? { ...draft, group: "", ungrouped: true }
+                : { ...draft, group: value, ungrouped: false }
             setDraft(next)
             setQuery(next)
-            setSelectedIds([])
           }}
         />
         <Space wrap>
@@ -103,7 +113,6 @@ export const VideoPoolPage = ({ canDelete = false }: VideoPoolPageProps): ReactN
           <Button
             onClick={() => {
               setQuery(draft)
-              setSelectedIds([])
             }}
             type="primary"
           >
@@ -114,7 +123,6 @@ export const VideoPoolPage = ({ canDelete = false }: VideoPoolPageProps): ReactN
               const empty = emptyVideoQuery()
               setDraft(empty)
               setQuery(empty)
-              setSelectedIds([])
             }}
           >
             重置
@@ -138,10 +146,7 @@ export const VideoPoolPage = ({ canDelete = false }: VideoPoolPageProps): ReactN
         dataSource={rows}
         pagination={false}
         rowKey="id"
-        rowSelection={{
-          onChange: (keys: readonly Key[]) => setSelectedIds(keys.map((key) => Number(key))),
-          selectedRowKeys: [...selectedIds],
-        }}
+        rowSelection={videoSelection}
         scroll={{ x: "max-content" }}
         size="small"
       />

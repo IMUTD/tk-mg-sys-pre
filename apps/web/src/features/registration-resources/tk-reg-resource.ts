@@ -1,3 +1,6 @@
+import { type FilterMode, combineChecks } from "../../components/tables/operation-controls"
+import { formatRemarks, splitRemarks } from "../labels/remark-list"
+
 export const FIELD_TYPE_OPTIONS = [
   { label: "忽略此列", value: "ignore" },
   { label: "账号", value: "account" },
@@ -27,6 +30,7 @@ export type TkRegResource = {
   data: Record<string, string>
   email: string
   id: number
+  recordId?: string
   recycle: ResourceStatus
   remark: string
   result: ResourceResult
@@ -37,9 +41,12 @@ export type TkRegResource = {
 export type ResourceQuery = {
   email: string
   remark: string
+  remarkChip: readonly string[]
   result: ResourceResult | ""
   status: ResourceStatus | ""
   tag: string
+  ungrouped: boolean
+  unremarked: boolean
 }
 
 export type FieldMapping = {
@@ -87,9 +94,12 @@ POP3邮箱: 邮箱----POP3服务器----POP3用户名----POP3密码----[代理id]
 export const emptyResourceQuery = (): ResourceQuery => ({
   email: "",
   remark: "",
+  remarkChip: [],
   result: "",
   status: "",
   tag: "",
+  ungrouped: false,
+  unremarked: false,
 })
 
 const pad2 = (value: number): string => value.toString().padStart(2, "0")
@@ -392,24 +402,27 @@ export const resourceTagKey = (resource: TkRegResource): string =>
 export const filterResources = (
   resources: readonly TkRegResource[],
   query: ResourceQuery,
+  mode: FilterMode = "and",
 ): TkRegResource[] =>
   resources.filter((resource) => {
-    if (
-      query.email.length > 0 &&
-      !resource.email.toLowerCase().includes(query.email.toLowerCase())
-    ) {
-      return false
-    }
-    if (
-      query.remark.length > 0 &&
-      !resource.remark.toLowerCase().includes(query.remark.toLowerCase())
-    ) {
-      return false
-    }
-    if (query.tag.length > 0 && resource.tag !== query.tag) return false
-    if (query.status.length > 0 && resource.status !== query.status) return false
-    if (query.result.length > 0 && resource.result !== query.result) return false
-    return true
+    const remarkParts = splitRemarks(resource.remark)
+    return combineChecks(mode, [
+      query.email.length > 0
+        ? resource.email.toLowerCase().includes(query.email.toLowerCase())
+        : null,
+      query.unremarked ? remarkParts.length === 0 : null,
+      ...(query.unremarked ? [] : query.remarkChip.map((name) => remarkParts.includes(name))),
+      query.remark.length > 0
+        ? resource.remark.toLowerCase().includes(query.remark.toLowerCase())
+        : null,
+      query.ungrouped || query.tag.length > 0
+        ? query.ungrouped
+          ? resource.tag.trim().length === 0
+          : resource.tag === query.tag
+        : null,
+      query.status.length > 0 ? resource.status === query.status : null,
+      query.result.length > 0 ? resource.result === query.result : null,
+    ])
   })
 
 export const resourceStatistics = (resources: readonly TkRegResource[]): TagStatistic[] => {
@@ -447,7 +460,7 @@ export const resourcesToCsv = (resources: readonly TkRegResource[]): string => {
       resource.status,
       resource.result,
       resource.recycle,
-      resource.remark,
+      formatRemarks(resource.remark),
       resource.createTime,
       resource.assignTime ?? "",
     ]

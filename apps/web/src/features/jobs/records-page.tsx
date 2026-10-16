@@ -1,6 +1,15 @@
 import { DeleteOutlined } from "@ant-design/icons"
 import { App, Button, Card, Input, Space, Table, type TableColumnsType } from "antd"
-import { type Key, type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
+import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
+import {
+  type FilterMode,
+  type SelectionScope,
+  FilterModeSwitch,
+  SelectionScopeSwitch,
+  pageSlice,
+  useClientPagination,
+} from "../../components/tables/operation-controls"
 
 import { createDispatchApi, type DispatchRecordBox, type DispatchRecordTask } from "../tasks/dispatch-api"
 import { createSeedTaskLogs, type TaskLog } from "./catalog"
@@ -42,6 +51,7 @@ const LiveRecords = ({
 }): ReactNode => {
   const { message, modal } = App.useApp()
   const [boxes, setBoxes] = useState<readonly DispatchRecordBox[]>([])
+  const [selectionScope, setSelectionScope] = useState<SelectionScope>("all")
   const [selected, setSelected] = useState<readonly string[]>([])
   const [clearing, setClearing] = useState(false)
   const reload = useCallback(() => {
@@ -55,6 +65,15 @@ const LiveRecords = ({
   useEffect(() => {
     reload()
   }, [reload])
+  const recordPaging = useClientPagination(groupId)
+  const recordSelection = useFilteredRowSelection({
+    onChange: (keys) => setSelected(keys.map((key) => String(key))),
+    pageKeys: pageSlice(boxes, recordPaging.current, recordPaging.pageSize).map((item) => item.id),
+    rowKey: "id",
+    rows: boxes,
+    selectedKeys: selected,
+    selectionScope,
+  })
   const clear = () => {
     const names = boxes.filter((box) => selected.includes(box.id)).map((box) => box.name)
     modal.confirm({
@@ -83,8 +102,11 @@ const LiveRecords = ({
   }
   return (
     <section className="module-page jobs-page">
-      {canWrite ? (
-        <Space wrap>
+      <Space wrap>
+        {canWrite ? (
+          <SelectionScopeSwitch onChange={setSelectionScope} scope={selectionScope} />
+        ) : null}
+        {canWrite ? (
           <Button
             danger
             disabled={selected.length === 0}
@@ -94,8 +116,8 @@ const LiveRecords = ({
           >
             清空
           </Button>
-        </Space>
-      ) : null}
+        ) : null}
+      </Space>
       <Table
         columns={[
           { dataIndex: "name", title: "盒子" },
@@ -128,16 +150,9 @@ const LiveRecords = ({
             />
           ),
         }}
-        pagination={false}
+        pagination={{ ...recordPaging.pagination, total: boxes.length }}
         rowKey="id"
-        {...(canWrite
-          ? {
-              rowSelection: {
-                onChange: (keys: readonly Key[]) => setSelected(keys.map((key) => String(key))),
-                selectedRowKeys: [...selected],
-              },
-            }
-          : {})}
+        {...(canWrite ? { rowSelection: recordSelection } : {})}
         size="small"
       />
     </section>
@@ -159,21 +174,23 @@ export const TaskRecordsPage = ({ canWrite = false, groupId = "" }: TaskRecordsP
 
 const SeedRecords = (): ReactNode => {
   const { message } = App.useApp()
+  const [filterMode, setFilterMode] = useState<FilterMode>("and")
   const [keyword, setKeyword] = useState("")
-  const [applied, setApplied] = useState("")
+  const seedPaging = useClientPagination(keyword)
   const rows = useMemo(
     () =>
       createSeedTaskLogs().filter((item) => {
-        if (applied.length === 0) return true
-        return item.feature.includes(applied) || item.content.includes(applied)
+        if (keyword.length === 0) return true
+        return item.feature.includes(keyword) || item.content.includes(keyword)
       }),
-    [applied],
+    [keyword],
   )
 
   return (
     <section className="module-page jobs-page">
-      <Card size="small">
-        <Space wrap>
+      <Card className="condition-panel filter-bar" size="small">
+        <div className="condition-search">
+          <span className="filter-label">搜索</span>
           <Input
             allowClear
             aria-label="功能"
@@ -182,24 +199,26 @@ const SeedRecords = (): ReactNode => {
             style={{ width: 200 }}
             value={keyword}
           />
-          <Button onClick={() => setApplied(keyword)} type="primary">
-            搜索
-          </Button>
           <Button
             onClick={() => {
+              setFilterMode("and")
               setKeyword("")
-              setApplied("")
             }}
           >
             重置
           </Button>
+          <FilterModeSwitch mode={filterMode} onChange={setFilterMode} />
+        </div>
+      </Card>
+      <div className="resource-crud-toolbar">
+        <Space wrap>
           <Button onClick={() => message.success("导出成功")}>导出</Button>
         </Space>
-      </Card>
+      </div>
       <Table
         columns={columns}
         dataSource={rows}
-        pagination={false}
+        pagination={{ ...seedPaging.pagination, total: rows.length }}
         rowKey="id"
         scroll={{ x: "max-content" }}
         size="small"

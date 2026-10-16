@@ -1,6 +1,7 @@
 import { App, Button, Collapse, Empty, Input, Modal, Select, Space, Table, Tabs, Tag, type TableColumnsType } from "antd"
-import type { Key } from "react"
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "react-router-dom"
+import { filteredRowSelection } from "../../components/tables/filtered-selection"
 
 type ShareFile = {
   id: string
@@ -25,12 +26,17 @@ type ShareBox = {
   scanStatus: string | null
 }
 
-const categories = [
-  { key: "video", label: "视频" },
+const poolCategories = [
   { key: "text", label: "文本" },
   { key: "image", label: "图片" },
   { key: "other", label: "其他" },
 ] as const
+
+type PoolCategory = (typeof poolCategories)[number]["key"]
+type ShareCategory = PoolCategory | "video" | "backup"
+
+const isPoolCategory = (value: string | null): value is PoolCategory =>
+  poolCategories.some((item) => item.key === value)
 
 const scanText = (status: string | null): string => {
   if (status === "pending") return "等待领取"
@@ -59,9 +65,26 @@ const columns: TableColumnsType<ShareFile> = [
   },
 ]
 
-export const VideoResourcesPage = (): ReactNode => {
+type VideoResourcesPageProps = {
+  readonly view?: "backup" | "image" | "pool" | "video"
+}
+
+export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): ReactNode => {
   const { message } = App.useApp()
-  const [category, setCategory] = useState<(typeof categories)[number]["key"]>("video")
+  const [params, setParams] = useSearchParams()
+  const requested = params.get("tab")
+  const category: ShareCategory =
+    view === "video"
+      ? "video"
+      : view === "backup"
+        ? "backup"
+        : view === "image"
+          ? "image"
+          : isPoolCategory(requested)
+            ? requested
+            : "text"
+  const backup = category === "backup"
+  const canTransfer = category === "video" || category === "image" || backup
   const [boxes, setBoxes] = useState<ShareBox[]>([])
   const [selected, setSelected] = useState<readonly string[]>([])
   const [open, setOpen] = useState(false)
@@ -71,11 +94,12 @@ export const VideoResourcesPage = (): ReactNode => {
   const [scanning, setScanning] = useState(false)
 
   const load = useCallback(async () => {
-    const response = await fetch(`/api/share-files?category=${category}`, { credentials: "same-origin" })
+    const query = backup ? "bucket=backup" : `category=${category}`
+    const response = await fetch(`/api/share-files?${query}`, { credentials: "same-origin" })
     if (!response.ok) return
     const body = (await response.json()) as { boxes: ShareBox[] }
     setBoxes(body.boxes)
-  }, [category])
+  }, [backup, category])
 
   useEffect(() => {
     void load()
@@ -99,7 +123,17 @@ export const VideoResourcesPage = (): ReactNode => {
 
   const scan = async (): Promise<void> => {
     setScanning(true)
-    const response = await fetch("/api/share-scans", { credentials: "same-origin", method: "POST" })
+    const response = await fetch(
+      "/api/share-scans",
+      backup
+        ? {
+            body: JSON.stringify({ scope: "backup" }),
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            method: "POST",
+          }
+        : { credentials: "same-origin", method: "POST" },
+    )
     setScanning(false)
     if (!response.ok) {
       message.error("扫描没有下发")
@@ -132,39 +166,58 @@ export const VideoResourcesPage = (): ReactNode => {
       message.error("转移没有下发")
       return
     }
-    message.success("转移任务已下发，对应盒子领到后会搬运文件")
+    message.success(
+      backup ? "转移任务已下发，对应盒子领到后会复制文件" : "转移任务已下发，对应盒子领到后会搬运文件",
+    )
     setOpen(false)
     setSelected([])
   }
 
   return (
     <section className="module-page">
-      <Tabs
-        activeKey={category}
-        items={categories.map((item) => ({ key: item.key, label: item.label }))}
-        onChange={(key) => {
-          setCategory(key as (typeof categories)[number]["key"])
-          setSelected([])
-        }}
-        tabBarExtraContent={
-          <Space>
+      {view === "pool" ? (
+        <Tabs
+          activeKey={category}
+          items={poolCategories.map((item) => ({ key: item.key, label: item.label }))}
+          onChange={(key) => {
+            setParams(
+              (current) => {
+                const next = new URLSearchParams(current)
+                if (key === "text") next.delete("tab")
+                else next.set("tab", key)
+                return next
+              },
+              { replace: true },
+            )
+            setSelected([])
+          }}
+          tabBarExtraContent={
             <Button loading={scanning} onClick={() => void scan()} type="primary">
               扫描盒子资源
             </Button>
-            {category === "video" ? (
-              <Button disabled={selected.length === 0} onClick={() => setOpen(true)}>
-                转移到目录
-              </Button>
-            ) : null}
-          </Space>
-        }
-      />
+          }
+        />
+      ) : (
+        <Space style={{ display: "flex", justifyContent: "flex-end" }}>
+          {canTransfer ? (
+            <Button disabled={selected.length === 0} onClick={() => setOpen(true)}>
+              转移到目录
+            </Button>
+          ) : null}
+          <Button loading={scanning} onClick={() => void scan()} type="primary">
+            {backup ? "扫描盒子备份" : "扫描盒子资源"}
+          </Button>
+        </Space>
+      )}
       {boxes.length === 0 ? <Empty description="这个管理员名下还没有盒子" /> : null}
       <Collapse
         items={boxes.map((box) => ({
           children:
             box.directories.length === 0 ? (
-              <Empty description="这个分类下还没有文件" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              <Empty
+                description={backup ? "还没有备份文件" : "这个分类下还没有文件"}
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+              />
             ) : (
               <Collapse
                 items={box.directories.map((dir) => ({
@@ -175,17 +228,13 @@ export const VideoResourcesPage = (): ReactNode => {
                       pagination={false}
                       rowKey="id"
                       rowSelection={
-                        category === "video"
-                          ? {
-                              onChange: (keys: readonly Key[]) => {
-                                const mine = new Set(dir.files.map((file) => file.id))
-                                setSelected((current) => [
-                                  ...current.filter((id) => !mine.has(id)),
-                                  ...keys.map(String),
-                                ])
-                              },
-                              selectedRowKeys: selected.filter((id) => dir.files.some((file) => file.id === id)),
-                            }
+                        canTransfer
+                          ? filteredRowSelection({
+                              onChange: (keys) => setSelected(keys.map(String)),
+                              rowKey: "id",
+                              rows: dir.files,
+                              selectedKeys: selected,
+                            })
                           : undefined
                       }
                       size="small"
@@ -213,7 +262,7 @@ export const VideoResourcesPage = (): ReactNode => {
         onCancel={() => setOpen(false)}
         onOk={() => void transfer()}
         open={open}
-        title={`转移 ${selected.length} 个视频`}
+        title={`转移 ${selected.length} 个${backup ? "备份" : category === "image" ? "图片" : "视频"}`}
       >
         <Space direction="vertical" style={{ width: "100%" }}>
           <Select
@@ -225,7 +274,11 @@ export const VideoResourcesPage = (): ReactNode => {
           />
           <Input
             onChange={(event) => setTargetDirectory(event.target.value)}
-            placeholder="目标目录，留空表示这个盒子视频桶的根目录"
+            placeholder={
+              backup
+                ? "目标目录，留空表示这台盒子备份目录的根目录"
+                : "目标目录，留空表示放到目标盒子同一桶的根目录"
+            }
             value={targetDirectory}
           />
           <span>

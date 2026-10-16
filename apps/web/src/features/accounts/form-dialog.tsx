@@ -1,6 +1,9 @@
 import { App, Button, Form, Input, Modal, Select, Switch } from "antd"
 import { type ReactNode, useState } from "react"
 
+import { joinRemarks, splitRemarks } from "../labels/remark-list"
+import { RemarkSelect } from "../labels/remark-tags"
+import { CreatableGroupSelect } from "./batch-dialogs"
 import {
   type AccountProxy,
   APP_OPTIONS,
@@ -63,6 +66,14 @@ export const AccountFormDialog = ({
     }
     if (password.trim() === "******") {
       message.error("密码不能为******，请填写真实密码后再提交")
+      return
+    }
+    if (splitRemarks(remark).some((name) => name.includes("+"))) {
+      message.error("备注名称不能包含 + 符号")
+      return
+    }
+    if (remark.length > 200) {
+      message.error("备注总长度不能超过 200")
       return
     }
     const extra = applyParsedResourceFields(record.extra, fields.map(toParsedField))
@@ -218,10 +229,12 @@ export const AccountFormDialog = ({
             virtual={false}
           />
         </Form.Item>
-        <Form.Item label="备注">
-          <Input
-            aria-label="备注"
-            onChange={(event) => setRemark(event.target.value)}
+        <Form.Item label="用户备注">
+          <RemarkSelect
+            ariaLabel="用户备注"
+            onChange={(value) => setRemark(joinRemarks(splitRemarks(value)))}
+            options={accounts.flatMap((account) => splitRemarks(account.remark))}
+            placeholder="选择或输入多个备注"
             value={remark}
           />
         </Form.Item>

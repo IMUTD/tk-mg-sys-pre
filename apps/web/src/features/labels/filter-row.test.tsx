@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { AntdApp } from "../../app/antd-app"
 import { PageKey } from "../../lib/pages"
 import { labelScopeForPage, labelsChanged } from "./api"
-import { BusinessLabelFilter, LabelFilterRow } from "./filter-row"
+import { BusinessLabelFilter, LabelFilterRow, UNASSIGNED_VALUE } from "./filter-row"
 
 afterEach(() => vi.unstubAllGlobals())
 const administratorId = "11111111-1111-4111-8111-111111111111"
@@ -134,8 +134,7 @@ describe("classification rows", () => {
     ).not.toBeInTheDocument()
     const user = userEvent.setup()
     await user.click(screen.getAllByRole("button", { name: "添加分组" })[0] as HTMLElement)
-    await user.type(screen.getByRole("textbox", { name: "分类名称" }), "新分类")
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^添加$/ }))
+    await user.type(screen.getByRole("textbox", { name: "添加分组" }), "新分类{Enter}")
     await waitFor(() => expect(screen.getAllByRole("button", { name: /新分类/ })).toHaveLength(2))
     expect(calls.find((call) => call.method === "POST")?.page).toBe(PageKey.Accounts)
     expect(calls.find((call) => call.method === "POST")?.scope).toBe("account")
@@ -193,5 +192,53 @@ describe("classification rows", () => {
     )
     expect(await screen.findByText("分类加载失败")).toBeVisible()
     expect(screen.queryByRole("button", { name: "不应显示" })).not.toBeInTheDocument()
+  })
+
+  it("shows a close control on a chip that accounts already use", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          administratorId,
+          canDelete: true,
+          scope: "account",
+          groups: [{ id, administratorId, name: "测试", scope: "account" }],
+          remarks: [],
+        }),
+      ),
+    )
+    render(
+      <AntdApp>
+        <BusinessLabelFilter
+          canDelete
+          canWrite
+          closable
+          onChange={vi.fn()}
+          options={[{ label: "测试(50)", value: "测试" }]}
+          page={PageKey.Accounts}
+          value=""
+        />
+      </AntdApp>,
+    )
+    expect(await screen.findByRole("button", { name: "测试(50)" })).toBeVisible()
+    expect(screen.getByLabelText(/^close$/i)).toBeVisible()
+  })
+
+  it("puts an unassigned chip ahead of catalog chips and keeps it exclusive", () => {
+    const change = vi.fn()
+    render(
+      <LabelFilterRow
+        multiple
+        onChange={change}
+        options={[{ label: "测试", value: "测试" }]}
+        selected={["测试"]}
+        title="账号标签"
+        unassigned={{ label: "未标签", value: UNASSIGNED_VALUE }}
+      />,
+    )
+    const chips = screen.getAllByRole("button").map((item) => item.textContent)
+    expect(chips.indexOf("未标签")).toBeLessThan(chips.indexOf("测试"))
+    fireEvent.click(screen.getByRole("button", { name: "未标签" }))
+    expect(change).toHaveBeenCalledWith([UNASSIGNED_VALUE])
   })
 })

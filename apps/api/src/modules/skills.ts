@@ -47,6 +47,130 @@ export const skillCatalog: readonly SkillSpec[] = [
     "risk": "write"
   },
   {
+    "batch": true,
+    "code": "PullShareVideo",
+    "defaults": {
+      "路径": ""
+    },
+    "group": "共享文件",
+    "hint": "路径写成数据表里的桶/相对路径，例如 video/分组/片段.mp4。文件从这台盒子的共享目录复制到云机 /sdcard/Movies，源文件保留。",
+    "name": "拉取视频",
+    "paramLabels": {
+      "路径": "路径"
+    },
+    "params": [
+      "路径"
+    ],
+    "risk": "write"
+  },
+  {
+    "batch": true,
+    "code": "PullShareImage",
+    "defaults": {
+      "路径": ""
+    },
+    "group": "共享文件",
+    "hint": "路径写成数据表里的桶/相对路径，例如 share/分组/封面.png。文件从这台盒子的共享目录复制到云机 /sdcard/Pictures，源文件保留。",
+    "name": "拉取图片",
+    "paramLabels": {
+      "路径": "路径"
+    },
+    "params": [
+      "路径"
+    ],
+    "risk": "write"
+  },
+  {
+    "batch": true,
+    "code": "PullShareBackup",
+    "defaults": {
+      "路径": ""
+    },
+    "group": "共享文件",
+    "hint": "路径写成数据表里的 backup/相对路径，例如 backup/分组/phone.tar.gz。文件先从备份目录放到共享目录，再复制到云机 /sdcard/Download，源文件保留。",
+    "name": "拉取备份",
+    "paramLabels": {
+      "路径": "路径"
+    },
+    "params": [
+      "路径"
+    ],
+    "risk": "write"
+  },
+  {
+    "batch": true,
+    "code": "ListShareVideo",
+    "defaults": {},
+    "group": "共享文件",
+    "hint": "列出这台盒子上的视频，一行一条，格式是桶/相对路径，可直接填给拉取视频。只看本机。",
+    "name": "列出视频",
+    "params": [],
+    "risk": "read"
+  },
+  {
+    "batch": true,
+    "code": "ListShareImage",
+    "defaults": {},
+    "group": "共享文件",
+    "hint": "列出这台盒子上的图片，一行一条，格式是桶/相对路径，可直接填给拉取图片。只看本机。",
+    "name": "列出图片",
+    "params": [],
+    "risk": "read"
+  },
+  {
+    "batch": true,
+    "code": "ListShareBackup",
+    "defaults": {},
+    "group": "共享文件",
+    "hint": "列出这台盒子上的备份，一行一条，格式是 backup/相对路径，可直接填给拉取备份。只看本机。",
+    "name": "列出备份",
+    "params": [],
+    "risk": "read"
+  },
+  {
+    "batch": true,
+    "code": "TransferShare",
+    "defaults": {
+      "路径": "",
+      "目标主机": "",
+      "目标目录": ""
+    },
+    "group": "共享文件",
+    "hint": "把本机盒子上的文件复制到另一台盒子的同一桶。路径写成桶/相对路径，例如 video/分组/片段.mp4。目标主机填对方盒子 IP，例如 192.168.76.48。目标目录留空则只保留文件名。源文件保留。",
+    "name": "转移文件",
+    "paramLabels": {
+      "路径": "路径",
+      "目标主机": "目标主机",
+      "目标目录": "目标目录"
+    },
+    "params": [
+      "路径",
+      "目标主机",
+      "目标目录"
+    ],
+    "risk": "write"
+  },
+  {
+    "batch": true,
+    "code": "StageShare",
+    "defaults": {
+      "路径": "",
+      "源主机": ""
+    },
+    "group": "共享文件",
+    "hint": "路径是文件所在盒子上的桶/相对路径。源主机是那台盒子的 IP。文件先复制到当前云机所在盒子的同一路径，再拉进云机。视频到 /sdcard/Movies，图片到 /sdcard/Pictures，备份到 /sdcard/Download。源文件保留。",
+    "name": "取用文件",
+    "paramLabels": {
+      "路径": "路径",
+      "源主机": "源主机"
+    },
+    "params": [
+      "路径",
+      "源主机"
+    ],
+    "risk": "write"
+  },
+  {
     "batch": false,
     "code": "CreateAndroid",
     "defaults": {

@@ -4,6 +4,7 @@ import {
   accountStatistics,
   accountsToCsv,
   assignProxies,
+  createBackupAccount,
   createSeedAccounts,
   emptyAccountQuery,
   filterAccounts,
@@ -59,6 +60,131 @@ describe("myt-account", () => {
 
     expect(noPassword.map((item) => item.username)).toEqual(["user.bravo"])
     expect(uids.map((item) => item.username).sort()).toEqual(["travel.daily", "user.alpha"])
+  })
+
+  it("keeps accounts that carry every selected tag", () => {
+    const account = (id: number, username: string, tagBucket: string[]) => ({
+      ...createBackupAccount({
+        app: "tiktok",
+        backType: "2",
+        createTime: "2026-10-14 12:00:00",
+        deviceId: 1,
+        deviceSeq: 1,
+        id,
+        password: "",
+        proxyId: null,
+        tag: "",
+        username,
+      }),
+      tagBucket,
+    })
+    const accounts = [
+      account(1, "alpha", ["甲", "乙"]),
+      account(2, "beta", ["丙"]),
+      account(3, "gamma", ["丁"]),
+    ]
+
+    expect(
+      filterAccounts(accounts, { ...emptyAccountQuery(), tagBucket: ["甲", "乙"] }).map(
+        (item) => item.username,
+      ),
+    ).toEqual(["alpha"])
+    expect(
+      filterAccounts(accounts, { ...emptyAccountQuery(), tagBucket: ["乙", "丙"] }).map(
+        (item) => item.username,
+      ),
+    ).toEqual([])
+    expect(
+      filterAccounts(accounts, { ...emptyAccountQuery(), tagBucket: ["甲"] }).map(
+        (item) => item.username,
+      ),
+    ).toEqual(["alpha"])
+  })
+
+  it("keeps only accounts missing a group, tag, or remark", () => {
+    const account = (id: number, username: string, tag: string, tagBucket: string[], remark: string) => ({
+      ...createBackupAccount({
+        app: "tiktok",
+        backType: "2",
+        createTime: "2026-10-14 12:00:00",
+        deviceId: 1,
+        deviceSeq: 1,
+        id,
+        password: "",
+        proxyId: null,
+        tag,
+        username,
+      }),
+      remark,
+      tagBucket,
+    })
+    const accounts = [
+      account(1, "grouped", "测试", ["甲"], "急急急"),
+      account(2, "blank", "", [], ""),
+    ]
+    expect(
+      filterAccounts(accounts, { ...emptyAccountQuery(), ungrouped: true }).map((item) => item.username),
+    ).toEqual(["blank"])
+    expect(
+      filterAccounts(accounts, { ...emptyAccountQuery(), untagged: true }).map((item) => item.username),
+    ).toEqual(["blank"])
+    expect(
+      filterAccounts(accounts, { ...emptyAccountQuery(), unremarked: true }).map((item) => item.username),
+    ).toEqual(["blank"])
+  })
+
+  it("matches mixed identity, exact remark and every region", () => {
+    const row = (
+      id: number,
+      username: string,
+      uid: string,
+      remark: string,
+      region: string,
+    ) => ({
+      ...createBackupAccount({
+        app: "tiktok",
+        backType: "2",
+        createTime: "2026-10-14 12:00:00",
+        deviceId: 1,
+        deviceSeq: 1,
+        id,
+        password: "",
+        proxyId: null,
+        tag: "",
+        username,
+      }),
+      region,
+      remark,
+      uid,
+    })
+    const accounts = [
+      row(1, "Alpha", "uid-1", "墨西哥", "US"),
+      row(2, "beta", "uid-2", "备注甲", "GB"),
+    ]
+
+    expect(
+      filterAccounts(accounts, { ...emptyAccountQuery(), identity: "alpha\nuid-2" }).map(
+        (item) => item.username,
+      ),
+    ).toEqual(["Alpha", "beta"])
+    expect(
+      filterAccounts(accounts, { ...emptyAccountQuery(), userRemark: "墨西哥" }).map(
+        (item) => item.username,
+      ),
+    ).toEqual(["Alpha"])
+    expect(
+      filterAccounts(accounts, { ...emptyAccountQuery(), region: ["US", "GB"] }).map(
+        (item) => item.username,
+      ),
+    ).toEqual([])
+    expect(
+      filterAccounts(accounts, {
+        ...emptyAccountQuery(),
+        identity: "alpha",
+        region: ["US"],
+        userRemark: "墨西哥",
+      }).map((item) => item.username),
+    ).toEqual(["Alpha"])
   })
 
   it("groups statistics and transfer codes from seed accounts", () => {

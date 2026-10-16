@@ -213,7 +213,7 @@ export const groupedDeviceOptions = (
 
 export const filterTasks = (tasks: readonly MytTask[], query: TaskQuery): MytTask[] =>
   tasks.filter((item) => {
-    if (query.id.trim().length > 0) return String(item.id) === query.id.trim()
+    if (query.id.trim().length > 0 && String(item.id) !== query.id.trim()) return false
     if (query.main === "true" && !item.main) return false
     if (
       query.name.trim().length > 0 &&

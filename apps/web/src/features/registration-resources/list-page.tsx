@@ -2,21 +2,39 @@ import {
   DeleteOutlined,
   DownloadOutlined,
   EditOutlined,
-  SearchOutlined,
   ThunderboltOutlined,
-  UploadOutlined,
 } from "@ant-design/icons"
-import { App, Button, Card, Input, Modal, Select, Space, Table, Tag } from "antd"
-import type { Key } from "react"
-import { type ReactNode, useMemo, useState } from "react"
+import { App, Button, Card, Input, Modal, Space, Table, Tag } from "antd"
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
+import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
+import {
+  type FilterMode,
+  type SelectionScope,
+  FilterModeSwitch,
+  SelectionScopeSwitch,
+  pageSlice,
+  useClientPagination,
+} from "../../components/tables/operation-controls"
 import { PageKey } from "../../lib/pages"
-import { BusinessLabelFilter } from "../labels/filter-row"
+import { BatchAssignDialog, batchClearOption, type BatchAssignResult } from "../labels/batch-assign-dialog"
+import { addRemarks, joinRemarks, splitRemarks } from "../labels/remark-list"
+import { RemarkTags } from "../labels/remark-tags"
+import { createLabelsApi } from "../labels/api"
+import { BusinessLabelFilter, LabelFilterRow, UNASSIGNED_VALUE, unionLabelNames, usageLabel } from "../labels/filter-row"
+import {
+  assignPoolGroups,
+  assignPoolNotes,
+  importPoolAccounts,
+  loadPoolAccounts,
+  removePoolAccounts,
+  resetPoolAccounts,
+  updatePoolAccount,
+} from "./pool-account"
 import { ResourceFormDialog } from "./resource-form-dialog"
 import "./registration-resources.css"
 import { SmartImportDialog } from "./smart-import-dialog"
 import { StatisticsDialog } from "./statistics-dialog"
 import {
-  availableTagCounts,
   createSeedResources,
   emptyResourceQuery,
   filterResources,
@@ -37,6 +55,7 @@ import {
 type RegistrationResourceListPageProps = {
   readonly canDelete?: boolean
   readonly canWrite: boolean
+  readonly groupId?: string
 }
 
 const downloadCsv = (csv: string): void => {
@@ -58,55 +77,284 @@ const copyText = async (value: string, onSuccess: () => void): Promise<void> => 
   onSuccess()
 }
 
+const storedTag = (tag: string): string => (tag === "未分组" ? "" : tag)
+
+const EditableTextTag = ({
+  color,
+  emptyLabel,
+  name,
+  onCommit,
+  onRemove,
+  removeLabel,
+}: {
+  readonly color: string
+  readonly emptyLabel: string
+  readonly name: string | null
+  readonly onCommit: (name: string) => void
+  readonly onRemove?: () => void
+  readonly removeLabel?: string
+}): ReactNode => {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(name ?? "")
+  const closed = useRef(false)
+  useEffect(() => setDraft(name ?? ""), [name])
+  const finish = (next: string) => {
+    if (closed.current) return
+    closed.current = true
+    setEditing(false)
+    const trimmed = next.trim()
+    if (trimmed === (name ?? "")) return
+    onCommit(trimmed)
+  }
+  if (editing) {
+    return (
+      <Input
+        aria-label={emptyLabel}
+        autoFocus
+        className="pool-edit-input"
+        maxLength={40}
+        onBlur={() => finish(draft)}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            closed.current = true
+            setDraft(name ?? "")
+            setEditing(false)
+          }
+        }}
+        onPressEnter={() => finish(draft)}
+        size="small"
+        value={draft}
+      />
+    )
+  }
+  return (
+    <Tag
+      className={name === null ? "pool-editable-tag is-empty" : "pool-editable-tag"}
+      closable={name !== null && onRemove !== undefined}
+      {...(name !== null && onRemove !== undefined && removeLabel !== undefined
+        ? {
+            closeIcon: (
+              <span role="img" aria-label={removeLabel}>
+                ×
+              </span>
+            ),
+          }
+        : {})}
+      color={name === null ? undefined : color}
+      onClick={() => {
+        closed.current = false
+        setDraft(name ?? "")
+        setEditing(true)
+      }}
+      onClose={(event) => {
+        event.preventDefault()
+        onRemove?.()
+      }}
+    >
+      {name ?? emptyLabel}
+    </Tag>
+  )
+}
+
+const selectionKey = (resource: TkRegResource): string => resource.recordId ?? String(resource.id)
+
 export const RegistrationResourceListPage = ({
   canDelete,
   canWrite,
+  groupId = "",
 }: RegistrationResourceListPageProps): ReactNode => {
   const allowDelete = canDelete === true
+  const persisted = groupId.length > 0
   const { message, modal } = App.useApp()
   const [draft, setDraft] = useState<ResourceQuery>(emptyResourceQuery)
+  const [filterMode, setFilterMode] = useState<FilterMode>("and")
+  const [selectionScope, setSelectionScope] = useState<SelectionScope>("all")
   const [query, setQuery] = useState<ResourceQuery>(emptyResourceQuery)
-  const [resources, setResources] = useState<TkRegResource[]>(() => createSeedResources())
-  const [selectedIds, setSelectedIds] = useState<readonly number[]>([])
+  const [reloadKey, setReloadKey] = useState(0)
+  const [resources, setResources] = useState<TkRegResource[]>(() =>
+    groupId.length > 0 ? [] : createSeedResources(),
+  )
+  const [selectedIds, setSelectedIds] = useState<readonly string[]>([])
   const [editRecord, setEditRecord] = useState<TkRegResource | null>(null)
+  const [batchAssignOpen, setBatchAssignOpen] = useState(false)
   const [smartImportOpen, setSmartImportOpen] = useState(false)
   const [statisticsOpen, setStatisticsOpen] = useState(false)
   const [detailItems, setDetailItems] = useState<readonly ParsedDataSummaryItem[] | null>(null)
 
-  const filtered = useMemo(() => filterResources(resources, query), [query, resources])
-  const selected = resources.filter((resource) => selectedIds.includes(resource.id))
-  const tagOptions = availableTagCounts(resources).map((item) => ({
-    label: `${item.tag}(${item.count})`,
-    value: item.tag,
-  }))
+  const filtered = useMemo(
+    () => filterResources(resources, query, filterMode),
+    [filterMode, query, resources],
+  )
+  const resourcePaging = useClientPagination(JSON.stringify([filterMode, query]))
+  const selected = resources.filter((resource) => selectedIds.includes(selectionKey(resource)))
+  const tagCounts = new Map<string, number>()
+  for (const resource of resources) {
+    const tag = resource.tag.trim()
+    if (tag.length > 0) tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1)
+  }
+  const tagOptions = [...tagCounts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right, "zh-CN"))
+    .map(([tag, count]) => ({ label: usageLabel(tag, count), value: tag }))
+  const ungroupedCount = resources.filter((resource) => resource.tag.trim().length === 0).length
+  const unremarkedCount = resources.filter((resource) => splitRemarks(resource.remark).length === 0).length
+  const remarkCounts = new Map<string, number>()
+  for (const resource of resources) {
+    for (const remark of splitRemarks(resource.remark)) {
+      remarkCounts.set(remark, (remarkCounts.get(remark) ?? 0) + 1)
+    }
+  }
+  const remarkOptions = [...remarkCounts.keys()]
+    .sort((left, right) => left.localeCompare(right, "zh-CN"))
+    .map((remark) => ({ label: usageLabel(remark, remarkCounts.get(remark) ?? 0), value: remark }))
+  const groupNames = [
+    ...new Set(
+      resources.flatMap((resource) => {
+        const tag = resource.tag.trim()
+        return tag.length === 0 ? [] : [tag]
+      }),
+    ),
+  ].sort((left, right) => left.localeCompare(right))
+  const [catalogGroups, setCatalogGroups] = useState<readonly string[]>([])
+  const [catalogRemarks, setCatalogRemarks] = useState<readonly string[]>([])
+  useEffect(() => {
+    const labels = createLabelsApi()
+    const load = (): void => {
+      void labels
+        .list(PageKey.Accounts, "account")
+        .then((result) => {
+          setCatalogGroups(result.groups.map((item) => item.name))
+          setCatalogRemarks(result.remarks.map((item) => item.name))
+        })
+        .catch(() => undefined)
+    }
+    load()
+    window.addEventListener("business-labels-changed", load)
+    return () => window.removeEventListener("business-labels-changed", load)
+  }, [])
   const statistics = resourceStatistics(resources)
   const nextId = Math.max(0, ...resources.map((resource) => resource.id)) + 1
 
-  const applyQuery = (next = draft): void => {
-    setDraft(next)
-    setQuery(next)
-    setSelectedIds([])
-  }
+  useEffect(() => {
+    if (!persisted) return
+    let stop = false
+    loadPoolAccounts(groupId)
+      .then((items) => {
+        if (!stop) setResources([...items])
+      })
+      .catch(() => {
+        if (!stop) message.error("注册池加载失败")
+      })
+    return () => {
+      stop = true
+    }
+  }, [groupId, message, persisted, reloadKey])
 
   const resetQuery = (): void => {
     const empty = emptyResourceQuery()
     setDraft(empty)
     setQuery(empty)
-    setSelectedIds([])
   }
 
   const changeSelectQuery = (patch: Partial<ResourceQuery>): void => {
     const next = { ...draft, ...patch }
     setDraft(next)
     setQuery(next)
-    setSelectedIds([])
   }
 
-  const deleteIds = (ids: readonly number[]): void => {
+  const saveLabel = (resource: TkRegResource, field: "remark" | "tag", value: string): void => {
+    const trimmed = field === "remark" ? joinRemarks(splitRemarks(value)) : value.trim()
+    if (field === "remark" && trimmed.length > 200) {
+      message.error("备注总长度不能超过 200")
+      return
+    }
+    if (trimmed.includes("+")) {
+      message.error(field === "tag" ? "分组名称不能包含 + 符号" : "备注名称不能包含 + 符号")
+      return
+    }
+    const next =
+      field === "tag" ? { ...resource, tag: trimmed } : { ...resource, remark: trimmed }
+    const apply = (current: readonly TkRegResource[]): TkRegResource[] =>
+      current.map((item) => (item.id === resource.id ? next : item))
+    if (!persisted) {
+      setResources(apply)
+      return
+    }
+    void updatePoolAccount(groupId, next)
+      .then(() => {
+        setResources(apply)
+        message.success("已保存")
+      })
+      .catch(() => message.error("保存失败"))
+  }
+
+  const applyRegistrationBatch = (choice: BatchAssignResult): void => {
+    const groupName = choice.group.kind === "set" ? (choice.group.values[0] ?? "") : ""
+    const remarkNames = choice.remarks.kind === "set" ? [...choice.remarks.values] : []
+    if (groupName.includes("+")) {
+      message.error("分组名称不能包含 + 符号")
+      return
+    }
+    if (remarkNames.some((name) => name.includes("+"))) {
+      message.error("备注名称不能包含 + 符号")
+      return
+    }
+    if (
+      choice.remarks.kind === "set" &&
+      selected.some((resource) => addRemarks(resource.remark, remarkNames).length > 200)
+    ) {
+      message.error("备注总长度不能超过 200")
+      return
+    }
+    const ids = new Set(selectedIds)
+    const apply = (): void => {
+      setResources((current) =>
+        current.map((resource) => {
+          if (!ids.has(selectionKey(resource))) return resource
+          return {
+            ...resource,
+            ...(choice.group.kind === "skip" ? {} : { tag: groupName }),
+            ...(choice.remarks.kind === "skip"
+              ? {}
+              : {
+                  remark: choice.remarks.kind === "clear" ? "" : addRemarks(resource.remark, remarkNames),
+                }),
+          }
+        }),
+      )
+      setBatchAssignOpen(false)
+      message.success("已分配")
+    }
+    if (!persisted) {
+      apply()
+      return
+    }
+    const recordIds = selectedRecordIds()
+    if (recordIds.length === 0) return
+    const run = async (): Promise<void> => {
+      if (choice.group.kind !== "skip") await assignPoolGroups(groupId, recordIds, groupName)
+      if (choice.remarks.kind !== "skip") {
+        const notes = new Map<string, string[]>()
+        for (const resource of selected) {
+          if (resource.recordId === undefined) continue
+          const note = choice.remarks.kind === "clear" ? "" : addRemarks(resource.remark, remarkNames)
+          notes.set(note, [...(notes.get(note) ?? []), resource.recordId])
+        }
+        for (const [note, ids] of notes) await assignPoolNotes(groupId, ids, note)
+      }
+      apply()
+    }
+    void run().catch(() => message.error("分配失败"))
+  }
+
+  const deleteIds = (ids: readonly string[]): void => {
     const idSet = new Set(ids)
-    setResources((current) => current.filter((resource) => !idSet.has(resource.id)))
+    setResources((current) => current.filter((resource) => !idSet.has(selectionKey(resource))))
     setSelectedIds((current) => current.filter((id) => !idSet.has(id)))
   }
+
+  const selectedRecordIds = (): string[] =>
+    selected.flatMap((resource) => (resource.recordId === undefined ? [] : [resource.recordId]))
 
   const deleteSelected = (): void => {
     if (selected.length === 0) return
@@ -114,8 +362,15 @@ export const RegistrationResourceListPage = ({
       cancelText: "取消",
       content: `确认删除选中的 ${selected.length} 条注册池数据吗？`,
       okText: "确定",
-      onOk: () => {
-        deleteIds(selectedIds)
+      onOk: async () => {
+        if (!persisted) {
+          deleteIds(selectedIds)
+          message.success("删除成功")
+          return
+        }
+        await removePoolAccounts(groupId, selectedRecordIds())
+        setReloadKey((current) => current + 1)
+        setSelectedIds([])
         message.success("删除成功")
       },
       title: "提示",
@@ -127,8 +382,14 @@ export const RegistrationResourceListPage = ({
       cancelText: "取消",
       content: "确定删除吗？",
       okText: "确定",
-      onOk: () => {
-        deleteIds([resource.id])
+      onOk: async () => {
+        if (!persisted) {
+          deleteIds([selectionKey(resource)])
+          message.success("删除成功")
+          return
+        }
+        await removePoolAccounts(groupId, resource.recordId === undefined ? [] : [resource.recordId])
+        setReloadKey((current) => current + 1)
         message.success("删除成功")
       },
       title: "提示",
@@ -141,24 +402,41 @@ export const RegistrationResourceListPage = ({
       cancelText: "取消",
       content: "确定要将已选择的数据重置状态吗?",
       okText: "确定",
-      onOk: () => {
-        const ids = new Set(selectedIds)
-        setResources((current) =>
-          current.map((resource) =>
-            ids.has(resource.id) ? { ...resource, status: "0" } : resource,
-          ),
-        )
-        message.success(`重置成功,共重置${selected.length}个账号`)
+      onOk: async () => {
+        if (!persisted) {
+          const ids = new Set(selectedIds)
+          setResources((current) =>
+            current.map((resource) =>
+              ids.has(selectionKey(resource)) ? { ...resource, status: "0" } : resource,
+            ),
+          )
+          message.success(`重置成功,共重置${selected.length}个账号`)
+          setSelectedIds([])
+          return
+        }
+        await resetPoolAccounts(groupId, selected)
+        setReloadKey((current) => current + 1)
         setSelectedIds([])
+        message.success(`重置成功,共重置${selected.length}个账号`)
       },
       title: "提示",
     })
   }
 
   const submitEdit = (resource: TkRegResource): void => {
-    setResources((current) => current.map((item) => (item.id === resource.id ? resource : item)))
-    message.success("修改成功")
-    setEditRecord(null)
+    if (!persisted) {
+      setResources((current) => current.map((item) => (item.id === resource.id ? resource : item)))
+      message.success("修改成功")
+      setEditRecord(null)
+      return
+    }
+    void updatePoolAccount(groupId, resource)
+      .then(() => {
+        setReloadKey((current) => current + 1)
+        message.success("修改成功")
+        setEditRecord(null)
+      })
+      .catch(() => message.error("修改失败"))
   }
 
   const importResources = (imported: readonly TkRegResource[]): void => {
@@ -166,9 +444,19 @@ export const RegistrationResourceListPage = ({
       message.error("分组名称不能包含 + 符号")
       return
     }
-    setResources((current) => [...imported, ...current])
-    message.success(`智能导入成功，共导入${imported.length}条数据`)
-    setSmartImportOpen(false)
+    if (!persisted) {
+      setResources((current) => [...imported, ...current])
+      message.success(`智能导入成功，共导入${imported.length}条数据`)
+      setSmartImportOpen(false)
+      return
+    }
+    void importPoolAccounts(groupId, imported)
+      .then(() => {
+        setReloadKey((current) => current + 1)
+        message.success(`智能导入成功，共导入${imported.length}条数据`)
+        setSmartImportOpen(false)
+      })
+      .catch(() => message.error("智能导入失败"))
   }
 
   const deleteUsedByTags = (tags: readonly string[]): void => {
@@ -176,95 +464,157 @@ export const RegistrationResourceListPage = ({
     const removed = resources.filter(
       (resource) => tagSet.has(resourceTagKey(resource)) && resource.status === "1",
     ).length
-    setResources((current) =>
-      current.filter(
-        (resource) => !(tagSet.has(resourceTagKey(resource)) && resource.status === "1"),
+    if (!persisted) {
+      setResources((current) =>
+        current.filter(
+          (resource) => !(tagSet.has(resourceTagKey(resource)) && resource.status === "1"),
+        ),
+      )
+      message.success(`已删除${removed}条已使用数据`)
+      return
+    }
+    void removePoolAccounts(
+      groupId,
+      resources.flatMap((resource) =>
+        resource.recordId !== undefined &&
+        tags.map(storedTag).includes(resource.tag) &&
+        resource.status === "1"
+          ? [resource.recordId]
+          : [],
       ),
     )
-    message.success(`已删除${removed}条已使用数据`)
+      .then(() => {
+        setReloadKey((current) => current + 1)
+        message.success(`已删除${removed}条已使用数据`)
+      })
+      .catch(() => message.error("删除失败"))
   }
 
   const deleteAllByTags = (tags: readonly string[]): void => {
     const tagSet = new Set(tags)
     const removed = resources.filter((resource) => tagSet.has(resourceTagKey(resource))).length
-    setResources((current) => current.filter((resource) => !tagSet.has(resourceTagKey(resource))))
-    message.success(`已删除${removed}条数据`)
+    if (!persisted) {
+      setResources((current) => current.filter((resource) => !tagSet.has(resourceTagKey(resource))))
+      message.success(`已删除${removed}条数据`)
+      return
+    }
+    void removePoolAccounts(
+      groupId,
+      resources.flatMap((resource) =>
+        resource.recordId !== undefined && tags.map(storedTag).includes(resource.tag)
+          ? [resource.recordId]
+          : [],
+      ),
+    )
+      .then(() => {
+        setReloadKey((current) => current + 1)
+        message.success(`已删除${removed}条数据`)
+      })
+      .catch(() => message.error("删除失败"))
   }
+  const resourceSelection = useFilteredRowSelection({
+    getCheckboxProps: (resource: TkRegResource) => ({
+      "aria-label": `选择 ${resource.email}`,
+    }),
+    onChange: (keys) => setSelectedIds(keys.map((key) => String(key))),
+    pageKeys: pageSlice(filtered, resourcePaging.current, resourcePaging.pageSize).map(selectionKey),
+    rowKey: selectionKey,
+    rows: filtered,
+    selectedKeys: selectedIds,
+    selectionScope,
+  })
 
   return (
     <section className="module-page registration-resources-page">
-      <Card className="filter-bar" size="small">
+      <Card className="condition-panel filter-bar" size="small">
         <BusinessLabelFilter
-          page={PageKey.StudioRegistration}
-          title="标签"
+          page={PageKey.Accounts}
+          title="账号分组"
+          system
+          blankLabel={usageLabel("未分组", ungroupedCount)}
           options={tagOptions}
-          value={draft.tag}
-          onChange={(tag) => changeSelectQuery({ tag })}
+          value={draft.ungrouped ? UNASSIGNED_VALUE : draft.tag}
+          onChange={(tag) =>
+            changeSelectQuery(
+              tag === UNASSIGNED_VALUE ? { tag: "", ungrouped: true } : { tag, ungrouped: false },
+            )
+          }
           canWrite={canWrite}
           canDelete={allowDelete}
+          closable
           validateName={(name) => (name.includes("+") ? "分组名称不能包含 + 符号" : null)}
         />
-        <Space className="resource-filter-row" wrap>
+        <BusinessLabelFilter
+          blankLabel={usageLabel("未备注", unremarkedCount)}
+          canDelete={allowDelete}
+          canWrite={canWrite}
+          closable
+          kind="remark"
+          multiple
+          onChange={(remarks) =>
+            changeSelectQuery(
+              remarks.includes(UNASSIGNED_VALUE)
+                ? { remarkChip: [], unremarked: true }
+                : { remarkChip: remarks, unremarked: false },
+            )
+          }
+          options={remarkOptions}
+          page={PageKey.Accounts}
+          scope="account"
+          system
+          title="账号备注"
+          validateName={(name) => (name.includes("+") ? "备注名称不能包含 + 符号" : null)}
+          value={draft.unremarked ? [UNASSIGNED_VALUE] : draft.remarkChip}
+        />
+        <LabelFilterRow
+          onChange={(values) =>
+            changeSelectQuery({ status: values[0] === "0" || values[0] === "1" ? values[0] : "" })
+          }
+          options={[
+            { label: "未使用", value: "0" },
+            { label: "已使用", value: "1" },
+          ]}
+          selected={draft.status.length === 0 ? [] : [draft.status]}
+          system
+          title="状态"
+        />
+        <LabelFilterRow
+          onChange={(values) =>
+            changeSelectQuery({ result: values[0] === "0" || values[0] === "1" ? values[0] : "" })
+          }
+          options={[
+            { label: "未知", value: "0" },
+            { label: "成功", value: "1" },
+          ]}
+          selected={draft.result.length === 0 ? [] : [draft.result]}
+          system
+          title="结果"
+        />
+        <Space className="condition-search resource-filter-row" wrap>
           <span className="filter-label">搜索</span>
           <Input
             allowClear
             aria-label="搜索"
-            onChange={(event) => setDraft({ ...draft, email: event.target.value })}
-            onPressEnter={() => applyQuery()}
+            onChange={(event) => changeSelectQuery({ email: event.target.value })}
             placeholder="搜索"
             style={{ width: 185 }}
             value={draft.email}
           />
-          <span className="filter-label">备注</span>
           <Input
             allowClear
             aria-label="备注筛选"
-            onChange={(event) => setDraft({ ...draft, remark: event.target.value })}
-            onPressEnter={() => applyQuery()}
+            onChange={(event) => changeSelectQuery({ remark: event.target.value })}
             placeholder="备注"
             style={{ width: 185 }}
             value={draft.remark}
           />
-          <span className="filter-label">状态</span>
-          <Select
-            allowClear
-            aria-label="状态"
-            onChange={(value: ResourceQuery["status"] | null) =>
-              changeSelectQuery({ status: value ?? "" })
-            }
-            options={[
-              { label: "未使用", value: "0" },
-              { label: "已使用", value: "1" },
-            ]}
-            placeholder="状态"
-            style={{ width: 90 }}
-            value={draft.status.length === 0 ? null : draft.status}
-            virtual={false}
-          />
-          <span className="filter-label">结果</span>
-          <Select
-            allowClear
-            aria-label="结果"
-            onChange={(value: ResourceQuery["result"] | null) =>
-              changeSelectQuery({ result: value ?? "" })
-            }
-            options={[
-              { label: "未知", value: "0" },
-              { label: "成功", value: "1" },
-            ]}
-            placeholder="状态"
-            style={{ width: 90 }}
-            value={draft.result.length === 0 ? null : draft.result}
-            virtual={false}
-          />
-          <Button icon={<SearchOutlined aria-hidden />} onClick={() => applyQuery()} type="primary">
-            搜索
-          </Button>
           <Button onClick={resetQuery}>重置</Button>
+          <FilterModeSwitch mode={filterMode} onChange={setFilterMode} />
         </Space>
       </Card>
       <div className="resource-crud-toolbar">
         <Space wrap>
+          <SelectionScopeSwitch onChange={setSelectionScope} scope={selectionScope} />
           {allowDelete ? (
             <Button
               danger
@@ -286,15 +636,6 @@ export const RegistrationResourceListPage = ({
           </Button>
         </Space>
         <Space wrap>
-          {canWrite ? (
-            <Button
-              icon={<UploadOutlined aria-hidden />}
-              onClick={() => message.warning("此功能已停用，请使用智能导入")}
-              type="primary"
-            >
-              导入资源
-            </Button>
-          ) : null}
           <Button
             icon={<ThunderboltOutlined aria-hidden />}
             onClick={() => setSmartImportOpen(true)}
@@ -302,6 +643,15 @@ export const RegistrationResourceListPage = ({
           >
             智能导入
           </Button>
+          {canWrite ? (
+            <Button
+              disabled={selected.length === 0}
+              onClick={() => setBatchAssignOpen(true)}
+              type="primary"
+            >
+              批量分配（{selected.length}）
+            </Button>
+          ) : null}
           <Button disabled={selected.length === 0} onClick={resetStatus} type="primary">
             {selected.length > 0 ? `重置状态(${selected.length})` : "重置状态"}
           </Button>
@@ -314,12 +664,6 @@ export const RegistrationResourceListPage = ({
       </div>
       <Table
         columns={[
-          {
-            key: "index",
-            render: (_value: unknown, _resource: TkRegResource, index: number) => index + 1,
-            title: "#",
-            width: 55,
-          },
           { dataIndex: "id", key: "id", title: "id", width: 100 },
           {
             dataIndex: "email",
@@ -360,19 +704,28 @@ export const RegistrationResourceListPage = ({
           {
             key: "tag",
             render: (_value: unknown, resource: TkRegResource) =>
-              resource.tag.length === 0 ? (
+              canWrite ? (
+                <EditableTextTag
+                  color="orange"
+                  emptyLabel="分组"
+                  name={resource.tag.length === 0 ? null : resource.tag}
+                  onCommit={(name) => saveLabel(resource, "tag", name)}
+                  {...(resource.tag.length === 0
+                    ? {}
+                    : {
+                        onRemove: () => saveLabel(resource, "tag", ""),
+                        removeLabel: `清除 ${resource.email} 的分组`,
+                      })}
+                />
+              ) : resource.tag.length === 0 ? (
                 "-"
               ) : (
-                <Tag
-                  className="resource-tag"
-                  onClick={() => void copyText(resource.tag, () => message.success("复制成功"))}
-                  title={resource.tag}
-                >
+                <Tag className="resource-tag" title={resource.tag}>
                   {resource.tag}
                 </Tag>
               ),
             title: "分组",
-            width: 120,
+            width: 140,
           },
           {
             key: "status",
@@ -393,11 +746,17 @@ export const RegistrationResourceListPage = ({
             title: "结果",
           },
           {
-            dataIndex: "remark",
-            ellipsis: true,
             key: "remark",
-            render: (remark: string) => (remark.length === 0 ? "-" : remark),
+            render: (_value: unknown, resource: TkRegResource) => (
+              <RemarkTags
+                canWrite={canWrite}
+                onChange={(name) => saveLabel(resource, "remark", name)}
+                removeLabel={(name) => `清除 ${resource.email} 的备注 ${name}`}
+                value={resource.remark}
+              />
+            ),
             title: "备注",
+            width: 140,
           },
           {
             key: "time",
@@ -441,19 +800,9 @@ export const RegistrationResourceListPage = ({
         ]}
         dataSource={filtered}
         locale={{ emptyText: "暂无数据" }}
-        pagination={{
-          pageSize: 10,
-          showSizeChanger: true,
-          showTotal: (total) => `共 ${total} 条`,
-        }}
-        rowKey="id"
-        rowSelection={{
-          getCheckboxProps: (resource: TkRegResource) => ({
-            "aria-label": `选择 ${resource.email}`,
-          }),
-          onChange: (keys: readonly Key[]) => setSelectedIds(keys.map((key) => Number(key))),
-          selectedRowKeys: [...selectedIds],
-        }}
+        pagination={{ ...resourcePaging.pagination, total: filtered.length }}
+        rowKey={selectionKey}
+        rowSelection={resourceSelection}
         scroll={{ x: "max-content" }}
         size="small"
       />
@@ -513,6 +862,23 @@ export const RegistrationResourceListPage = ({
           size="small"
         />
       </Modal>
+      <BatchAssignDialog
+        groupOptions={[
+          batchClearOption("清除分组"),
+          ...unionLabelNames(catalogGroups, groupNames).map((name) => ({ label: name, value: name })),
+        ]}
+        onCancel={() => setBatchAssignOpen(false)}
+        onSubmit={applyRegistrationBatch}
+        open={batchAssignOpen}
+        remarkOptions={[
+          batchClearOption("清除备注"),
+          ...unionLabelNames(
+            catalogRemarks,
+            remarkOptions.map((item) => item.value),
+          ).map((name) => ({ label: name, value: name })),
+        ]}
+        selectedCount={selected.length}
+      />
     </section>
   )
 }
