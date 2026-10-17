@@ -177,6 +177,12 @@ export const registerBusinessLabels = (
       )
         return context.json({ error: "label_in_use" }, 409)
       if (
+        scope === "resource" &&
+        label.kind === "group" &&
+        (await resourceCategoryInUse(tx, administratorId, label.name))
+      )
+        return context.json({ error: "label_in_use" }, 409)
+      if (
         label.kind === "group" &&
         (await businessGroupInUse(tx, administratorId, scope, label.name))
       )
@@ -213,6 +219,19 @@ const accountRemarkInUse = async (
       from unnest(string_to_array(btrim(coalesce(a.note, '')), ${"\u001e"})) as part(name)
       where btrim(name) = ${name}
     )
+    limit 1`
+  return rows.length > 0
+}
+
+const resourceCategoryInUse = async (
+  sql: Sql | TransactionSql,
+  administratorId: string,
+  name: string,
+): Promise<boolean> => {
+  const rows = await sql`
+    select 1 from operation_resource r
+    join user_group ug on ug.group_id = r.group_id
+    where ug.user_id = ${administratorId}::uuid and btrim(r.category) = ${name}
     limit 1`
   return rows.length > 0
 }

@@ -28,7 +28,17 @@ export const MaterialFormDialog = ({
       message.error("资源内容不能为空")
       return
     }
-    onSubmit({ ...record, content: content.trim(), remark, tag: tag.trim() })
+    const nextTag = tag.trim()
+    const previous = record.tag.trim()
+    const seen = new Set<string>()
+    const tags: string[] = []
+    for (const raw of record.tags ?? []) {
+      const name = raw.trim() === previous ? nextTag : raw.trim()
+      if (name.length === 0 || seen.has(name)) continue
+      seen.add(name)
+      tags.push(name)
+    }
+    onSubmit({ ...record, content: content.trim(), remark, tag: nextTag, tags })
   }
 
   return (

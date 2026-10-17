@@ -6,6 +6,7 @@ import "./labels.css"
 export const EditableTextTag = ({
   color,
   emptyLabel,
+  maxLength = 40,
   name,
   onCommit,
   onRemove,
@@ -13,6 +14,7 @@ export const EditableTextTag = ({
 }: {
   readonly color: string
   readonly emptyLabel: string
+  readonly maxLength?: number
   readonly name: string | null
   readonly onCommit: (name: string) => void
   readonly onRemove?: () => void
@@ -36,7 +38,7 @@ export const EditableTextTag = ({
         aria-label={emptyLabel}
         autoFocus
         className="editable-text-input"
-        maxLength={40}
+        maxLength={maxLength}
         onBlur={() => finish(draft)}
         onChange={(event) => setDraft(event.target.value)}
         onKeyDown={(event) => {

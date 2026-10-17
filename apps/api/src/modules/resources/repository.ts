@@ -1,10 +1,12 @@
 import type { Sql } from "postgres"
 import { z } from "zod"
 
+import type { UserId } from "../../lib/authorization"
 import {
   assertNoActiveResourceAllocations,
   assertNoActiveTaskClaims,
 } from "../../lib/operation-claim-guard"
+import { administratorFor, lockBusinessLabel } from "../business-labels"
 
 import {
   type OperationResource,
@@ -116,6 +118,54 @@ export const createPostgresResourceRepository = (client: Sql): ResourceRepositor
       throw new ResourcePersistenceError()
     }
     return toResource(row)
+  },
+  assignTags: async (groupId, ids, tags, actorId: UserId) => {
+    if (ids.length === 0) return 0
+    const incoming = [...new Set(tags.map((tag) => tag.trim()).filter((tag) => tag.length > 0))]
+    return client.begin(async (transaction) => {
+      if (incoming.length === 0) {
+        const rows = await transaction<{ readonly id: string }[]>`
+          update operation_resource set tags = '{}'::text[], category = '', updated_at = now()
+          where group_id = ${groupId} and id = any(${ids})
+          returning id
+        `
+        return rows.length
+      }
+      const administratorId = await administratorFor(transaction, actorId)
+      if (administratorId !== null) {
+        for (const name of incoming) {
+          await lockBusinessLabel(transaction, administratorId, "resource", "group", name)
+          await transaction`
+            insert into business_label (administrator_id, scope, kind, name)
+            values (${administratorId}::uuid, 'resource', 'group', ${name})
+            on conflict (administrator_id, scope, kind, name) do nothing
+          `
+        }
+      }
+      const current = await transaction<{ readonly id: string; readonly tags: readonly string[] }[]>`
+        select id, tags from operation_resource
+        where group_id = ${groupId} and id = any(${ids})
+        for update
+      `
+      let affected = 0
+      for (const row of current) {
+        const seen = new Set<string>()
+        const merged: string[] = []
+        for (const raw of [...row.tags, ...incoming]) {
+          const name = raw.trim()
+          if (name.length === 0 || seen.has(name)) continue
+          seen.add(name)
+          merged.push(name)
+        }
+        if (merged.length > 20) throw new ResourceTagLimitError()
+        await transaction`
+          update operation_resource set tags = ${merged}, updated_at = now()
+          where id = ${row.id}
+        `
+        affected += 1
+      }
+      return affected
+    })
   },
   delete: async (groupId, ids) => {
     if (ids.length === 0) return 0
@@ -261,6 +311,13 @@ export const createPostgresResourceRepository = (client: Sql): ResourceRepositor
       return row === undefined ? null : toResource(row)
     }),
 })
+
+export class ResourceTagLimitError extends Error {
+  public constructor() {
+    super("A text row cannot carry more than 20 tags")
+    this.name = "ResourceTagLimitError"
+  }
+}
 
 export class ResourceStatusConflictError extends Error {
   public constructor() {

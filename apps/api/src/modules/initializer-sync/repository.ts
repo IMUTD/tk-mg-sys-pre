@@ -156,10 +156,15 @@ export const applyInitializerSnapshot = async (
         model = case when ${present} then ${box.type} else model end,
         box_type = case when ${present} then ${box.type} else box_type end,
         firmware = ${box.firmware}, memory = ${box.memory}, memory_pct = ${box.memoryPct},
-        disk = ${box.disk}, disk_pct = ${box.diskPct}, last_seen_at = greatest(last_seen_at, ${box.lastSeenAt}::timestamptz),
-        status = case when exists (select 1 from device_agent a where a.device_id = device.id
-          and a.last_heartbeat_at > now() - interval '45 seconds') then status
-          else ${box.online ? "online" : "offline"} end, updated_at = now(),
+        disk = ${box.disk}, disk_pct = ${box.diskPct},
+        last_seen_at = case when exists (
+          select 1 from device_agent a where a.device_id = device.id
+            and a.last_heartbeat_at > now() - interval '45 seconds'
+        ) then greatest(last_seen_at, ${box.lastSeenAt}::timestamptz) else last_seen_at end,
+        status = case when exists (
+          select 1 from device_agent a where a.device_id = device.id
+            and a.last_heartbeat_at > now() - interval '45 seconds'
+        ) then 'online' else 'offline' end, updated_at = now(),
         box_group_id = case when ${changing} then null else box_group_id end,
         sequence_no = case when ${changing} then null else sequence_no end
         where id = ${deviceId}`

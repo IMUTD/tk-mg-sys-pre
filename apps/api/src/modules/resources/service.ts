@@ -24,6 +24,12 @@ export interface ResourceService {
     resourceId: string,
     accountId: string,
   ): Promise<ResourceAllocation | null>
+  assignTags(
+    actorId: UserId,
+    groupId: string,
+    ids: readonly string[],
+    tags: readonly string[],
+  ): Promise<number>
   create(
     actorId: UserId,
     groupId: string,
@@ -76,6 +82,17 @@ export const createResourceService = (
         `resource:${rawResourceId}`,
       )
     return allocation
+  },
+  assignTags: async (actorId, rawGroupId, rawIds, tags) => {
+    const count = await dependencies.repository.assignTags(
+      GroupIdSchema.parse(rawGroupId),
+      rawIds.map((id) => OperationResourceIdSchema.parse(id)),
+      tags,
+      actorId,
+    )
+    if (count > 0)
+      await audit(dependencies.auditRepository, actorId, "resource.assign", `group:${rawGroupId}`)
+    return count
   },
   create: async (actorId, rawGroupId, input) => {
     const resource = await dependencies.repository.create({

@@ -8,6 +8,7 @@ type StoredResource = {
   readonly lastAssignedAt?: string | null
   readonly name: string
   readonly note: string
+  readonly tags?: readonly string[]
 }
 
 type ResourcePage = {
@@ -16,6 +17,8 @@ type ResourcePage = {
 }
 
 export type TextPoolApi = {
+  assignTags(ids: readonly string[], tags: readonly string[]): Promise<number>
+  setLabels(id: string, input: { readonly category?: string; readonly tags?: readonly string[] }): Promise<void>
   deleteIds(ids: readonly string[]): Promise<number>
   deleteScope(tag?: string): Promise<number>
   importLines(tag: string, contents: readonly string[]): Promise<number>
@@ -42,6 +45,7 @@ const toMaterial = (item: StoredResource): MytMaterial => ({
   id: item.id,
   remark: item.note,
   tag: item.category,
+  tags: item.tags ?? [],
 })
 
 const readError = async (response: Response): Promise<string> => {
@@ -74,6 +78,14 @@ const request = async (path: string, init?: RequestInit): Promise<Response> => {
 export const createTextPoolApi = (groupId: string): TextPoolApi => {
   const root = `/api/groups/${groupId}/operations/resources`
   return {
+    assignTags: async (ids, tags) => {
+      const response = await request(`${root}/batch/assign`, {
+        body: JSON.stringify({ ids, tags }),
+        method: "POST",
+      })
+      const body = (await response.json()) as { affected: number }
+      return body.affected
+    },
     deleteIds: async (ids) => {
       const response = await request(`${root}/batch/delete`, {
         body: JSON.stringify({ ids }),
@@ -102,6 +114,15 @@ export const createTextPoolApi = (groupId: string): TextPoolApi => {
       }
       return imported
     },
+    setLabels: async (id, input) => {
+      const body: { category?: string; tags?: readonly string[] } = {}
+      if (input.category !== undefined) body.category = input.category
+      if (input.tags !== undefined) body.tags = input.tags
+      await request(`${root}/${id}`, {
+        body: JSON.stringify(body),
+        method: "PATCH",
+      })
+    },
     list: async () => {
       const materials: MytMaterial[] = []
       let page = 1
@@ -122,7 +143,7 @@ export const createTextPoolApi = (groupId: string): TextPoolApi => {
           category: material.tag,
           name: material.content,
           note: material.remark,
-          tags: [material.tag],
+          tags: material.tags ?? [],
         }),
         method: "PATCH",
       })

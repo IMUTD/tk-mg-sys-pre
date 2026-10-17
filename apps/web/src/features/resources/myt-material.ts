@@ -1,3 +1,5 @@
+import { combineChecks, type FilterMode } from "../../components/tables/operation-controls"
+
 export type MytMaterial = {
   assignTime: string | null
   assignedCount: number
@@ -6,6 +8,19 @@ export type MytMaterial = {
   id: string
   remark: string
   tag: string
+  tags?: readonly string[]
+}
+
+export const materialLabelSet = (item: MytMaterial): string[] => {
+  const seen = new Set<string>()
+  const names: string[] = []
+  for (const raw of [item.tag, ...(item.tags ?? [])]) {
+    const name = raw.trim()
+    if (name.length === 0 || seen.has(name)) continue
+    seen.add(name)
+    names.push(name)
+  }
+  return names
 }
 
 export type MaterialQuery = {
@@ -28,25 +43,57 @@ export const nowText = (): string => {
 }
 
 export const uniqueTags = (materials: readonly MytMaterial[]): string[] =>
-  [...new Set(materials.map((item) => item.tag).filter((tag) => tag.length > 0))].sort(
-    (left, right) => left.localeCompare(right, "zh-CN"),
+  [...new Set(materials.flatMap((item) => materialLabelSet(item)))].sort((left, right) =>
+    left.localeCompare(right, "zh-CN"),
   )
+
+export const matchesMaterialTags = (
+  item: MytMaterial,
+  query: MaterialQuery,
+): boolean | null => {
+  if (query.tags.length === 0 && !query.untagged) return null
+  const tag = item.tag.trim()
+  return query.tags.includes(tag) || (query.untagged && tag.length === 0)
+}
 
 export const filterMaterials = (
   materials: readonly MytMaterial[],
   query: MaterialQuery,
+): MytMaterial[] => materials.filter((item) => matchesMaterialTags(item, query) !== false)
+
+export type TextPoolFilter = MaterialQuery & {
+  keyword: string
+  mode: FilterMode
+}
+
+const matchesKeyword = (item: MytMaterial, keyword: string): boolean | null => {
+  const needle = keyword.trim().toLocaleLowerCase()
+  if (needle.length === 0) return null
+  return [...materialLabelSet(item), item.content, item.remark].some((value) =>
+    value.toLocaleLowerCase().includes(needle),
+  )
+}
+
+export const filterTextPool = (
+  materials: readonly MytMaterial[],
+  filter: TextPoolFilter,
 ): MytMaterial[] =>
   materials.filter((item) => {
-    if (query.untagged) return item.tag.trim().length === 0
-    if (query.tags.length > 0) return query.tags.includes(item.tag.trim())
-    return true
+    const labels = materialLabelSet(item)
+    return combineChecks(filter.mode, [
+      ...filter.tags.map((tag) => labels.includes(tag)),
+      filter.untagged ? labels.length === 0 : null,
+      matchesKeyword(item, filter.keyword),
+    ])
   })
 
 export const materialStatistics = (materials: readonly MytMaterial[]): MaterialTagStatistic[] => {
   const grouped = new Map<string, number>()
   for (const item of materials) {
-    const tag = item.tag.length === 0 ? "未分组" : item.tag
-    grouped.set(tag, (grouped.get(tag) ?? 0) + 1)
+    const labels = materialLabelSet(item)
+    for (const tag of labels.length === 0 ? ["未标签"] : labels) {
+      grouped.set(tag, (grouped.get(tag) ?? 0) + 1)
+    }
   }
   return [...grouped.entries()].map(([tag, count]) => ({ count, tag }))
 }

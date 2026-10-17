@@ -1,7 +1,14 @@
-import { DeleteOutlined, EditOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons"
-import { App, Button, Card, Space, Table } from "antd"
+import { DeleteOutlined, EditOutlined, UploadOutlined } from "@ant-design/icons"
+import { App, Button, Card, Checkbox, Input, Space, Table } from "antd"
 import { type ReactNode, useEffect, useMemo, useState } from "react"
-import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
+import {
+  type FilterMode,
+  FilterModeSwitch,
+  pageSlice,
+  type SelectionScope,
+  SelectionScopeSwitch,
+  useClientPagination,
+} from "../../components/tables/operation-controls"
 
 import { createTextPoolApi, type TextPoolApi } from "./api"
 import { BatchDeleteDialog } from "./batch-delete-dialog"
@@ -10,16 +17,20 @@ import { MaterialImportDialog } from "./import-dialog"
 import {
   createSeedMaterials,
   emptyMaterialQuery,
-  filterMaterials,
+  filterTextPool,
   type MaterialQuery,
+  materialLabelSet,
   type MytMaterial,
   materialStatistics,
   uniqueTags,
 } from "./myt-material"
 import "./resources.css"
 import { PageKey } from "../../lib/pages"
+import { labelsChanged } from "../labels/api"
+import { EditableTextTag } from "../labels/editable-text-tag"
 import { BusinessLabelFilter, UNASSIGNED_VALUE, usageLabel } from "../labels/filter-row"
 import { MaterialStatisticsDialog } from "./statistics-dialog"
+import { TextTagAssignDialog } from "./tag-assign-dialog"
 
 type ResourcesListPageProps = {
   readonly api?: TextPoolApi
@@ -37,23 +48,38 @@ export const ResourcesListPage = ({
   const allowDelete = canDelete === true
   const { message, modal } = App.useApp()
   const pool = useMemo(() => api ?? createTextPoolApi(groupId), [api, groupId])
-  const [draft, setDraft] = useState<MaterialQuery>(emptyMaterialQuery)
+  const [keyword, setKeyword] = useState("")
+  const [filterMode, setFilterMode] = useState<FilterMode>("and")
+  const [selectionScope, setSelectionScope] = useState<SelectionScope>("all")
   const [query, setQuery] = useState<MaterialQuery>(emptyMaterialQuery)
   const [materials, setMaterials] = useState<MytMaterial[]>(() => createSeedMaterials())
   const [selectedIds, setSelectedIds] = useState<readonly string[]>([])
   const [loading, setLoading] = useState(false)
   const [editRecord, setEditRecord] = useState<MytMaterial | null>(null)
   const [importOpen, setImportOpen] = useState(false)
+  const [assignOpen, setAssignOpen] = useState(false)
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false)
   const [statisticsOpen, setStatisticsOpen] = useState(false)
 
-  const filtered = useMemo(() => filterMaterials(materials, query), [materials, query])
+  const filtered = useMemo(
+    () => filterTextPool(materials, { ...query, keyword, mode: filterMode }),
+    [filterMode, keyword, materials, query],
+  )
+  const paging = useClientPagination(
+    `${keyword}\0${filterMode}\0${query.tags.join("\u001e")}\0${query.untagged}`,
+  )
+  const pageRows = pageSlice(filtered, paging.current, paging.pageSize)
+  const targetIds = (selectionScope === "page" ? pageRows : filtered).map((item) => item.id)
+  const selectedTarget = targetIds.filter((id) => selectedIds.includes(id)).length
+  const allTargetSelected = targetIds.length > 0 && selectedTarget === targetIds.length
   const selected = materials.filter((item) => selectedIds.includes(item.id))
   const tags = uniqueTags(materials)
   const tagCounts = new Map<string, number>()
+  let untaggedCount = 0
   for (const item of materials) {
-    const tag = item.tag.trim()
-    if (tag.length > 0) tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1)
+    const labels = materialLabelSet(item)
+    if (labels.length === 0) untaggedCount += 1
+    for (const tag of labels) tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1)
   }
   const tagOptions = tags.map((tag) => ({ label: usageLabel(tag, tagCounts.get(tag) ?? 0), value: tag }))
   const statistics = materialStatistics(materials)
@@ -78,15 +104,40 @@ export const ResourcesListPage = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pool])
 
-  const applyQuery = (next = draft): void => {
-    setDraft(next)
-    setQuery(next)
-  }
+  useEffect(() => {
+    const allowed = new Set(filtered.map((item) => item.id))
+    setSelectedIds((current) => {
+      const next = current.filter((id) => allowed.has(id))
+      return next.length === current.length ? current : next
+    })
+  }, [filtered])
 
   const resetQuery = (): void => {
-    const empty = emptyMaterialQuery()
-    setDraft(empty)
-    setQuery(empty)
+    setKeyword("")
+    setQuery(emptyMaterialQuery())
+  }
+
+  const saveLabel = async (item: MytMaterial, from: string, to: string): Promise<void> => {
+    try {
+      if (from.length === 0) {
+        if (to.length === 0) return
+        await pool.setLabels(item.id, { category: to })
+      } else {
+        const nextCategory = item.tag.trim() === from ? to : item.tag
+        const seen = new Set<string>()
+        const nextTags: string[] = []
+        for (const raw of item.tags ?? []) {
+          const name = raw.trim() === from ? to : raw.trim()
+          if (name.length === 0 || seen.has(name)) continue
+          seen.add(name)
+          nextTags.push(name)
+        }
+        await pool.setLabels(item.id, { category: nextCategory, tags: nextTags })
+      }
+      await reload()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "保存失败")
+    }
   }
 
   const remove = async (ids: readonly string[], success: string): Promise<void> => {
@@ -127,48 +178,61 @@ export const ResourcesListPage = ({
     if (record === undefined) return
     setEditRecord(record)
   }
-  const materialSelection = useFilteredRowSelection({
-    getCheckboxProps: (item: MytMaterial) => ({
-      "aria-label": `选择 ${item.content}`,
-    }),
-    onChange: (keys) => setSelectedIds(keys.map((key) => String(key))),
-    rowKey: "id",
-    rows: filtered,
-    selectedKeys: selectedIds,
-  })
+  const toggleFiltered = (): void => {
+    setSelectedIds((current) => {
+      if (allTargetSelected) return current.filter((id) => !targetIds.includes(id))
+      return [...new Set([...current, ...targetIds])]
+    })
+  }
+
+  const toggleOne = (id: string): void => {
+    setSelectedIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
+    )
+  }
 
   return (
     <section className="module-page resources-page">
-      <Card className="filter-bar" size="small">
+      <Card className="condition-panel filter-bar" size="small">
         <BusinessLabelFilter
           page={PageKey.StudioTextPool}
           title="标签"
-          blankLabel={usageLabel(
-            "未标签",
-            materials.filter((item) => item.tag.trim().length === 0).length,
-          )}
+          blankLabel={usageLabel("未标签", untaggedCount)}
+          independentUnassigned
           multiple
           options={tagOptions}
-          value={draft.untagged ? [UNASSIGNED_VALUE] : draft.tags}
+          value={[...query.tags, ...(query.untagged ? [UNASSIGNED_VALUE] : [])]}
           onChange={(tags) =>
-            applyQuery(
-              tags.includes(UNASSIGNED_VALUE)
-                ? { ...draft, tags: [], untagged: true }
-                : { ...draft, tags, untagged: false },
-            )
+            setQuery({
+              tags: tags.filter((tag) => tag !== UNASSIGNED_VALUE),
+              untagged: tags.includes(UNASSIGNED_VALUE),
+            })
           }
           canWrite={canWrite}
           canDelete={allowDelete}
         />
-        <Space className="resource-filter-row" wrap>
-          <Button icon={<SearchOutlined aria-hidden />} onClick={() => applyQuery()} type="primary">
-            搜索
-          </Button>
+        <div className="condition-search">
+          <span className="filter-label">搜索</span>
+          <Input
+            allowClear
+            aria-label="搜索"
+            onChange={(event) => setKeyword(event.target.value)}
+            placeholder="标签 / 内容 / 说明"
+            style={{ width: 240 }}
+            value={keyword}
+          />
           <Button onClick={resetQuery}>重置</Button>
-        </Space>
+          <FilterModeSwitch mode={filterMode} onChange={setFilterMode} />
+        </div>
       </Card>
       <div className="resource-crud-toolbar">
         <Space wrap>
+          <SelectionScopeSwitch onChange={setSelectionScope} scope={selectionScope} />
+          {canWrite ? (
+            <Button disabled={selected.length === 0} onClick={() => setAssignOpen(true)} type="primary">
+              批量分配（{selected.length}）
+            </Button>
+          ) : null}
           {canWrite ? (
             <>
               <Button disabled={selected.length !== 1} onClick={openEditSelected}>
@@ -207,7 +271,62 @@ export const ResourcesListPage = ({
       </div>
       <Table
         columns={[
-          { dataIndex: "tag", ellipsis: true, key: "tag", title: "标签" },
+          {
+            title: (
+              <Checkbox
+                aria-label="全选"
+                checked={allTargetSelected}
+                disabled={targetIds.length === 0}
+                indeterminate={selectedTarget > 0 && !allTargetSelected}
+                onChange={toggleFiltered}
+              />
+            ),
+            width: 48,
+            render: (_value: unknown, item: MytMaterial) => (
+              <Checkbox
+                aria-label={`选择 ${item.content}`}
+                checked={selectedIds.includes(item.id)}
+                onChange={() => toggleOne(item.id)}
+              />
+            ),
+          },
+          {
+            dataIndex: "tag",
+            ellipsis: true,
+            key: "tag",
+            render: (_value: string, item: MytMaterial) => {
+              const labels = materialLabelSet(item)
+              if (!canWrite) return labels.length === 0 ? "未标签" : labels.join("、")
+              if (labels.length === 0) {
+                return (
+                  <EditableTextTag
+                    color="orange"
+                    emptyLabel="未标签"
+                    maxLength={80}
+                    name={null}
+                    onCommit={(name) => void saveLabel(item, "", name)}
+                  />
+                )
+              }
+              return (
+                <Space size={4} wrap>
+                  {labels.map((name) => (
+                    <EditableTextTag
+                      color="orange"
+                      emptyLabel="未标签"
+                      key={name}
+                      maxLength={80}
+                      name={name}
+                      onCommit={(next) => void saveLabel(item, name, next)}
+                      onRemove={() => void saveLabel(item, name, "")}
+                      removeLabel="清除标签"
+                    />
+                  ))}
+                </Space>
+              )
+            },
+            title: "标签",
+          },
           { dataIndex: "content", ellipsis: true, key: "content", title: "资源内容" },
           {
             dataIndex: "assignedCount",
@@ -254,13 +373,8 @@ export const ResourcesListPage = ({
         dataSource={filtered}
         locale={{ emptyText: "暂无数据" }}
         loading={loading}
-        pagination={{
-          pageSize: 10,
-          showSizeChanger: true,
-          showTotal: (total) => `共 ${total} 条`,
-        }}
+        pagination={{ ...paging.pagination, total: filtered.length }}
         rowKey="id"
-        rowSelection={materialSelection}
         scroll={{ x: "max-content" }}
         size="small"
       />
@@ -321,6 +435,28 @@ export const ResourcesListPage = ({
       ) : null}
       {statisticsOpen ? (
         <MaterialStatisticsDialog onCancel={() => setStatisticsOpen(false)} rows={statistics} />
+      ) : null}
+      {assignOpen ? (
+        <TextTagAssignDialog
+          onCancel={() => setAssignOpen(false)}
+          onSubmit={(names) => {
+            void pool
+              .assignTags(selectedIds, names)
+              .then(async (count) => {
+                labelsChanged()
+                setSelectedIds([])
+                await reload()
+                message.success(`已分配 ${count} 条`)
+                setAssignOpen(false)
+              })
+              .catch((error: unknown) => {
+                message.error(error instanceof Error ? error.message : "保存失败")
+              })
+          }}
+          open
+          options={tags.map((tag) => ({ label: tag, value: tag }))}
+          selectedCount={selected.length}
+        />
       ) : null}
       {editRecord === null ? null : (
         <MaterialFormDialog

@@ -22,6 +22,7 @@ type ShareBox = {
   finishedAt: string | null
   host: string
   name: string
+  online?: boolean
   scanStatus: string | null
 }
 
@@ -102,9 +103,22 @@ export const BackupResourcesPage = (): ReactNode => {
       message.error("扫描没有下发")
       return
     }
-    const body = (await response.json()) as { scans: { status: string }[] }
+    const body = (await response.json()) as { scans: { host?: string; name?: string; status: string }[] }
+    const offline = body.scans.filter((item) => item.status === "offline")
     const busy = body.scans.filter((item) => item.status === "busy").length
-    const sent = body.scans.length - busy
+    const sent = body.scans.filter((item) => item.status === "pending" || item.status === "running").length
+    if (sent === 0 && offline.length > 0) {
+      message.error("无法扫描")
+      await load()
+      return
+    }
+    if (offline.length > 0) {
+      const names = offline
+        .map((item) => item.host || item.name || "")
+        .filter((name) => name !== "")
+        .join("、")
+      message.warning(names === "" ? "无法扫描" : `无法扫描：${names} 不在线`)
+    }
     if (sent === 0) {
       message.warning("盒子正在扫描其他目录")
       await load()
@@ -178,6 +192,9 @@ export const BackupResourcesPage = (): ReactNode => {
             <Space>
               <span>{box.name || box.host}</span>
               <span>{box.host}</span>
+              <Tag color={box.online === false ? "default" : "success"}>
+                {box.online === false ? "离线" : "在线"}
+              </Tag>
               <Tag>{scanText(box.scanStatus)}</Tag>
             </Space>
           ),

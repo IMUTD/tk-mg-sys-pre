@@ -23,8 +23,15 @@ const resource: OperationResource = {
   updatedAt: new Date("2026-09-12T00:00:00.000Z"),
 }
 
+const assigned: { ids?: readonly string[]; tags?: readonly string[] } = {}
+
 const resourceService: ResourceService = {
   allocate: async () => null,
+  assignTags: async (_actorId, _groupId, ids, tags) => {
+    assigned.ids = ids
+    assigned.tags = tags
+    return ids.length === 0 ? 0 : 2
+  },
   create: async () => resource,
   delete: async () => 0,
   deleteScope: async () => 0,
@@ -111,5 +118,67 @@ describe("resource routes", () => {
       expect(response.status).toBe(400)
       await expect(response.json()).resolves.toEqual({ error: "invalid_resource_id" })
     }
+  })
+
+  it("appends tags and treats an omitted list as no change", async () => {
+    const app = createAuthenticatedApp()
+    const cookie = await login(app)
+    const headers = { "Content-Type": "application/json", Cookie: cookie }
+    const path = `/api/groups/${groupId}/operations/resources/batch/assign`
+    const id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+
+    const rejected = await app.request(path, {
+      body: JSON.stringify({ ids: [] }),
+      headers,
+      method: "POST",
+    })
+    expect(rejected.status).toBe(400)
+    await expect(rejected.json()).resolves.toEqual({ error: "invalid_batch_request" })
+
+    const skipped = await app.request(path, {
+      body: JSON.stringify({ ids: [id] }),
+      headers,
+      method: "POST",
+    })
+    expect(skipped.status).toBe(200)
+    await expect(skipped.json()).resolves.toEqual({ affected: 0 })
+
+    const blank = await app.request(path, {
+      body: JSON.stringify({ ids: [id], tags: ["  "] }),
+      headers,
+      method: "POST",
+    })
+    expect(blank.status).toBe(400)
+
+    const cleared = await app.request(path, {
+      body: JSON.stringify({ ids: [id], tags: [] }),
+      headers,
+      method: "POST",
+    })
+    expect(cleared.status).toBe(200)
+    await expect(cleared.json()).resolves.toEqual({ affected: 2 })
+    expect(assigned.tags).toEqual([])
+
+    const named = await app.request(path, {
+      body: JSON.stringify({ ids: [id], tags: [" 问候 ", "备用"] }),
+      headers,
+      method: "POST",
+    })
+    expect(named.status).toBe(200)
+    expect(assigned.tags).toEqual(["问候", "备用"])
+  })
+
+  it("accepts an empty category on a single resource update", async () => {
+    const app = createAuthenticatedApp()
+    const cookie = await login(app)
+    const response = await app.request(
+      `/api/groups/${groupId}/operations/resources/cccccccc-cccc-4ccc-8ccc-cccccccccccc`,
+      {
+        body: JSON.stringify({ category: "" }),
+        headers: { "Content-Type": "application/json", Cookie: cookie },
+        method: "PATCH",
+      },
+    )
+    expect(response.status).toBe(200)
   })
 })

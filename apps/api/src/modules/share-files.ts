@@ -4,6 +4,7 @@ import type { Hono } from "hono"
 import type { Sql } from "postgres"
 
 import { administratorFor } from "./business-labels"
+import { markBoxesWithoutHeartbeat } from "./box-presence"
 import { directoryOk, fileCategory, isBucket, splitRelative } from "./share-path"
 
 const unassignedGroup = "00000000-0000-4000-8000-000000000001"
@@ -77,8 +78,9 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
     const buckets = scanBuckets(request?.scope)
     if (buckets === null) return context.json({ error: "invalid_payload" }, 400)
     const scope = buckets === backupBuckets ? "backup" : "files"
-    const devices = await sql<{ deviceId: string; groupId: string; name: string }[]>`
-      select d.id as "deviceId", d.group_id as "groupId", d.name
+    await markBoxesWithoutHeartbeat(sql)
+    const devices = await sql<{ deviceId: string; groupId: string; host: string; name: string; status: string }[]>`
+      select d.id as "deviceId", d.group_id as "groupId", d.host, d.name, d.status
       from device d
       where d.enabled = true and d.assignment_pending = false and d.external_id is not null
         and d.group_id <> ${unassignedGroup}::uuid
@@ -87,6 +89,17 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
     `
     const scans = []
     for (const device of devices) {
+      if (device.status !== "online") {
+        scans.push({
+          deviceId: device.deviceId,
+          host: device.host,
+          name: device.name,
+          scanId: "",
+          status: "offline",
+          taskId: null,
+        })
+        continue
+      }
       const active = await sql<{ buckets: string; id: string; status: string; taskId: string | null }[]>`
         select s.id::text as id, s.status, s.buckets,
           (select t.id::text from execution_task t
@@ -149,6 +162,7 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
     const administratorId = await administratorFor(sql, user)
     if (administratorId === null) return context.json({ boxes: [] })
     await expireStaleScans(sql)
+    await markBoxesWithoutHeartbeat(sql)
     const requestedBucket = context.req.query("bucket") ?? ""
     if (requestedBucket !== "" && requestedBucket !== "backup")
       return context.json({ error: "invalid_category" }, 400)
@@ -158,9 +172,9 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
       return context.json({ error: "invalid_category" }, 400)
     const scope = backup ? backupBuckets : fileBuckets
     const devices = await sql<
-      { deviceId: string; host: string; name: string; scanStatus: string | null; finishedAt: Date | null }[]
+      { deviceId: string; host: string; name: string; scanStatus: string | null; finishedAt: Date | null; status: string }[]
     >`
-      select d.id as "deviceId", d.host, d.name,
+      select d.id as "deviceId", d.host, d.name, d.status,
         s.status as "scanStatus", s.finished_at as "finishedAt"
       from device d
       left join lateral (
@@ -213,6 +227,7 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
         finishedAt: device.finishedAt,
         host: device.host,
         name: device.name,
+        online: device.status === "online",
         scanStatus: device.scanStatus,
       }
     })

@@ -23,7 +23,45 @@ type ShareBox = {
   finishedAt: string | null
   host: string
   name: string
+  online?: boolean
   scanStatus: string | null
+}
+
+type ScanReply = {
+  host?: string
+  name?: string
+  status: string
+}
+
+const reportScan = (
+  scans: readonly ScanReply[],
+  notify: {
+    error: (text: string) => void
+    success: (text: string) => void
+    warning: (text: string) => void
+  },
+): void => {
+  const offline = scans.filter((item) => item.status === "offline")
+  const busy = scans.filter((item) => item.status === "busy").length
+  const sent = scans.filter((item) => item.status === "pending" || item.status === "running").length
+  if (sent === 0 && offline.length > 0) {
+    notify.error("无法扫描")
+    return
+  }
+  if (offline.length > 0) {
+    const names = offline
+      .map((item) => item.host || item.name || "")
+      .filter((name) => name !== "")
+      .join("、")
+    notify.warning(names === "" ? "无法扫描" : `无法扫描：${names} 不在线`)
+  }
+  if (sent === 0) {
+    notify.warning("盒子正在扫描其他目录")
+    return
+  }
+  notify.success(
+    busy === 0 ? `已向 ${sent} 台盒子下发扫描` : `已向 ${sent} 台盒子下发扫描，另有 ${busy} 台正在扫描其他目录`,
+  )
 }
 
 const poolCategories = [
@@ -139,17 +177,8 @@ export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): 
       message.error("扫描没有下发")
       return
     }
-    const body = (await response.json()) as { scans: { status: string }[] }
-    const busy = body.scans.filter((item) => item.status === "busy").length
-    const sent = body.scans.length - busy
-    if (sent === 0) {
-      message.warning("盒子正在扫描其他目录")
-      await load()
-      return
-    }
-    message.success(
-      busy === 0 ? `已向 ${sent} 台盒子下发扫描` : `已向 ${sent} 台盒子下发扫描，另有 ${busy} 台正在扫描其他目录`,
-    )
+    const body = (await response.json()) as { scans: ScanReply[] }
+    reportScan(body.scans, message)
     await load()
   }
 
@@ -250,6 +279,9 @@ export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): 
             <Space>
               <span>{box.name || box.host}</span>
               <span>{box.host}</span>
+              <Tag color={box.online === false ? "default" : "success"}>
+                {box.online === false ? "离线" : "在线"}
+              </Tag>
               <Tag>{scanText(box.scanStatus)}</Tag>
             </Space>
           ),

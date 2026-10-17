@@ -41,6 +41,7 @@ type LabelRowProps = {
   readonly system?: boolean
   readonly onAdd?: (name: string) => void | Promise<void>
   readonly onRemove?: (value: string) => void
+  readonly independentUnassigned?: boolean
   readonly unassigned?: { readonly value: string; readonly label: string }
 }
 
@@ -54,6 +55,7 @@ export const LabelFilterRow = ({
   multiple = false,
   allowClear = true,
   system = false,
+  independentUnassigned = false,
   onAdd,
   onRemove,
   unassigned,
@@ -82,6 +84,14 @@ export const LabelFilterRow = ({
       })
   }
   const choose = (value: string): void => {
+    if (independentUnassigned) {
+      if (selected.includes(value)) {
+        if (allowClear) onChange(selected.filter((item) => item !== value))
+        return
+      }
+      onChange(multiple ? [...selected, value] : [value])
+      return
+    }
     if (unassigned !== undefined && value === unassigned.value) {
       onChange(selected.includes(value) ? [] : [value])
       return
@@ -211,6 +221,7 @@ type BusinessFilterProps = {
   readonly canDelete?: boolean
   readonly blankLabel?: string
   readonly closable?: boolean
+  readonly independentUnassigned?: boolean
   readonly system?: boolean
   readonly validateName?: (name: string) => string | null
 } & (
@@ -315,6 +326,7 @@ export const BusinessLabelFilter = (props: BusinessFilterProps): ReactNode => {
         selected={selected}
         onChange={change}
         multiple={props.multiple === true}
+        {...(props.independentUnassigned === true ? { independentUnassigned: true } : {})}
         system={system}
         {...(blankLabel === undefined
           ? {}

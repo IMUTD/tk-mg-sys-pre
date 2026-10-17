@@ -74,6 +74,12 @@ export interface ResourceRepository {
     actorId: UserId,
   ): Promise<ResourceAllocation | null>
   create(input: ResourceCreateInput): Promise<OperationResource>
+  assignTags(
+    groupId: GroupId,
+    ids: readonly OperationResourceId[],
+    tags: readonly string[],
+    actorId: UserId,
+  ): Promise<number>
   delete(groupId: GroupId, ids: readonly OperationResourceId[]): Promise<number>
   deleteScope(groupId: GroupId, tag: string | null): Promise<number>
   importTexts(input: {

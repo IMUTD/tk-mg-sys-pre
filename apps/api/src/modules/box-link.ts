@@ -27,6 +27,7 @@ import {
   registerBusinessLabels,
 } from "./business-labels"
 import { accountAnchorCatalog, type ChainAnchor, readAnchor, readStepSources } from "./account-anchor"
+import { markBoxesWithoutHeartbeat } from "./box-presence"
 import { refreshDeviceHosts } from "./dispatch/fill"
 import { type GuardCode, guardCatalog, normalizeGuards, xmlHasText } from "./guards"
 import { registerShareFiles } from "./share-files"
@@ -744,8 +745,9 @@ export const registerBoxLink = (
   const cleanup = setInterval(() => {
     const now = Date.now()
     for (const [key, frame] of frames) if (now - frame.at > 15000) frames.delete(key)
-    void sql`update device set status = 'offline' where external_id is not null and status = 'online'
-      and last_seen_at < now() - interval '45 seconds'`.catch(() => {})
+    void markBoxesWithoutHeartbeat(sql).catch((error: unknown) => {
+      console.error("box presence update failed", error instanceof Error ? error.name : "Error")
+    })
     void recoverBoxTasks(sql).catch(() => {
       console.error("box task recovery failed")
     })
@@ -1530,6 +1532,7 @@ export const registerBoxLink = (
   app.get("/api/devices", async (context) => {
     const user = await userFromRequest(sql, context.req.raw)
     if (user === null) return context.json({ error: "authentication_required" }, 401)
+    await markBoxesWithoutHeartbeat(sql)
     const rows = await sql`
       select d.id, d.external_id as "externalId", d.host, d.name, d.model, d.version, d.firmware,
         d.memory, d.disk, d.disk_pct as "diskPct", d.enabled, d.status,

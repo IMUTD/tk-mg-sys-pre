@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest"
 import { AntdApp } from "../../app/antd-app"
 import type { TextPoolApi } from "./api"
 import { ResourcesListPage } from "./list-page"
-import type { MytMaterial } from "./myt-material"
+import { materialLabelSet, type MytMaterial } from "./myt-material"
 
 const seed = (): MytMaterial[] => [
   {
@@ -40,6 +40,18 @@ const seed = (): MytMaterial[] => [
 const memoryApi = (): TextPoolApi => {
   let rows = seed()
   return {
+    assignTags: async (ids, tags) => {
+      const idSet = new Set(ids)
+      let affected = 0
+      rows = rows.map((item) => {
+        if (!idSet.has(item.id)) return item
+        affected += 1
+        if (tags.length === 0) return { ...item, tag: "", tags: [] }
+        const seen = new Set(materialLabelSet(item))
+        return { ...item, tags: [...(item.tags ?? []), ...tags.filter((tag) => !seen.has(tag))] }
+      })
+      return affected
+    },
     deleteIds: async (ids) => {
       const idSet = new Set(ids)
       const before = rows.length
@@ -65,6 +77,9 @@ const memoryApi = (): TextPoolApi => {
       return created.length
     },
     list: async () => rows,
+    setLabels: async (id, input) => {
+      rows = rows.map((item) => (item.id === id ? { ...item, ...input } : item))
+    },
     update: async (material) => {
       rows = rows.map((item) => (item.id === material.id ? material : item))
       return material
@@ -88,7 +103,8 @@ describe("ResourcesListPage", () => {
     // Then
     expect(await screen.findByText("这个视频太好看了，已关注")).toBeVisible()
     expect(screen.getByLabelText("标签")).toBeVisible()
-    expect(screen.getByRole("button", { name: "搜索" })).toBeVisible()
+    expect(screen.getByRole("textbox", { name: "搜索" })).toBeVisible()
+    expect(screen.getByRole("button", { name: "批量分配（0）" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "修改" })).toBeVisible()
     expect(screen.getByRole("button", { name: "统计" })).toBeVisible()
     expect(screen.getByRole("button", { name: "批量删除" })).toBeVisible()
@@ -107,6 +123,7 @@ describe("ResourcesListPage", () => {
     expect(screen.getByRole("button", { name: "统计" })).toBeEnabled()
     expect(screen.getByRole("button", { name: "批量导入" })).toBeEnabled()
     expect(screen.queryByRole("button", { name: "修改" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "批量分配（0）" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "批量删除" })).not.toBeInTheDocument()
   })
 
@@ -146,5 +163,16 @@ describe("ResourcesListPage", () => {
     // Then
     expect(await screen.findByText("记得开播通知我")).toBeVisible()
     expect(screen.getByText("修改成功")).toBeVisible()
+  })
+
+  it("filters content as the search box changes", async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("更新记得艾特我")
+
+    await user.type(screen.getByRole("textbox", { name: "搜索" }), "艾特")
+
+    expect(screen.getByText("更新记得艾特我")).toBeVisible()
+    expect(screen.queryByText("这个视频太好看了，已关注")).not.toBeInTheDocument()
   })
 }, 30_000)

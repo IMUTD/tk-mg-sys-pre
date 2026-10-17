@@ -12,6 +12,7 @@ import {
   OperationResourceStatus,
   OperationResourceStatusSchema,
   ResourceStatusConflictError,
+  ResourceTagLimitError,
 } from "./repository"
 import { authorizeOperationRequest, hasOperationAuthorizationFailure } from "./route-authorization"
 import type { ResourceService } from "./service"
@@ -26,8 +27,19 @@ const CreateSchema = z.object({
     .default(OperationResourceStatus.Available),
   tags: TagsSchema,
 })
-const UpdateSchema = CreateSchema.partial()
+const UpdateSchema = z.object({
+  category: z.string().trim().max(80).optional(),
+  name: z.string().trim().min(1).max(4000).optional(),
+  note: z.string().max(2000).optional(),
+  status: z
+    .enum([OperationResourceStatus.Available, OperationResourceStatus.Inactive])
+    .optional(),
+  tags: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
+})
 const BatchSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(500) })
+const AssignSchema = BatchSchema.extend({
+  tags: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
+})
 const ImportSchema = z.object({
   contents: z.array(z.string().trim().min(1).max(4000)).min(1).max(1000),
   tag: z.string().trim().min(1).max(80),
@@ -152,6 +164,35 @@ export const registerResourceRoutes = (
     } catch (error) {
       if (error instanceof OperationDeleteConflictError)
         return context.json({ error: "operation_entity_active" }, 409)
+      throw error
+    }
+  })
+  app.post("/api/groups/:groupId/operations/resources/batch/assign", async (context) => {
+    const authorization = await authorizeOperationRequest(
+      context,
+      authService,
+      auditRepository,
+      "resource.assign",
+      Permission.OperationsWrite,
+      PageKey.StudioTextPool,
+    )
+    if (hasOperationAuthorizationFailure(authorization)) return authorization.response
+    const input = await parseJson(context.req.raw, AssignSchema)
+    if (input === null) return context.json({ error: "invalid_batch_request" }, 400)
+    if (input.tags === undefined) return context.json({ affected: 0 })
+    try {
+      const affected = await service.assignTags(
+        authorization.principal.userId,
+        authorization.groupId,
+        input.ids,
+        input.tags,
+      )
+      return affected === 0
+        ? context.json({ error: "not_found" }, 404)
+        : context.json({ affected })
+    } catch (error) {
+      if (error instanceof ResourceTagLimitError)
+        return context.json({ error: "invalid_batch_request" }, 400)
       throw error
     }
   })
