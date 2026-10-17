@@ -12,7 +12,7 @@ x-api-environment: &api-environment
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: ${IMAGE_REGISTRY:-ghcr.io/imutd/tk-mg-sys}-postgres:${IMAGE_TAG:?}
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?}
@@ -29,7 +29,7 @@ services:
     networks: [backend]
 
   redis:
-    image: redis:7-alpine
+    image: ${IMAGE_REGISTRY:-ghcr.io/imutd/tk-mg-sys}-redis:${IMAGE_TAG:?}
     restart: unless-stopped
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?}
