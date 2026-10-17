@@ -1,0 +1,122 @@
+name: tk-mg
+
+x-api-environment: &api-environment
+  DATABASE_URL: postgres://${POSTGRES_USER:?}:${POSTGRES_PASSWORD_URL_ENCODED:?}@postgres:5432/${POSTGRES_DB:?}
+  REDIS_URL: redis://:${REDIS_PASSWORD_URL_ENCODED:?}@redis:6379/0
+  SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:?}
+  TK_MG_SYSTEM_ACTOR_ID: ${TK_MG_SYSTEM_ACTOR_ID:?}
+  AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
+  MIHOMO_BINARY: /usr/local/bin/mihomo
+  PROXY_PROBE_BINARY: /usr/local/bin/sing-box
+  PORT: "3000"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?}
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/00-extensions.sql:ro
+    networks: [backend]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?}"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a $$REDIS_PASSWORD ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    volumes: [redis-data:/data]
+    networks: [backend]
+
+  initialize:
+    profiles: [bootstrap]
+    image: ${IMAGE_REGISTRY:-ghcr.io/imutd/tk-mg-sys}-api:${IMAGE_TAG:?}
+    restart: "no"
+    command:
+      - sh
+      - -ec
+      - bun --cwd apps/api node_modules/drizzle-kit/bin.cjs migrate --config=drizzle.config.ts && bun apps/api/src/bootstrap-deployment.ts
+    environment:
+      <<: *api-environment
+      ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:?}
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:?}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [backend]
+
+  api:
+    image: ${IMAGE_REGISTRY:-ghcr.io/imutd/tk-mg-sys}-api:${IMAGE_TAG:?}
+    restart: unless-stopped
+    environment: *api-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bun", "-e", "const r=await fetch('http://127.0.0.1:3000/ready');if(!r.ok)process.exit(1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+    networks: [backend]
+
+  worker:
+    image: ${IMAGE_REGISTRY:-ghcr.io/imutd/tk-mg-sys}-worker:${IMAGE_TAG:?}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:?}:${POSTGRES_PASSWORD_URL_ENCODED:?}@postgres:5432/${POSTGRES_DB:?}
+      TK_MG_SYSTEM_ACTOR_ID: ${TK_MG_SYSTEM_ACTOR_ID:?}
+      TK_MG_WORKER_ID: ${TK_MG_WORKER_ID:-worker-1}
+      TK_MG_WORKER_CONCURRENCY: ${TK_MG_WORKER_CONCURRENCY:-4}
+      TK_MG_WORKER_HEALTH_FILE: /tmp/tk-mg-worker-ready
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bun", "apps/worker/src/health-check.ts"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+    stop_grace_period: 30s
+    networks: [backend]
+
+  web:
+    image: ${IMAGE_REGISTRY:-ghcr.io/imutd/tk-mg-sys}-web:${IMAGE_TAG:?}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks: [backend]
+
+networks:
+  backend:
+
+volumes:
+  postgres-data:
+  redis-data:

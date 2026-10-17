@@ -4,6 +4,7 @@ import { createProductionApp } from "./composition"
 import { retentionMs } from "./db/retention"
 
 const ApiRuntimeConfigurationSchema = z.object({
+  AUTH_COOKIE_SECURE: z.enum(["true", "false"]).default("true"),
   DATABASE_URL: z.string().url(),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3000),
   REDIS_URL: z.string().url(),
@@ -17,6 +18,7 @@ const ApiRuntimeConfigurationSchema = z.object({
 })
 
 export type ApiRuntimeConfig = {
+  readonly authCookieSecure: boolean
   readonly databaseUrl: string
   readonly port: number
   readonly redisUrl: string
@@ -47,6 +49,7 @@ export const parseApiRuntimeConfig = (
 ): ApiRuntimeConfig => {
   const config = ApiRuntimeConfigurationSchema.parse(environment)
   return {
+    authCookieSecure: config.AUTH_COOKIE_SECURE === "true",
     databaseUrl: config.DATABASE_URL,
     port: config.PORT,
     redisUrl: config.REDIS_URL,

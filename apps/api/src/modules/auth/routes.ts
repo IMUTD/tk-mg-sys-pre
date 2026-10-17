@@ -27,7 +27,11 @@ const readLoginRequest = async (request: Request): Promise<LoginRequest | null> 
   }
 }
 
-export const registerAuthRoutes = (app: Hono, authService: AuthService): void => {
+export const registerAuthRoutes = (
+  app: Hono,
+  authService: AuthService,
+  secureCookie = true,
+): void => {
   app.post("/api/auth/login", async (context) => {
     const request = await readLoginRequest(context.req.raw)
     if (request === null) {
@@ -42,7 +46,7 @@ export const registerAuthRoutes = (app: Hono, authService: AuthService): void =>
           maxAge: 60 * 60 * 8,
           path: "/",
           sameSite: "Strict",
-          secure: true,
+          secure: secureCookie,
         })
         return context.json({ user: result.principal })
       case "invalid_credentials":
@@ -60,7 +64,7 @@ export const registerAuthRoutes = (app: Hono, authService: AuthService): void =>
       maxAge: 0,
       path: "/",
       sameSite: "Strict",
-      secure: true,
+      secure: secureCookie,
     })
     return context.body(null, 204)
   })
