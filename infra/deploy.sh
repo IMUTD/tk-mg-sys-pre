@@ -27,8 +27,10 @@ report_failure() {
 trap report_failure ERR
 compose config --quiet
 if [[ "$mode" != --rollback ]]; then
+  echo "Pulling release images ($image_tag)..."
   compose --profile bootstrap pull
 fi
+echo "Starting PostgreSQL and Redis..."
 compose up -d --pull never --wait --wait-timeout 180 postgres redis
 if [[ -f "$deploy_root/current-release" ]]; then
   backup="$deploy_root/backups/$(date -u +%Y%m%dT%H%M%S)-$image_tag.dump"
@@ -40,9 +42,12 @@ printf '%s\n' "$image_tag" > "$deploy_root/pending-release.tmp"
 mv "$deploy_root/pending-release.tmp" "$deploy_root/pending-release"
 compose stop worker web api
 if [[ "$mode" != --rollback ]]; then
+  echo "Applying migrations and initializing deployment accounts..."
   compose --profile bootstrap run --rm --no-deps --pull never initialize
 fi
+echo "Starting API, worker and web..."
 compose up -d --no-build --pull never --wait --wait-timeout 180 api worker web
+echo "Checking deployment health..."
 bash "$script_dir/smoke-test.sh" --env-file "$env_file" --compose-file "$script_dir/compose.prod.yml"
 if [[ -f "$deploy_root/current-release" ]] && [[ "$(cat "$deploy_root/current-release")" != "$image_tag" ]]; then
   cp "$deploy_root/current-release" "$deploy_root/previous-release.tmp"

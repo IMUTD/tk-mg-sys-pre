@@ -22,12 +22,13 @@ bun -e '
   const targets = workflow.jobs.build.strategy.matrix.target;
   if (c.services.postgres.ports?.length || c.services.redis.ports?.length) throw new Error("Database ports exposed");
   for (const name of ["api", "worker", "web", "initialize", "postgres", "redis"]) {
-    const target = name === "initialize" ? "api" : name;
+    const target = ["initialize", "worker"].includes(name) ? "api" : name;
     const expected = `ghcr.io/imutd/tk-mg-sys-${target}:${process.argv[3]}`;
     if (c.services[name].image !== expected) throw new Error(`${name} must use the release image from GHCR`);
     if (!targets.includes(target)) throw new Error(`Workflow does not publish ${target}`);
     if (c.services[name].build) throw new Error("Server must not build images");
   }
+  if (JSON.stringify(c.services.worker.command) !== JSON.stringify(["bun", "apps/worker/src/main.ts"])) throw new Error("Shared worker image must start the worker entry point");
   if (c.services.initialize.depends_on.api) throw new Error("Initialization waits for API readiness");
   if (c.services.api.environment.AUTH_COOKIE_SECURE !== "false") throw new Error("HTTP cookies not configured");
 ' "$test_root/compose.json" "$script_dir/../.github/workflows/deploy.yml" "$tag_one"

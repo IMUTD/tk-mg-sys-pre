@@ -79,7 +79,8 @@ services:
     networks: [backend]
 
   worker:
-    image: ${IMAGE_REGISTRY:-ghcr.io/imutd/tk-mg-sys}-worker:${IMAGE_TAG:?}
+    image: ${IMAGE_REGISTRY:-ghcr.io/imutd/tk-mg-sys}-api:${IMAGE_TAG:?}
+    command: ["bun", "apps/worker/src/main.ts"]
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:?}:${POSTGRES_PASSWORD_URL_ENCODED:?}@postgres:5432/${POSTGRES_DB:?}

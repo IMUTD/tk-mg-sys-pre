@@ -4,7 +4,7 @@
 
 ## 分支与触发条件
 
-`feat/github-deploy-test` 和 `main` 的推送会触发 `.github/workflows/deploy.yml`：部署验证、后端单元测试、真实 PostgreSQL 初始化测试通过后，构建五个 `linux/amd64` 镜像并推送 GHCR。除前端、API 和 Worker 外，还将官方 PostgreSQL 16、Redis 7 的 Alpine 镜像按 Dockerfile 固定的摘要发布到 GHCR，保留官方启动命令和数据目录。
+`feat/github-deploy-test` 和 `main` 的推送会触发 `.github/workflows/deploy.yml`：部署验证、后端单元测试、真实 PostgreSQL 初始化测试通过后，构建四个 `linux/amd64` 镜像并推送 GHCR。API 和 Worker 共用包含两者代码及依赖的 API 镜像，Worker 通过独立启动命令运行，避免重复构建和下载依赖层。另将官方 PostgreSQL 16、Redis 7 的 Alpine 镜像按 Dockerfile 固定的摘要发布到 GHCR，保留官方启动命令和数据目录。
 
 测试分支只检查本次部署涉及的 TypeScript 文件；现有全量 lint 和类型检查在当前主分支已有失败，不降低原测试断言。原 CI 增加可复用调用入口，保留原触发条件和所有检查；`main` 的部署等待完整 CI 成功，包括 lint、类型检查、前端单元测试、PostgreSQL 集成测试和浏览器测试。此测试分支用于部署验收，不能代替项目完整质量验收。
 
@@ -14,7 +14,6 @@
 
 ```text
 ghcr.io/imutd/tk-mg-sys-api:sha-完整提交SHA
-ghcr.io/imutd/tk-mg-sys-worker:sha-完整提交SHA
 ghcr.io/imutd/tk-mg-sys-web:sha-完整提交SHA
 ghcr.io/imutd/tk-mg-sys-postgres:sha-完整提交SHA
 ghcr.io/imutd/tk-mg-sys-redis:sha-完整提交SHA
@@ -23,6 +22,8 @@ ghcr.io/imutd/tk-mg-sys-redis:sha-完整提交SHA
 使用仓库内置 `GITHUB_TOKEN` 发布和拉取本仓库关联镜像，工作流为镜像设置源码仓库标签。服务器登录凭证仅在部署期间存入发布目录的临时 Docker 配置，结束后清理。组织需要允许该仓库创建 GHCR 包；已有同名包需要授予本仓库 Actions 读取和写入权限。
 
 部署服务器只从 GHCR 拉取镜像，无需访问 Docker Hub，也无需配置阿里云或腾讯云镜像加速器。Docker Hub 上游镜像由 GitHub 托管的构建任务获取；服务器仍需能访问 GHCR 及其镜像层下载地址。修复后必须提交并推送新版本，触发新的 Deploy 运行；重跑旧提交的工作流不会使用新配置。
+
+服务器部署命令设有 12 分钟超时，终止后最多等待 30 秒清理进程，早于 GitHub 部署任务的 15 分钟上限，避免任务超时后下载进程继续占用部署锁。日志会标明拉取镜像、启动数据库、迁移、启动应用及健康检查阶段。若长期停在下载阶段，应先检查镜像下载链路，避免反复重跑。
 
 ## 一次性配置
 
