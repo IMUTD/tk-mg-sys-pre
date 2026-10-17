@@ -19,6 +19,40 @@ IMAGE_TAG="$tag_one" docker compose --env-file "$root/shared/.env" -f "$script_d
 bun -e '
   const c = await Bun.file(process.argv[1]).json();
   const workflow = Bun.YAML.parse(await Bun.file(process.argv[2]).text());
+  const assert = (condition, message) => { if (!condition) throw new Error(message); };
+  assert(JSON.stringify(workflow.on) === JSON.stringify({pull_request: {branches: ["main"], types: ["closed"]}}), "Deploy must only listen for PRs closed against main");
+  const github = {event_name: "pull_request", ref: "refs/heads/main", event: {action: "closed", pull_request: {merged: true, base: {ref: "main"}}}};
+  const needs = {verify: {result: "success"}, "production-ci": {result: "success"}, build: {result: "success"}};
+  const allows = (job, context = github, results = needs, enabled = "true", cancelled = false) => {
+    const expression = workflow.jobs[job].if;
+    assert(typeof expression === "string", `${job} must have an explicit deployment gate`);
+    return Boolean(new Function("github", "needs", "vars", "cancelled", `return (${expression.replace(/^\$\{\{\s*|\s*\}\}$/g, "")});`)(context, results, {DEPLOY_ENABLED: enabled}, () => cancelled));
+  };
+  for (const job of ["verify", "production-ci", "build", "deploy"]) {
+    assert(allows(job), `${job} rejects a successful main merge`);
+    for (const eventName of ["push", "workflow_dispatch", "pull_request_target"]) {
+      assert(!allows(job, {...github, event_name: eventName}), `${job} permits ${eventName}`);
+    }
+    for (const [action, merged, branch, ref] of [
+      ["opened", false, "main", "refs/pull/1/merge"],
+      ["synchronize", false, "main", "refs/pull/1/merge"],
+      ["closed", false, "main", "refs/pull/1/merge"],
+      ["closed", true, "develop", "refs/heads/develop"],
+      ["closed", true, "main", "refs/heads/feat/github-deploy-test"],
+    ]) {
+      assert(!allows(job, {...github, ref, event: {action, pull_request: {merged, base: {ref: branch}}}}), `${job} permits ${action}/${merged}/${branch}/${ref}`);
+    }
+  }
+  for (const dependency of ["verify", "production-ci"]) {
+    for (const result of ["failure", "cancelled", "skipped"]) {
+      assert(!allows("build", github, {...needs, [dependency]: {result}}), `Build permits ${dependency} ${result}`);
+    }
+  }
+  for (const result of ["failure", "cancelled", "skipped"]) {
+    assert(!allows("deploy", github, {...needs, build: {result}}), `Deploy permits build ${result}`);
+  }
+  for (const enabled of ["false", "", "TRUE"]) assert(!allows("deploy", github, needs, enabled), "Deploy ignores DEPLOY_ENABLED");
+  for (const job of ["build", "deploy"]) assert(!allows(job, github, needs, "true", true), `${job} permits a cancelled workflow`);
   const targets = workflow.jobs.build.strategy.matrix.target;
   if (c.services.postgres.ports?.length || c.services.redis.ports?.length) throw new Error("Database ports exposed");
   for (const name of ["api", "worker", "web", "initialize", "postgres", "redis"]) {
@@ -93,4 +127,4 @@ bash "$script_dir/rollback.sh" "$root" > "$test_root/rollback.log"
 [[ $(cat "$root/current-release") = "$tag_one" ]]
 ! grep -q 'initialize\|bootstrap pull' "$DEPLOY_TEST_LOG"
 ! grep -q 'down' "$DEPLOY_TEST_LOG"
-echo "Deployment contracts passed: credentials, isolation, first start, backup, failure, lock and rollback"
+echo "Deployment contracts passed: main merge gates, credentials, isolation, first start, backup, failure, lock and rollback"

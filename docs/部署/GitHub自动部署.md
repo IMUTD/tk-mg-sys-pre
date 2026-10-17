@@ -4,11 +4,13 @@
 
 ## 分支与触发条件
 
-`feat/github-deploy-test` 和 `main` 的推送会触发 `.github/workflows/deploy.yml`：部署验证、后端单元测试、真实 PostgreSQL 初始化测试通过后，构建四个 `linux/amd64` 镜像并推送 GHCR。API 和 Worker 共用包含两者代码及依赖的 API 镜像，Worker 通过独立启动命令运行，避免重复构建和下载依赖层。另将官方 PostgreSQL 16、Redis 7 的 Alpine 镜像按 Dockerfile 固定的摘要发布到 GHCR，保留官方启动命令和数据目录。
+生产部署只接受 **PR 合并到 `main`**：`.github/workflows/deploy.yml` 监听目标分支为 `main` 的 `pull_request: closed` 事件，各阶段同时校验 `merged=true` 和主分支引用。仅关闭而未合并的 PR 会跳过所有任务；普通分支推送、直接推送 `main`、标签、合并到其他分支均不会触发部署，也不提供 `workflow_dispatch` 手动部署入口。
 
-测试分支只检查本次部署涉及的 TypeScript 文件；现有全量 lint 和类型检查在当前主分支已有失败，不降低原测试断言。原 CI 增加可复用调用入口，保留原触发条件和所有检查；`main` 的部署等待完整 CI 成功，包括 lint、类型检查、前端单元测试、PostgreSQL 集成测试和浏览器测试。此测试分支用于部署验收，不能代替项目完整质量验收。
+流程为：开发分支提交 → 创建或更新 PR 后运行 CI → PR 合并到 `main` → 对合并后的提交执行部署验证和完整 CI → 构建并推送 GHCR 镜像 → SSH 更新生产服务器 → 健康检查。完整 CI 包括 lint、类型检查、前端单元测试、PostgreSQL 集成测试和浏览器测试。部署验证与完整 CI 必须全部成功；失败、取消或跳过都不能继续构建和部署。原 `ci.yml` 保留 PR、`main` 推送和可复用调用入口，自身没有生产部署步骤。
 
-服务器部署还要求仓库变量 `DEPLOY_ENABLED=true`。未设置时只验证和构建镜像，不连接服务器。首次测试直接通过推送测试分支触发：GitHub 要求工作流先存在于默认分支，才能使用 `workflow_dispatch` 手动运行。合入主分支后可在 Actions 的 Deploy 页面选择分支手动运行。
+构建四个 `linux/amd64` 镜像并推送 GHCR。API 和 Worker 共用包含两者代码及依赖的 API 镜像，Worker 通过独立启动命令运行，避免重复构建和下载依赖层。另将官方 PostgreSQL 16、Redis 7 的 Alpine 镜像按 Dockerfile 固定的摘要发布到 GHCR，保留官方启动命令和数据目录。
+
+服务器部署还要求仓库变量 `DEPLOY_ENABLED=true`。未设置时，合并后的工作流只验证和构建镜像，不连接服务器。首次部署测试分支的推送部署入口已移除；新规则需要提交并推送后才能生效，旧运行的 Re-run 仍使用旧提交中的工作流，不能用来验证新规则。
 
 镜像名称为：
 
@@ -21,7 +23,7 @@ ghcr.io/imutd/tk-mg-sys-redis:sha-完整提交SHA
 
 使用仓库内置 `GITHUB_TOKEN` 发布和拉取本仓库关联镜像，工作流为镜像设置源码仓库标签。服务器登录凭证仅在部署期间存入发布目录的临时 Docker 配置，结束后清理。组织需要允许该仓库创建 GHCR 包；已有同名包需要授予本仓库 Actions 读取和写入权限。
 
-部署服务器只从 GHCR 拉取镜像，无需访问 Docker Hub，也无需配置阿里云或腾讯云镜像加速器。Docker Hub 上游镜像由 GitHub 托管的构建任务获取；服务器仍需能访问 GHCR 及其镜像层下载地址。修复后必须提交并推送新版本，触发新的 Deploy 运行；重跑旧提交的工作流不会使用新配置。
+部署服务器只从 GHCR 拉取镜像，无需访问 Docker Hub，也无需配置阿里云或腾讯云镜像加速器。Docker Hub 上游镜像由 GitHub 托管的构建任务获取；服务器仍需能访问 GHCR 及其镜像层下载地址。修复后必须通过 PR 合并到 `main`，触发新的 Deploy 运行；重跑旧提交的工作流不会使用新配置。
 
 服务器部署命令设有 12 分钟超时，终止后最多等待 30 秒清理进程，早于 GitHub 部署任务的 15 分钟上限，避免任务超时后下载进程继续占用部署锁。日志会标明拉取镜像、启动数据库、迁移、启动应用及健康检查阶段。若长期停在下载阶段，应先检查镜像下载链路，避免反复重跑。
 
@@ -64,7 +66,7 @@ ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 
 ## 首次部署
 
-配置完成后推送测试分支。工作流上传当前提交里的 `infra` 文件，首次自动生成 `/opt/tk-mg-sys/shared/.env`，权限为 `600`。数据库密码、Redis 密码、管理员密码和 32 字节加密密钥在服务器随机生成，不输出到 Actions 日志；再次部署保留该文件。
+配置完成后通过 PR 将部署工作流合并到 `main`。工作流上传合并后提交里的 `infra` 文件，首次自动生成 `/opt/tk-mg-sys/shared/.env`，权限为 `600`。数据库密码、Redis 密码、管理员密码和 32 字节加密密钥在服务器随机生成，不输出到 Actions 日志；再次部署保留该文件。
 
 启动顺序为：
 
