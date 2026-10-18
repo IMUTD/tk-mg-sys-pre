@@ -33,12 +33,19 @@ export const createRegistrationPoolApi = () => ({
   delete: async (groupId: string, ids: readonly number[]): Promise<void> => {
     await client().post(`groups/${groupId}/registration-pool/delete`, { json: { ids } })
   },
-  deleteByTags: async (groupId: string, tags: readonly string[], usedOnly: boolean): Promise<void> => {
+  deleteByTags: async (
+    groupId: string,
+    tags: readonly string[],
+    usedOnly: boolean,
+  ): Promise<void> => {
     await client().post(`groups/${groupId}/registration-pool/delete-by-tags`, {
       json: { tags, usedOnly },
     })
   },
-  import: async (groupId: string, items: readonly TkRegResource[]): Promise<readonly TkRegResource[]> => {
+  import: async (
+    groupId: string,
+    items: readonly TkRegResource[],
+  ): Promise<readonly TkRegResource[]> => {
     const response = await client().post(`groups/${groupId}/registration-pool/import`, {
       json: {
         items: items.map((item) => ({

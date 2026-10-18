@@ -4,9 +4,9 @@ import { takeBalanced } from "./allocate"
 import {
   drawShareFiles,
   drawTexts,
-  fillStep,
   type FillAccount,
   type FillContext,
+  fillStep,
   refreshDeviceHosts,
   resolveProxyLink,
 } from "./fill"
@@ -72,7 +72,7 @@ describe("dispatch fill", () => {
         text: { content: "抽到的文案", resourceId: "text-1" },
       }),
     )
-    expect(filled.parameters.text).toBe("抽到的文案")
+    expect(filled.parameters["text"]).toBe("抽到的文案")
     expect(filled.textResourceId).toBe("text-1")
   })
 
@@ -102,7 +102,7 @@ describe("dispatch fill", () => {
       { deviceHost: "", backupHost: "" },
     )
     expect(refreshed.changed).toBe(false)
-    expect(refreshed.parameters.box).toBe("10.0.0.1")
+    expect(refreshed.parameters["box"]).toBe("10.0.0.1")
   })
 
   it("fills a drawn video path and its source host", () => {
@@ -121,10 +121,34 @@ describe("dispatch fill", () => {
 
   it("draws one file per account from a directory and then cycles", () => {
     const files = [
-      { deviceId: "box-48", host: "192.168.76.48", parent: "bf", path: "video/bf/b.mp4", pool: "video" as const },
-      { deviceId: "box-48", host: "192.168.76.48", parent: "bf", path: "video/bf/a.mp4", pool: "video" as const },
-      { deviceId: "box-48", host: "192.168.76.48", parent: "", path: "video/root.mp4", pool: "video" as const },
-      { deviceId: "box-48", host: "192.168.76.48", parent: "分组", path: "backup/分组/phone.tar.gz", pool: "backup" as const },
+      {
+        deviceId: "box-48",
+        host: "192.168.76.48",
+        parent: "bf",
+        path: "video/bf/b.mp4",
+        pool: "video" as const,
+      },
+      {
+        deviceId: "box-48",
+        host: "192.168.76.48",
+        parent: "bf",
+        path: "video/bf/a.mp4",
+        pool: "video" as const,
+      },
+      {
+        deviceId: "box-48",
+        host: "192.168.76.48",
+        parent: "",
+        path: "video/root.mp4",
+        pool: "video" as const,
+      },
+      {
+        deviceId: "box-48",
+        host: "192.168.76.48",
+        parent: "分组",
+        path: "backup/分组/phone.tar.gz",
+        pool: "backup" as const,
+      },
     ]
     expect(drawShareFiles(files, "box-48", "bf", "video", "sequence", 3)).toEqual([
       { host: "192.168.76.48", path: "video/bf/a.mp4" },
@@ -147,7 +171,7 @@ describe("dispatch fill", () => {
       context({ proxy: null }),
     )
     expect(filled.missingKeys).toEqual(["vless"])
-    expect(filled.parameters.vless).toBe("")
+    expect(filled.parameters["vless"]).toBe("")
   })
 
   it("draws text in order and then cycles", () => {

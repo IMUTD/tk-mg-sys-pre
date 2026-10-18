@@ -2,8 +2,8 @@ import { Modal, Select, Space } from "antd"
 import { type ReactNode, useEffect, useState } from "react"
 
 import { PageKey } from "../../lib/pages"
-import { batchClearOption } from "../labels/batch-assign-dialog"
 import { createLabelsApi } from "../labels/api"
+import { batchClearOption } from "../labels/batch-assign-dialog"
 import "../labels/labels.css"
 
 const keepLatest = (values: readonly string[]): string[] => {
@@ -71,7 +71,10 @@ export const TextTagAssignDialog = ({
           mode="tags"
           onChange={(values: string[]) => setTags(keepLatest(values))}
           optionFilterProp="label"
-          options={[batchClearOption("清除标签"), ...choices.map((name) => ({ label: name, value: name }))]}
+          options={[
+            batchClearOption("清除标签"),
+            ...choices.map((name) => ({ label: name, value: name })),
+          ]}
           placeholder="不修改；选择或输入多个标签，追加到选中行"
           style={{ width: "100%" }}
           value={tags}

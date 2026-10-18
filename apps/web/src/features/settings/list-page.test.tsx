@@ -1,10 +1,11 @@
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
-import { describe, expect, it } from "vitest"
-
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AntdApp } from "../../app/antd-app"
 import { ConfigListPage } from "./list-page"
+import * as fixturesSource from "./myt-config"
+import { createTestConfigs } from "./myt-config.test-fixtures"
 
 const renderPage = (canWrite = true): void => {
   render(
@@ -111,3 +112,9 @@ describe("ConfigListPage", () => {
     expect(screen.queryByText("proxy-config-secret")).not.toBeInTheDocument()
   })
 }, 30_000)
+
+afterEach(() => vi.restoreAllMocks())
+
+beforeEach(() => {
+  vi.spyOn(fixturesSource, "createSeedConfigs").mockImplementation(createTestConfigs)
+})

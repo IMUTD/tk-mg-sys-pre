@@ -9,7 +9,12 @@ import {
 
 export class AccountDeskError extends Error {
   public constructor(
-    readonly reason: "confirm_required" | "invalid_binding" | "invalid_transfer" | "not_found" | "transfer_conflict",
+    readonly reason:
+      | "confirm_required"
+      | "invalid_binding"
+      | "invalid_transfer"
+      | "not_found"
+      | "transfer_conflict",
   ) {
     super(reason)
     this.name = "AccountDeskError"
@@ -28,14 +33,25 @@ export type AccountStatisticRow = {
 export type AccountFacetDevice = {
   readonly host: string
   readonly id: string
-  readonly instances: readonly { readonly id: string; readonly index: number; readonly label: string }[]
+  readonly instances: readonly {
+    readonly id: string
+    readonly index: number
+    readonly label: string
+  }[]
   readonly name: string
 }
 
 export type AccountFacets = {
   readonly devices: readonly AccountFacetDevice[]
   readonly groups: readonly { readonly count: number; readonly tag: string }[]
-  readonly statuses: readonly ["ready", "suspended", "disabled", "expired", "hidden", "unregistered"]
+  readonly statuses: readonly [
+    "ready",
+    "suspended",
+    "disabled",
+    "expired",
+    "hidden",
+    "unregistered",
+  ]
 }
 
 export type AccountTransferView = {
@@ -467,7 +483,8 @@ export const createAccountDesk = (client: Sql): AccountDesk => ({
         for update of a
       `
       const accountIds = accounts.map((row) => row.id)
-      if (accountIds.length === 0 || size >= accountIds.length) throw new AccountDeskError("invalid_transfer")
+      if (accountIds.length === 0 || size >= accountIds.length)
+        throw new AccountDeskError("invalid_transfer")
       const chunks: string[][] = []
       for (let offset = 0; offset < accountIds.length; offset += size) {
         chunks.push(accountIds.slice(offset, offset + size))

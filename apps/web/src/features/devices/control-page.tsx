@@ -1,5 +1,5 @@
 import { Button } from "antd"
-import { type ReactNode, useEffect, useState } from "react"
+import { type CSSProperties, type ReactNode, useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 
 import "./devices.css"
@@ -19,7 +19,10 @@ type Slot = {
 
 const pitIndexes = [1, 2, 3, 4, 5] as const
 
-const webrtcPorts = (index: number, apiPort: number): { readonly tcp: number; readonly udp: number } => {
+const webrtcPorts = (
+  index: number,
+  apiPort: number,
+): { readonly tcp: number; readonly udp: number } => {
   if (apiPort === 9082) return { tcp: 10008, udp: 10008 }
   const tcp = 30000 + (index - 1) * 100 + 7
   return { tcp, udp: tcp + 1 }
@@ -72,7 +75,9 @@ export const DeviceControlPage = (): ReactNode => {
       if (!stop && Array.isArray(rows)) setSlots(rows)
       await Promise.all(
         pitIndexes.map(async (index) => {
-          const frame = await fetch(`/api/frames?deviceId=${deviceId}&index=${index}`, { credentials: "same-origin" })
+          const frame = await fetch(`/api/frames?deviceId=${deviceId}&index=${index}`, {
+            credentials: "same-origin",
+          })
           if (stop || !frame.ok || frame.status === 204) return
           const blob = await frame.blob()
           if (stop || blob.size === 0) return
@@ -109,7 +114,11 @@ export const DeviceControlPage = (): ReactNode => {
   }
 
   const byIndex = new Map(slots.map((slot) => [slot.index, slot]))
-  const fileBrowserUrl = slots.find((slot) => (slot.fileBrowserUrl ?? "").length > 0)?.fileBrowserUrl ?? ""
+  const fileBrowserUrl =
+    slots.find((slot) => (slot.fileBrowserUrl ?? "").length > 0)?.fileBrowserUrl ?? ""
+  const boardStyle: CSSProperties & { readonly "--phone-scale": string } = {
+    "--phone-scale": String(scale),
+  }
 
   return (
     <section className="control-page">
@@ -126,16 +135,22 @@ export const DeviceControlPage = (): ReactNode => {
           放大
         </Button>
       </div>
-      <div className="control-board" style={{ "--phone-scale": String(scale) }}>
+      <div className="control-board" style={boardStyle}>
         {pitIndexes.map((index) => {
           const slot = byIndex.get(index)
           const host = slot?.host ?? ""
           const active = controlling.has(index)
+          const cardStyle: CSSProperties & { readonly "--phone-aspect": string } = {
+            "--phone-aspect": phoneAspect(slot),
+          }
           return (
-            <article className="control-card" key={index} style={{ "--phone-aspect": phoneAspect(slot) }}>
+            <article className="control-card" key={index} style={cardStyle}>
               <div className="control-screen">
                 {active && host.length > 0 ? (
-                  <iframe title={`${index} 控制`} src={playerUrl(host, index, slot?.apiPort ?? 0)} />
+                  <iframe
+                    title={`${index} 控制`}
+                    src={playerUrl(host, index, slot?.apiPort ?? 0)}
+                  />
                 ) : frames[index] !== undefined ? (
                   <img alt="" src={frames[index]} />
                 ) : (
@@ -166,13 +181,25 @@ export const DeviceControlPage = (): ReactNode => {
                   >
                     {active ? "关闭" : "控制"}
                   </Button>
-                  <Button disabled={slot === undefined || slot.busy} onClick={() => slot !== undefined && void run("BoxStart", slot)} size="small">
+                  <Button
+                    disabled={slot === undefined || slot.busy}
+                    onClick={() => slot !== undefined && void run("BoxStart", slot)}
+                    size="small"
+                  >
                     启动
                   </Button>
-                  <Button disabled={slot === undefined || slot.busy} onClick={() => slot !== undefined && void run("BoxStop", slot)} size="small">
+                  <Button
+                    disabled={slot === undefined || slot.busy}
+                    onClick={() => slot !== undefined && void run("BoxStop", slot)}
+                    size="small"
+                  >
                     停止
                   </Button>
-                  <Button disabled={slot === undefined || slot.busy} onClick={() => slot !== undefined && void run("BoxRestart", slot)} size="small">
+                  <Button
+                    disabled={slot === undefined || slot.busy}
+                    onClick={() => slot !== undefined && void run("BoxRestart", slot)}
+                    size="small"
+                  >
                     重启
                   </Button>
                 </div>

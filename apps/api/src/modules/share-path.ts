@@ -10,7 +10,7 @@ const textExt = new Set(["csv", "htm", "html", "json", "log", "md", "srt", "txt"
 const segmentOk = (value: string): boolean => {
   if (value.length === 0 || value.length > 180) return false
   if (value === "." || value === "..") return false
-  return !/[/\\\u0000\t\n\r"'`$]/.test(value)
+  return !value.includes("\0") && !/[/\\\t\n\r"'`$]/.test(value)
 }
 
 export const isBucket = (value: string): value is ShareBucket =>

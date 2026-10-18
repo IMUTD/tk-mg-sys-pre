@@ -3,10 +3,6 @@ import { describe, expect, it } from "vitest"
 import {
   applyAccountOffer,
   applyNodeOffer,
-  createSeedAccounts,
-  createSeedNodes,
-  createSeedOps,
-  createSeedSales,
   dashboardKpis,
   emptyAccountQuery,
   emptyNodeQuery,
@@ -16,10 +12,16 @@ import {
   soldRate,
   validatePrice,
 } from "./catalog"
+import {
+  createAccountFixtures,
+  createNodeFixtures,
+  createOpsFixtures,
+  createSalesFixtures,
+} from "./catalog.test-fixtures"
 
 describe("marketing catalog", () => {
   it("computes remaining inventory, net sales and ticket size", () => {
-    const kpis = dashboardKpis(createSeedAccounts(), createSeedSales())
+    const kpis = dashboardKpis(createAccountFixtures(), createSalesFixtures())
 
     expect(kpis.accountSales).toBe(92_600)
     expect(kpis.nodeSales).toBe(27_100)
@@ -34,7 +36,7 @@ describe("marketing catalog", () => {
   })
 
   it("filters accounts by type, region and windowed flag", () => {
-    const accounts = createSeedAccounts()
+    const accounts = createAccountFixtures()
     expect(
       filterAccounts(accounts, { ...emptyAccountQuery(), type: "white" }).map((item) => item.sku),
     ).toEqual(["ACC-W-001", "ACC-W-118"])
@@ -46,23 +48,23 @@ describe("marketing catalog", () => {
   })
 
   it("filters nodes and ranks sales and ops metrics", () => {
-    const soldOut = filterNodes(createSeedNodes(), { ...emptyNodeQuery(), status: "soldout" })
+    const soldOut = filterNodes(createNodeFixtures(), { ...emptyNodeQuery(), status: "soldout" })
     expect(soldOut.map((item) => item.name)).toEqual(["伦敦移动"])
 
-    const topSales = createSeedSales()
+    const topSales = createSalesFixtures()
       .slice()
       .sort((left, right) => netSales(right) - netSales(left))[0]
     if (topSales === undefined) throw new Error("missing sales")
     expect(topSales.name).toBe("林小满")
     expect(netSales(topSales)).toBe(74_400)
 
-    const ops = createSeedOps().find((item) => item.name === "陈北")
+    const ops = createOpsFixtures().find((item) => item.name === "陈北")
     if (ops === undefined) throw new Error("missing ops")
     expect(soldRate(ops)).toBe(54)
   })
 
   it("updates only windowed, price and status on a listing", () => {
-    const account = createSeedAccounts()[0]
+    const account = createAccountFixtures()[0]
     if (account === undefined) throw new Error("missing account")
     const nextAccount = applyAccountOffer(account, {
       price: 200,
@@ -79,7 +81,7 @@ describe("marketing catalog", () => {
       windowed: true,
     })
 
-    const node = createSeedNodes()[0]
+    const node = createNodeFixtures()[0]
     if (node === undefined) throw new Error("missing node")
     const nextNode = applyNodeOffer(node, { price: 48, status: "soldout" })
     expect(nextNode.bandwidth).toBe(node.bandwidth)

@@ -120,27 +120,27 @@ const columns = (
     key: "actions",
     render: (_value: unknown, member: Member) =>
       member.role === "administrator" ? null : (
-      <Space size={0}>
-        <Button
-          aria-label={`编辑 ${member.displayName}`}
-          onClick={() => onEdit(member)}
-          size="small"
-          type="link"
-        >
-          编辑
-        </Button>
-        <Button
-          aria-label={`删除 ${member.displayName}`}
-          danger
-          disabled={member.id === currentUserId}
-          onClick={() => onDelete(member)}
-          size="small"
-          type="link"
-        >
-          删除
-        </Button>
-      </Space>
-    ),
+        <Space size={0}>
+          <Button
+            aria-label={`编辑 ${member.displayName}`}
+            onClick={() => onEdit(member)}
+            size="small"
+            type="link"
+          >
+            编辑
+          </Button>
+          <Button
+            aria-label={`删除 ${member.displayName}`}
+            danger
+            disabled={member.id === currentUserId}
+            onClick={() => onDelete(member)}
+            size="small"
+            type="link"
+          >
+            删除
+          </Button>
+        </Space>
+      ),
     title: "操作",
     width: 120,
   },

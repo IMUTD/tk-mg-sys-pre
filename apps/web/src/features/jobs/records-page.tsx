@@ -4,14 +4,18 @@ import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react
 import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
 import {
   type FilterMode,
-  type SelectionScope,
   FilterModeSwitch,
-  SelectionScopeSwitch,
   pageSlice,
+  type SelectionScope,
+  SelectionScopeSwitch,
   useClientPagination,
 } from "../../components/tables/operation-controls"
 
-import { createDispatchApi, type DispatchRecordBox, type DispatchRecordTask } from "../tasks/dispatch-api"
+import {
+  createDispatchApi,
+  type DispatchRecordBox,
+  type DispatchRecordTask,
+} from "../tasks/dispatch-api"
 import { createSeedTaskLogs, type TaskLog } from "./catalog"
 import "../mall/mall.css"
 
@@ -137,7 +141,10 @@ const LiveRecords = ({
                 expandedRowRender: (task: DispatchRecordTask) => (
                   <Table
                     columns={stepColumns}
-                    dataSource={task.steps.map((step) => ({ ...step, id: `${task.id}-${step.sequence}` }))}
+                    dataSource={task.steps.map((step) => ({
+                      ...step,
+                      id: `${task.id}-${step.sequence}`,
+                    }))}
                     pagination={false}
                     rowKey="id"
                     size="small"
@@ -167,7 +174,10 @@ const columns: TableColumnsType<TaskLog> = [
   { dataIndex: "updatedAt", title: "更新时间", width: 180 },
 ]
 
-export const TaskRecordsPage = ({ canWrite = false, groupId = "" }: TaskRecordsPageProps): ReactNode => {
+export const TaskRecordsPage = ({
+  canWrite = false,
+  groupId = "",
+}: TaskRecordsPageProps): ReactNode => {
   if (groupId.length > 0) return <LiveRecords canWrite={canWrite} groupId={groupId} />
   return <SeedRecords />
 }

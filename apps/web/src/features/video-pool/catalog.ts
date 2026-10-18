@@ -38,7 +38,11 @@ export const filterVideos = (rows: readonly VideoWork[], query: VideoQuery): Vid
       return false
     }
     if (query.caption.length > 0 && !item.caption.includes(query.caption)) return false
-    if (query.ungrouped ? item.group.trim().length > 0 : query.group.length > 0 && item.group !== query.group)
+    if (
+      query.ungrouped
+        ? item.group.trim().length > 0
+        : query.group.length > 0 && item.group !== query.group
+    )
       return false
     return true
   })

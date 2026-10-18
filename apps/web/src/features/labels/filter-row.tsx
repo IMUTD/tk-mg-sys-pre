@@ -19,9 +19,14 @@ export const usageLabel = (name: string, count: number): string =>
   count > 0 ? `${name}(${count})` : name
 
 export const unionLabelNames = (...groups: readonly (readonly string[])[]): string[] =>
-  [...new Set(groups.flat().map((name) => name.trim()).filter((name) => name.length > 0))].sort(
-    (left, right) => left.localeCompare(right, "zh-CN"),
-  )
+  [
+    ...new Set(
+      groups
+        .flat()
+        .map((name) => name.trim())
+        .filter((name) => name.length > 0),
+    ),
+  ].sort((left, right) => left.localeCompare(right, "zh-CN"))
 
 export type LabelOption = {
   readonly value: string

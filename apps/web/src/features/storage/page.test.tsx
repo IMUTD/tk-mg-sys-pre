@@ -1,10 +1,11 @@
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
-import { describe, expect, it } from "vitest"
-
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AntdApp } from "../../app/antd-app"
 import { StoragePage } from "./page"
+import * as fixturesSource from "./storage-target"
+import { createTestTargets } from "./storage-target.test-fixtures"
 
 const renderPage = (canWrite = true): void => {
   render(
@@ -81,3 +82,9 @@ describe("StoragePage", () => {
     expect(await screen.findByText("最近备份成功")).toBeVisible()
   })
 }, 30_000)
+
+afterEach(() => vi.restoreAllMocks())
+
+beforeEach(() => {
+  vi.spyOn(fixturesSource, "createSeedTargets").mockImplementation(createTestTargets)
+})

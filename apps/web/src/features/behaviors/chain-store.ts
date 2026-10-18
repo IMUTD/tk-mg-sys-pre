@@ -56,7 +56,9 @@ const toChain = (row: ChainPayload): BehaviorChain => ({
     return {
       api: step.api,
       delayMs: normalizeDelay(step.delayMs),
-      guards: (step.guards ?? []).filter((code): code is GuardCode => code === "ad" || code === "transcode"),
+      guards: (step.guards ?? []).filter(
+        (code): code is GuardCode => code === "ad" || code === "transcode",
+      ),
       id: index,
       params: { ...step.params },
       scopes,

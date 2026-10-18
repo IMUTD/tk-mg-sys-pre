@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest"
 import {
   calcProgress,
   childTasksOf,
-  createSeedTasks,
   createTasksFromForm,
   deleteTasks,
   emptyTaskQuery,
@@ -13,9 +12,11 @@ import {
   taskLogLines,
 } from "./myt-task"
 
+import { createTaskFixtures } from "./myt-task.test-fixtures"
+
 describe("myt-task", () => {
   it("filters seed tasks by 云大师 query fields and hides children by default", () => {
-    const tasks = createSeedTasks()
+    const tasks = createTaskFixtures()
     const mains = filterTasks(tasks, emptyTaskQuery())
     const all = filterTasks(tasks, { ...emptyTaskQuery(), main: "all" })
     const byId = filterTasks(tasks, { ...emptyTaskQuery(), id: "5005", main: "all" })
@@ -37,7 +38,7 @@ describe("myt-task", () => {
   })
 
   it("starts paused tasks, kills running tasks and deletes children with the parent", () => {
-    const tasks = createSeedTasks()
+    const tasks = createTaskFixtures()
     const started = startTasks(tasks, [5001, 5003], "2026-09-17 12:00:00")
     const killed = killTasks(started, [5003, 5005], "2026-09-17 12:01:00")
     const removed = deleteTasks(killed, [5003], true)
@@ -77,8 +78,8 @@ describe("myt-task", () => {
       status: "2",
     })
     expect(created.slice(1).every((item) => item.pid === 6001 && item.main === false)).toBe(true)
-    const nurture = createSeedTasks().find((item) => item.id === 5003)
-    const unpublished = createSeedTasks().find((item) => item.id === 5001)
+    const nurture = createTaskFixtures().find((item) => item.id === 5003)
+    const unpublished = createTaskFixtures().find((item) => item.id === 5001)
     if (nurture === undefined || unpublished === undefined) throw new Error("missing seed task")
     expect(calcProgress(nurture)).toBe(25)
     expect(taskLogLines(unpublished)).toContain("等待手动启动，创建后不会自动执行")

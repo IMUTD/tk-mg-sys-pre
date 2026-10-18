@@ -164,7 +164,7 @@ export const applyInitializerSnapshot = async (
         status = case when exists (
           select 1 from device_agent a where a.device_id = device.id
             and a.last_heartbeat_at > now() - interval '45 seconds'
-        ) then 'online' else 'offline' end, updated_at = now(),
+        ) then 'online' else 'offline' end::device_status, updated_at = now(),
         box_group_id = case when ${changing} then null else box_group_id end,
         sequence_no = case when ${changing} then null else sequence_no end
         where id = ${deviceId}`

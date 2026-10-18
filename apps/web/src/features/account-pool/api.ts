@@ -145,9 +145,7 @@ export const createAccountPoolsApi = () => {
     create: async (groupId: string, input: PoolWrite) =>
       PoolSchema.parse(await client.post(root(groupId), { json: input }).json()),
     createDesk: async (groupId: string, query: DeskPoolQuery, name = "") =>
-      PoolSchema.parse(
-        await client.post(root(groupId), { json: { desk: query, name } }).json(),
-      ),
+      PoolSchema.parse(await client.post(root(groupId), { json: { desk: query, name } }).json()),
     details: async (groupId: string, id: string) =>
       DetailsSchema.parse(await client.get(`${root(groupId)}/${id}`).json()),
     remove: async (groupId: string, ids: readonly string[]) => {

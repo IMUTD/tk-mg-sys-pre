@@ -35,13 +35,24 @@ try {
       await sql`select id from operation_account where group_id = ${user.group_id} and identifier = ${identifier}`
     if (exists.length > 0) continue
     const local = index < 4
+    let instanceId: string | null = null
+    if (local) {
+      const instances = await sql<{ id: string }[]>`
+        insert into device_instance(device_id, instance_index, label)
+        values (${device.id}, ${index + 1}, ${`模拟坑位-${index + 1}`})
+        on conflict(device_id, instance_index) do update set device_id = excluded.device_id
+        returning id`
+      const instance = instances[0]
+      if (instance === undefined) throw new Error("Missing disposable fixture instance")
+      instanceId = instance.id
+    }
     await sql`insert into operation_account
       (group_id, name, identifier, encrypted_secret, app, platform_uid, backup_type,
-        backup_key, device_id, tags, status, online, transferred, deleted, note, follower, following, favorite, extra)
+        backup_key, device_id, device_instance_id, tags, status, online, transferred, deleted, note, follower, following, favorite, extra)
       values (${user.group_id}, ${`模拟账号-${index + 1}`}, ${identifier},
         ${cipher.encrypt("simulation-only-not-a-real-password")}, 'tiktok', ${`SIMPOOL-${index + 1}`},
         ${local ? "local" : "private_cloud"}::operation_account_backup_type,
-        ${`simulation-backup-${index + 1}`}, ${local ? device.id : null},
+        ${`simulation-backup-${index + 1}`}, ${local ? device.id : null}, ${instanceId},
         ${[local ? "验收-本地账号" : "验收-云端账号", index % 2 === 0 ? "验收-标签A" : "验收-标签B"]},
         ${index === 10 ? "disabled" : index === 7 ? "suspended" : "ready"}::operation_account_status,
         ${index % 2 === 0}, ${index === 8}, ${index === 9},

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "bun:test"
 
 import { directoryOk, fileCategory, isBucket, splitRelative } from "./share-path"
 
@@ -20,4 +20,12 @@ describe("share paths", () => {
     expect(directoryOk("美女/一月")).toBe(true)
     expect(directoryOk("")).toBe(true)
   })
+
+  it.each(["\0", "\t", "\n", "\r", '"', "'", "`", "$"])(
+    "rejects a path segment containing %j",
+    (character) => {
+      expect(splitRelative(`folder/file${character}.mp4`)).toBeNull()
+      expect(directoryOk(`folder/sub${character}directory`)).toBe(false)
+    },
+  )
 })

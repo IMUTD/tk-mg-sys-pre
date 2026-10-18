@@ -35,20 +35,27 @@ test("real login, synchronized devices, account persistence and compatible Agent
   const box = z.array(Box).parse(await boxesResponse.json())[0]
   if (box === undefined) throw new Error("Missing synchronized box")
   const filterFixture = async () => {
-    await page.getByLabel("用户名", { exact: true }).fill("integration.account")
-    await page.getByRole("button", { name: "搜索", exact: true }).click()
+    await page.getByLabel("用户名 / UID", { exact: true }).click()
+    await page.getByLabel("用户名 / UID 内容", { exact: true }).fill("integration.account")
+    await page.getByText("搜索", { exact: true }).click()
+    await expect(page.getByRole("button", { name: "编辑", exact: true })).toHaveCount(1)
   }
   await page.goto("/operations/accounts")
   await filterFixture()
-  await expect(page.getByText("integration.account", { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole("table").getByText("integration.account", { exact: true }),
+  ).toBeVisible()
   await page.reload()
   await filterFixture()
-  await expect(page.getByText("integration.account", { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole("table").getByText("integration.account", { exact: true }),
+  ).toBeVisible()
   const accountsPath = `/api/groups/${box.groupId}/operations/accounts`
   await page.getByRole("button", { name: "编辑", exact: true }).click()
   const editor = page.getByRole("dialog", { name: "编辑账号" })
   await editor.getByLabel("uid", { exact: true }).fill("integration-uid")
-  await editor.getByLabel("备注", { exact: true }).fill("persisted-ui-note")
+  await editor.getByLabel("用户备注", { exact: true }).fill("persisted-ui-note")
+  await page.getByRole("option", { name: "persisted-ui-note", exact: true }).click()
   const saved = page.waitForResponse(
     (response) => response.request().method() === "PATCH" && response.url().includes(accountsPath),
   )
@@ -58,7 +65,7 @@ test("real login, synchronized devices, account persistence and compatible Agent
   await page.reload()
   await filterFixture()
   await page.getByRole("button", { name: "编辑", exact: true }).click()
-  await expect(editor.getByLabel("备注", { exact: true })).toHaveValue("persisted-ui-note")
+  await expect(editor.getByText("persisted-ui-note", { exact: true })).toBeVisible()
   await expect(editor.getByLabel("uid", { exact: true })).toHaveValue("integration-uid")
   await editor.getByRole("button", { name: "取消", exact: true }).click()
   const fixtureQuery = `${accountsPath}?query=integration.account&pageSize=100`

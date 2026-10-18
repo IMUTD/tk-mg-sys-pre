@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
 import type { SecretCipher } from "../../lib/crypto"
-import { planDispatch, type DispatchSelection, type FileChoice } from "./repository"
+import { type DispatchSelection, type FileChoice, planDispatch } from "./repository"
 
 const cipher: SecretCipher = {
   decrypt: () => "secret-a",
@@ -28,8 +28,20 @@ describe("planDispatch file draw", () => {
     const planned = planDispatch(
       cipher,
       selection([
-        { deviceId: "box-48", directory: "bf", mode: "sequence", sequence: 1, source: "pool.video" },
-        { deviceId: "box-48", directory: "分组", mode: "sequence", sequence: 2, source: "pool.backup" },
+        {
+          deviceId: "box-48",
+          directory: "bf",
+          mode: "sequence",
+          sequence: 1,
+          source: "pool.video",
+        },
+        {
+          deviceId: "box-48",
+          directory: "分组",
+          mode: "sequence",
+          sequence: 2,
+          source: "pool.backup",
+        },
       ]),
       [
         {
@@ -66,7 +78,13 @@ describe("planDispatch file draw", () => {
       new Map(),
       new Map(),
       [
-        { deviceId: "box-48", host: "192.168.76.48", parent: "bf", path: "video/bf/1.mp4", pool: "video" },
+        {
+          deviceId: "box-48",
+          host: "192.168.76.48",
+          parent: "bf",
+          path: "video/bf/1.mp4",
+          pool: "video",
+        },
         {
           deviceId: "box-48",
           host: "192.168.76.48",
@@ -108,7 +126,7 @@ describe("planDispatch file draw", () => {
     expect(item?.deviceHost).toBe("192.168.76.140")
     expect(item?.instanceIndex).toBe(1)
     expect(item?.proxyName).toBe("代理甲")
-    expect(item?.filled[0]?.parameters.text).toBe("user-a")
+    expect(item?.filled[0]?.parameters["text"]).toBe("user-a")
     expect(item?.filled[1]?.parameters).toEqual({ 路径: "video/bf/1.mp4", 源主机: "192.168.76.48" })
     expect(item?.filled[2]?.parameters).toEqual({
       路径: "backup/分组/phone.tar.gz",

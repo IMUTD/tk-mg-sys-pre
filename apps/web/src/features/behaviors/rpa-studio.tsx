@@ -1,14 +1,14 @@
 import { App, Button, Card, Input, Modal, Select, Switch } from "antd"
-import { type ReactNode, useEffect, useState, type MutableRefObject } from "react"
+import { type MutableRefObject, type ReactNode, useEffect, useId, useState } from "react"
 import { SaveChainDialog } from "./chain-list"
 import { saveChain, useChains } from "./chain-store"
 import {
   type AnchorField,
   type AnchorKey,
+  apiByCode,
   type BehaviorChain,
   type ChainStep,
   chainFingerprint,
-  apiByCode,
   createStep,
   type GuardCode,
   normalizeDelay,
@@ -38,6 +38,7 @@ export const RpaStudio = ({
   skills,
 }: RpaStudioProps): ReactNode => {
   const { message, modal } = App.useApp()
+  const studioId = useId()
   const chains = useChains()
   const [steps, setSteps] = useState<ChainStep[]>([])
   const [nextId, setNextId] = useState(1)
@@ -51,7 +52,9 @@ export const RpaStudio = ({
   const [anchorKey, setAnchorKey] = useState<AnchorKey["key"]>("id")
   const fingerprint = chainFingerprint(steps)
   const sourcesReady = steps.every((step) =>
-    Object.keys(step.params).every((key) => step.scopes[key] !== "external" || (step.sources?.[key] ?? "").length > 0),
+    Object.keys(step.params).every(
+      (key) => step.scopes[key] !== "external" || (step.sources?.[key] ?? "").length > 0,
+    ),
   )
   const canSave = canWrite && steps.length > 0 && testedKey === fingerprint && sourcesReady
   const constrained = anchorTable === "operation_account"
@@ -273,15 +276,21 @@ export const RpaStudio = ({
                   return (
                     <div className="rpa-param" key={key}>
                       {external ? (
-                        <label className="rpa-source">
-                          <span className="rpa-source-label">{paramLabel(apiByCode(item.api), key)}</span>
-                          <Select
+                        <label className="rpa-source" htmlFor={`${studioId}-${item.id}-${key}`}>
+                          <span className="rpa-source-label">
+                            {paramLabel(apiByCode(item.api), key)}
+                          </span>
+                          <Select<string>
                             aria-label={`${item.api}-${key}-来源`}
+                            id={`${studioId}-${item.id}-${key}`}
                             onChange={(source) => setSource(item.id, key, source)}
-                            options={anchorFields.map((field) => ({ label: field.label, value: field.source }))}
+                            options={anchorFields.map((field) => ({
+                              label: field.label,
+                              value: field.source,
+                            }))}
                             placeholder="选择字段"
                             style={{ width: 160 }}
-                            value={(item.sources?.[key] ?? "").length === 0 ? undefined : item.sources?.[key]}
+                            value={item.sources?.[key] || null}
                             virtual={false}
                           />
                         </label>
@@ -316,18 +325,20 @@ export const RpaStudio = ({
                 </div>
                 <div className="rpa-guards">
                   <span>守护</span>
-                  <label>
+                  <label htmlFor={`${studioId}-${item.id}-ad`}>
                     <Switch
                       aria-label={`${item.api}-广告通过`}
+                      id={`${studioId}-${item.id}-ad`}
                       checked={(item.guards ?? []).includes("ad")}
                       onChange={(on) => setGuard(item.id, "ad", on)}
                       size="small"
                     />
                     广告通过
                   </label>
-                  <label>
+                  <label htmlFor={`${studioId}-${item.id}-transcode`}>
                     <Switch
                       aria-label={`${item.api}-转码通过`}
+                      id={`${studioId}-${item.id}-transcode`}
                       checked={(item.guards ?? []).includes("transcode")}
                       onChange={(on) => setGuard(item.id, "transcode", on)}
                       size="small"
@@ -377,7 +388,13 @@ export const RpaStudio = ({
         </div>
       )}
       {loadingChain ? (
-        <Modal footer={null} onCancel={() => setLoadingChain(false)} open title="载入行为链" width={420}>
+        <Modal
+          footer={null}
+          onCancel={() => setLoadingChain(false)}
+          open
+          title="载入行为链"
+          width={420}
+        >
           {chains.length === 0 ? (
             <p className="behaviors-meta">暂无行为链</p>
           ) : (

@@ -1,4 +1,9 @@
-import { CopyOutlined, DeleteOutlined, PlusOutlined, QuestionCircleOutlined } from "@ant-design/icons"
+import {
+  CopyOutlined,
+  DeleteOutlined,
+  PlusOutlined,
+  QuestionCircleOutlined,
+} from "@ant-design/icons"
 import type { TableColumnsType } from "antd"
 import { Alert, App, Button, Card, Input, Space, Table } from "antd"
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
@@ -6,8 +11,8 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { FilteredSelectCheckbox } from "../../components/tables/filtered-selection"
 import {
   type FilterMode,
-  type SelectionScope,
   FilterModeSwitch,
+  type SelectionScope,
   SelectionScopeSwitch,
 } from "../../components/tables/operation-controls"
 import "./account-pool.css"
@@ -461,7 +466,7 @@ export const AccountPoolListPage = ({
           </Button>
         </Space>
       </div>
-      <Table
+      <Table<MytTaskRes>
         columns={columns}
         dataSource={pools}
         loading={loading}

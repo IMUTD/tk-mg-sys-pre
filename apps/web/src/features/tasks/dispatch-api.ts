@@ -9,7 +9,11 @@ export type DispatchOptions = {
   readonly accountTags: readonly string[]
   readonly boxGroups: readonly string[]
   readonly boxRemarks: readonly string[]
-  readonly chains: readonly { readonly id: string; readonly name: string; readonly steps: readonly DispatchChainStep[] }[]
+  readonly chains: readonly {
+    readonly id: string
+    readonly name: string
+    readonly steps: readonly DispatchChainStep[]
+  }[]
   readonly devices: readonly { readonly host: string; readonly id: string; readonly name: string }[]
   readonly pits: readonly number[]
   readonly pools: readonly { readonly id: string; readonly key: string }[]
@@ -81,7 +85,11 @@ export type DispatchCreateInput = {
   }[]
   readonly pitIndexes?: readonly number[]
   readonly proxies?: { readonly by: "group" | "remark"; readonly name: string }
-  readonly texts?: readonly { readonly mode: "random" | "sequence" | "tag"; readonly sequence: number; readonly tag?: string }[]
+  readonly texts?: readonly {
+    readonly mode: "random" | "sequence" | "tag"
+    readonly sequence: number
+    readonly tag?: string
+  }[]
 }
 
 const readError = async (response: Response): Promise<string> => {
@@ -91,7 +99,8 @@ const readError = async (response: Response): Promise<string> => {
   } | null
   if (body?.error === "dispatch_incomplete") {
     const first = body.items?.[0]
-    const where = first === undefined ? "" : `${first.account ?? ""} 第 ${(first.sequence ?? 0) + 1} 步`
+    const where =
+      first === undefined ? "" : `${first.account ?? ""} 第 ${(first.sequence ?? 0) + 1} 步`
     return `参数没有写全，不能开始。${where} ${first?.keys?.join("、") ?? ""}`.trim()
   }
   if (body?.error === "no_accounts") return "这个范围内没有账号"
@@ -129,13 +138,24 @@ export const createDispatchApi = (groupId: string) => {
       const response = await request(
         `${root}/dispatches/directories?deviceId=${encodeURIComponent(deviceId)}&source=${encodeURIComponent(source)}`,
       )
-      return ((await response.json()) as { directories: readonly { readonly bucket: string; readonly count: number; readonly directory: string }[] }).directories
+      return (
+        (await response.json()) as {
+          directories: readonly {
+            readonly bucket: string
+            readonly count: number
+            readonly directory: string
+          }[]
+        }
+      ).directories
     },
     options: async () => {
       const response = await request(`${root}/dispatches/options`)
       return (await response.json()) as DispatchOptions
     },
-    clearRecords: async (input: { readonly deviceIds: readonly string[]; readonly unassigned: boolean }) => {
+    clearRecords: async (input: {
+      readonly deviceIds: readonly string[]
+      readonly unassigned: boolean
+    }) => {
       const response = await request(`${root}/dispatch-records/clear`, {
         body: JSON.stringify(input),
         method: "POST",

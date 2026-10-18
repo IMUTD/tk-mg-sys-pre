@@ -1,4 +1,4 @@
-import { type FilterMode, combineChecks } from "../../components/tables/operation-controls"
+import { combineChecks, type FilterMode } from "../../components/tables/operation-controls"
 import { formatRemarks, splitRemarks } from "../labels/remark-list"
 
 export const FIELD_TYPE_OPTIONS = [

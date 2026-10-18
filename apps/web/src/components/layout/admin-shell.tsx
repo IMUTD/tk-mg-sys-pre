@@ -143,7 +143,11 @@ const navigation: readonly NavigationItem[] = [
       { icon: <InboxOutlined aria-hidden />, label: "文本池", path: "/studio/text-pool" },
       { icon: <VideoCameraOutlined aria-hidden />, label: "视频池", path: "/studio/share-video" },
       { icon: <PictureOutlined aria-hidden />, label: "图片池", path: "/studio/image-pool" },
-      { icon: <FileProtectOutlined aria-hidden />, label: "备份池", path: "/studio/backup-resources" },
+      {
+        icon: <FileProtectOutlined aria-hidden />,
+        label: "备份池",
+        path: "/studio/backup-resources",
+      },
       { icon: <DatabaseOutlined aria-hidden />, label: "注册池", path: "/studio/registration" },
     ],
   },
@@ -211,7 +215,8 @@ const parentMenuPath = (path: string): string | undefined => {
 
 const openMenuKeysForPath = (path: string): string[] => {
   const current = parentMenuPath(path)
-  if (current === undefined || defaultOpenMenuPaths.includes(current)) return [...defaultOpenMenuPaths]
+  if (current === undefined || defaultOpenMenuPaths.includes(current))
+    return [...defaultOpenMenuPaths]
   return [...defaultOpenMenuPaths, current]
 }
 

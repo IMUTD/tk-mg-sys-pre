@@ -190,6 +190,7 @@ jobs:
           export INIT_FIXTURE_WRITER_URL="postgres://tk_mg_init:$POSTGRES_PASSWORD@127.0.0.1:55433/tk_mg_test_initializer"
           export REDIS_URL="redis://:$REDIS_PASSWORD@127.0.0.1:16379/0"
           bun apps/api/src/integration-fixtures.ts
+          bun apps/api/src/account-pool-fixtures.ts
           bun infra/scripts/deploy-integration.ts
       - name: Verify read-only source access and live software chain
         run: |

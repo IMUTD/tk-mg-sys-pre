@@ -302,11 +302,13 @@ export const createDevicesApi = (apiBaseUrl = "/api"): DevicesApi => {
     groups: async () => AccessGroupListSchema.parse(await client.get("access/groups").json()).items,
     owned: async () => z.array(OwnedBoxSchema).parse(await client.get("devices").json()),
     labels: async () => BoxLabelListSchema.parse(await client.get("box-labels").json()),
-    createRemark: async (name) => BoxLabelSchema.parse(await client.post("box-remarks", { json: { name } }).json()),
+    createRemark: async (name) =>
+      BoxLabelSchema.parse(await client.post("box-remarks", { json: { name } }).json()),
     deleteRemark: async (id) => {
       await client.delete(`box-remarks/${encodeURIComponent(id)}`)
     },
-    createBoxGroup: async (name) => BoxLabelSchema.parse(await client.post("box-groups", { json: { name } }).json()),
+    createBoxGroup: async (name) =>
+      BoxLabelSchema.parse(await client.post("box-groups", { json: { name } }).json()),
     deleteBoxGroup: async (id) => {
       await client.delete(`box-groups/${encodeURIComponent(id)}`)
     },

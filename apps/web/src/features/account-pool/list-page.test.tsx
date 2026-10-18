@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AntdApp } from "../../app/antd-app"
-import { createPoolTestApi, poolTestGroup } from "../../test/account-pool-fixtures"
+import { createPoolTestApi, poolTestGroup, poolTestSources } from "../../test/account-pool-fixtures"
 import * as labelsApi from "../labels/api"
 import * as poolApi from "./api"
 import { AccountPoolListPage } from "./list-page"
@@ -28,6 +28,30 @@ describe("AccountPoolListPage", () => {
   let state: ReturnType<typeof createPoolTestApi>
   beforeEach(() => {
     state = createPoolTestApi()
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (request: Request) => {
+        const path = new URL(request.url).pathname
+        if (path.endsWith("/devices")) return Response.json({ items: [] })
+        if (path.endsWith("/proxies")) return Response.json({ items: [], total: 0 })
+        if (path.endsWith("/transfers")) return Response.json([])
+        if (path.endsWith("/accounts")) {
+          const items = poolTestSources().map((source) => ({
+            id: source.id,
+            groupId: poolTestGroup,
+            identifier: source.username,
+            name: source.username,
+            status: "ready",
+            updatedAt: source.updateTime,
+            platformUid: source.uid,
+            tags: [source.tag, ...source.tagBucket],
+            note: source.remark,
+          }))
+          return Response.json({ items, page: 1, pageSize: 500, total: items.length })
+        }
+        throw new Error(`Unexpected request: ${path}`)
+      }),
+    )
     vi.spyOn(poolApi, "createAccountPoolsApi").mockReturnValue(state.api)
     vi.spyOn(labelsApi, "createLabelsApi").mockReturnValue({
       list: async (_page, scope = "account") => ({
@@ -43,6 +67,7 @@ describe("AccountPoolListPage", () => {
   })
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it("renders 云大师账号池 filters, columns and API records", async () => {
@@ -68,7 +93,7 @@ describe("AccountPoolListPage", () => {
     expect(screen.getByRole("columnheader", { name: "分析" })).toBeVisible()
     expect(screen.getByText("1107养号")).toBeVisible()
     expect(screen.getByText("gen-1108测试")).toBeVisible()
-    expect(screen.getAllByText("发布任务池")[0]).toBeVisible()
+    expect(within(rowByText("1107发布")).getByRole("cell", { name: "2" })).toBeVisible()
     expect(within(rowByText("1107发布")).getByRole("button", { name: "复制" })).toBeVisible()
     expect(
       within(rowByText("gen-1108测试")).queryByRole("button", { name: "复制" }),
@@ -101,7 +126,7 @@ describe("AccountPoolListPage", () => {
     expect(within(dialog).queryByRole("button", { name: "添加账号分组" })).not.toBeInTheDocument()
     expect(within(dialog).queryByRole("button", { name: "添加账号标签" })).not.toBeInTheDocument()
     expect(within(dialog).queryByRole("button", { name: "添加用户备注" })).not.toBeInTheDocument()
-    expect(within(dialog).getByText("全部账号")).toBeVisible()
+    await waitFor(() => expect(within(dialog).getByText("全部账号")).toBeVisible())
     expect(within(dialog).getByRole("columnheader", { name: "用户名" })).toBeVisible()
     expect(within(dialog).getByRole("columnheader", { name: "状态" })).toBeVisible()
     await user.click(within(dialog).getByRole("button", { name: "正常" }))
@@ -190,9 +215,11 @@ describe("AccountPoolListPage", () => {
   })
 
   it("retains saved pools after remount instead of storing them only in React", async () => {
+    const filter = (await state.api.details(poolTestGroup, "cccccccc-cccc-4ccc-8ccc-000000000101"))
+      .filterCondition
+    if (filter !== null && "kind" in filter) throw new Error("expected legacy pool fixture")
     await state.api.create(poolTestGroup, {
-      filter: (await state.api.details(poolTestGroup, "cccccccc-cccc-4ccc-8ccc-000000000101"))
-        .filterCondition ?? {
+      filter: filter ?? {
         backType: "3",
         deviceId: null,
         deviceSeq: null,
@@ -226,9 +253,14 @@ describe("AccountPoolListPage", () => {
     expect(within(dialog).getByText("2 / 2")).toBeVisible()
     expect(within(dialog).getAllByRole("button", { name: "导出未使用" })).toHaveLength(3)
     await user.keyboard("{Escape}")
+    await waitFor(() => expect(dialog).not.toBeInTheDocument())
     await user.click(within(rowByText("1107发布")).getByRole("button", { name: "数据统计" }))
-    const stats = await screen.findByRole("dialog")
-    await waitFor(() => expect(within(stats).getByText("未查询")).toBeVisible())
+    await waitFor(() => {
+      const stats = screen.getByRole("dialog")
+      expect(within(stats).getByText("数据统计", { selector: ".ant-modal-title" })).toBeVisible()
+      expect(within(stats).getByText("未查询")).toBeVisible()
+    })
+    const stats = screen.getByRole("dialog")
     expect(within(stats).getByText("已存数据")).toBeVisible()
     expect(within(stats).queryByText("查询成功")).not.toBeInTheDocument()
   })

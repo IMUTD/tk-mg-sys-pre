@@ -212,9 +212,7 @@ export const createPostgresPoolRepository = (
         left join app_user u on u.id = p.created_by_user_id
         where ${where()}
         order by p.display_id desc limit ${filter.pageSize} offset ${(filter.page - 1) * filter.pageSize}`,
-      client<
-        { total: string }[]
-      >`select count(*) as total from operation_account_pool p
+      client<{ total: string }[]>`select count(*) as total from operation_account_pool p
         left join app_user u on u.id = p.created_by_user_id
         where ${where()}`,
     ])

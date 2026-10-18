@@ -1,5 +1,5 @@
 import { Button, Card } from "antd"
-import { type ReactNode } from "react"
+import type { ReactNode } from "react"
 
 import type { TestResult } from "./rpa-api"
 
@@ -35,11 +35,13 @@ export const taskFinished = (status: string): boolean =>
   status === "succeeded" || status === "failed" || status === "cancelled"
 
 const asRecord = (value: unknown): Record<string, unknown> => {
-  if (value !== null && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>
+  if (value !== null && typeof value === "object" && !Array.isArray(value))
+    return value as Record<string, unknown>
   if (typeof value === "string") {
     try {
       const parsed = JSON.parse(value) as unknown
-      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed))
+        return parsed as Record<string, unknown>
     } catch {
       return { text: value }
     }
@@ -55,11 +57,23 @@ const textOf = (value: unknown): string => {
 
 const isXml = (key: string, value: string): boolean => {
   const text = value.trimStart()
-  return key.toLowerCase() === "xml" || text.startsWith("<?xml") || text.startsWith("<hierarchy") || text.startsWith("<node")
+  return (
+    key.toLowerCase() === "xml" ||
+    text.startsWith("<?xml") ||
+    text.startsWith("<hierarchy") ||
+    text.startsWith("<node")
+  )
 }
 
-const ResultValue = ({ name, value }: { readonly name: string; readonly value: string }): ReactNode => {
-  if (value.startsWith("data:image/")) return <img alt={name} className="api-lab-image" src={value} />
+const ResultValue = ({
+  name,
+  value,
+}: {
+  readonly name: string
+  readonly value: string
+}): ReactNode => {
+  if (value.startsWith("data:image/"))
+    return <img alt={name} className="api-lab-image" src={value} />
   if (isXml(name, value)) {
     return (
       <details className="api-lab-xml">
@@ -72,10 +86,14 @@ const ResultValue = ({ name, value }: { readonly name: string; readonly value: s
 }
 
 const orderedEntries = (result: unknown): Array<[string, string]> => {
-  const entries = Object.entries(asRecord(result)).map(([key, value]) => [key, textOf(value)] as [string, string])
+  const entries = Object.entries(asRecord(result)).map(
+    ([key, value]) => [key, textOf(value)] as [string, string],
+  )
   const image = entries.filter(([, value]) => value.startsWith("data:image/"))
   const xml = entries.filter(([key, value]) => isXml(key, value))
-  const rest = entries.filter(([key, value]) => !value.startsWith("data:image/") && !isXml(key, value))
+  const rest = entries.filter(
+    ([key, value]) => !value.startsWith("data:image/") && !isXml(key, value),
+  )
   return [...image, ...rest, ...xml]
 }
 
@@ -86,17 +104,30 @@ type TestResultCardProps = {
   readonly waiting: boolean
 }
 
-export const TestResultCard = ({ logs, onClear, report, waiting }: TestResultCardProps): ReactNode => {
+export const TestResultCard = ({
+  logs,
+  onClear,
+  report,
+  waiting,
+}: TestResultCardProps): ReactNode => {
   const hasLogs = logs.length > 0
   return (
     <Card
       className="behaviors-result"
-      extra={hasLogs || report !== null ? <Button onClick={onClear} size="small" type="link">清空记录</Button> : null}
+      extra={
+        hasLogs || report !== null ? (
+          <Button onClick={onClear} size="small" type="link">
+            清空记录
+          </Button>
+        ) : null
+      }
       size="small"
       title="测试返回"
     >
       {report === null ? (
-        <p className="behaviors-meta">点击测试后，云机返回的内容会显示在这里。四个页签共用这一份记录。</p>
+        <p className="behaviors-meta">
+          点击测试后，云机返回的内容会显示在这里。四个页签共用这一份记录。
+        </p>
       ) : (
         <div className="api-lab-report">
           <p>

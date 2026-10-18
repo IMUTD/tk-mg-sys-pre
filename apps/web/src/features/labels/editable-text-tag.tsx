@@ -67,7 +67,7 @@ export const EditableTextTag = ({
             ),
           }
         : {})}
-      color={name === null ? undefined : color}
+      {...(name === null ? {} : { color })}
       onClick={(event) => {
         const target = event.target
         if (target instanceof Element && target.closest(".ant-tag-close-icon") !== null) return

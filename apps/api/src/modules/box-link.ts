@@ -6,6 +6,12 @@ import { z } from "zod"
 
 import { canDeletePage, canViewPage } from "../lib/authorization"
 import { PageKey } from "../lib/pages"
+import {
+  accountAnchorCatalog,
+  type ChainAnchor,
+  readAnchor,
+  readStepSources,
+} from "./account-anchor"
 import type { AuditRepository } from "./audit/service"
 import { writeAuditEvent } from "./audit/service"
 import type { AuthService } from "./auth/service"
@@ -20,22 +26,33 @@ import {
   StatusSchema,
   WatchSchema,
 } from "./box-contract"
+import { markBoxesWithoutHeartbeat } from "./box-presence"
 import {
   administratorFor,
   businessGroupInUse,
   lockBusinessLabel,
   registerBusinessLabels,
 } from "./business-labels"
-import { accountAnchorCatalog, type ChainAnchor, readAnchor, readStepSources } from "./account-anchor"
-import { markBoxesWithoutHeartbeat } from "./box-presence"
 import { refreshDeviceHosts } from "./dispatch/fill"
 import { type GuardCode, guardCatalog, normalizeGuards, xmlHasText } from "./guards"
 import { registerShareFiles } from "./share-files"
 
 const guardLabel = (code: string): string =>
   code === "ad" || code === "transcode" ? guardCatalog[code].label : code
+
 import { type SkillSpec, skillCatalog } from "./skills"
-import { agentSkillStep, isCatalogPullSkill, isSharedVideoSkill, sharedPullCommand, sharedVideoCommand, stageShareAction, stageShareCode, stageShareReady, transferShareCode, transferShareReady } from "./video-share"
+import {
+  agentSkillStep,
+  isCatalogPullSkill,
+  isSharedVideoSkill,
+  sharedPullCommand,
+  sharedVideoCommand,
+  stageShareAction,
+  stageShareCode,
+  stageShareReady,
+  transferShareCode,
+  transferShareReady,
+} from "./video-share"
 
 const unassignedGroup = "00000000-0000-4000-8000-000000000001"
 const noBatch = new Set([
@@ -147,7 +164,9 @@ const fileBrowserFromHost = (host: string): string => {
 const boxPitIndexes = async (host: string): Promise<number[] | null> => {
   if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(host)) return null
   try {
-    const response = await fetch(`http://${host}:8000/android`, { signal: AbortSignal.timeout(3000) })
+    const response = await fetch(`http://${host}:8000/android`, {
+      signal: AbortSignal.timeout(3000),
+    })
     if (!response.ok) return null
     const body = (await response.json()) as {
       code?: number
@@ -259,31 +278,35 @@ const chainView = (row: ChainRow) => {
       ? null
       : readAnchor({ key: row.anchorKey, table: row.anchorTable })
   return {
-  anchor: stored === "invalid" ? null : stored,
-  id: row.id,
-  lastTestedAt: row.lastTestedAt,
-  name: row.name,
-  origin: row.origin,
-  steps: (row.parameters ?? []).map((item, index) => {
-    const scopes = row.paramScopes?.[index] ?? {}
-    const stored = row.paramSources?.[index] ?? {}
-    const sources: ChainSource = {}
-    for (const key of Object.keys(item.input ?? {})) {
-      const value = stored[key]
-      sources[key] =
-        typeof value === "string" && value.length > 0 ? value : scopes[key] === "external" ? "" : "literal"
-    }
-    return {
-      api: item.skill,
-      delayMs: row.delays?.[index] ?? 0,
-      guards: row.guards?.[index] ?? [],
-      id: index,
-      params: item.input ?? {},
-      scopes,
-      sources,
-    }
-  }),
-  updatedAt: row.updatedAt,
+    anchor: stored === "invalid" ? null : stored,
+    id: row.id,
+    lastTestedAt: row.lastTestedAt,
+    name: row.name,
+    origin: row.origin,
+    steps: (row.parameters ?? []).map((item, index) => {
+      const scopes = row.paramScopes?.[index] ?? {}
+      const stored = row.paramSources?.[index] ?? {}
+      const sources: ChainSource = {}
+      for (const key of Object.keys(item.input ?? {})) {
+        const value = stored[key]
+        sources[key] =
+          typeof value === "string" && value.length > 0
+            ? value
+            : scopes[key] === "external"
+              ? ""
+              : "literal"
+      }
+      return {
+        api: item.skill,
+        delayMs: row.delays?.[index] ?? 0,
+        guards: row.guards?.[index] ?? [],
+        id: index,
+        params: item.input ?? {},
+        scopes,
+        sources,
+      }
+    }),
+    updatedAt: row.updatedAt,
   }
 }
 
@@ -366,7 +389,7 @@ const jumpStepCount = (raw: unknown): number | null => {
 }
 
 const jumpNodesReady = (input: Record<string, string> | null | undefined): boolean => {
-  if (jumpStepCount(input?.steps) === null) return false
+  if (jumpStepCount(input?.["steps"]) === null) return false
   return ["text", "contentDesc", "resourceId", "className", "pkg"].some(
     (key) => (input?.[key] ?? "").trim() !== "",
   )
@@ -378,7 +401,7 @@ const claimedSkillStep = (
 ): { readonly input: Record<string, string>; readonly skill: string } => {
   if (kind !== "JumpNodes") return agentSkillStep(kind, parameters)
   const input = { ...(parameters ?? {}) }
-  delete input.steps
+  delete input["steps"]
   return { input, skill: "JumpNodes" }
 }
 
@@ -473,7 +496,11 @@ const failStage = async (tx: TransactionSql, row: ClaimRow): Promise<void> => {
 const stageShareClaim = async (
   tx: TransactionSql,
   row: ClaimRow,
-): Promise<{ readonly kind: "keep" } | { readonly kind: "stop" } | { readonly kind: "rewrite"; readonly skill: string }> => {
+): Promise<
+  | { readonly kind: "keep" }
+  | { readonly kind: "stop" }
+  | { readonly kind: "rewrite"; readonly skill: string }
+> => {
   if (row.kind !== stageShareCode) return { kind: "keep" }
   const path = (row.parameters["路径"] ?? "").trim()
   const sourceHost = (row.parameters["源主机"] ?? "").trim()
@@ -766,7 +793,11 @@ export const registerBoxLink = (
   app.use("/api/*", async (context, next) => {
     const path = context.req.path
     let pages: readonly string[] = []
-    if (path === "/api/skills" || path === "/api/behavior-anchors" || path.startsWith("/api/behavior-chains"))
+    if (
+      path === "/api/skills" ||
+      path === "/api/behavior-anchors" ||
+      path.startsWith("/api/behavior-chains")
+    )
       pages = [PageKey.Behaviors]
     else if (path.startsWith("/api/box-") || path === "/api/devices/labels")
       pages = [PageKey.Devices]
@@ -940,7 +971,8 @@ export const registerBoxLink = (
         if (index >= 1 && index <= 5) reported.push(index)
       }
     }
-    let inventory = !stale && (body?.slotsFresh === true || (Array.isArray(slots) && slots.length > 0))
+    let inventory =
+      !stale && (body?.slotsFresh === true || (Array.isArray(slots) && slots.length > 0))
     if (!inventory) {
       const live = await boxPitIndexes(device.host)
       if (live !== null) {
@@ -1187,9 +1219,15 @@ export const registerBoxLink = (
         }
         if (status === "succeeded" && row.kind === "JumpNodes") {
           const found = Number(outputs["count"] ?? "")
-          const steps = jumpStepCount(row.parameters?.steps)
+          const steps = jumpStepCount(row.parameters?.["steps"])
           const sequence = Number(row.sequence)
-          if (Number.isInteger(found) && found > 0 && steps !== null && steps > 0 && Number.isInteger(sequence)) {
+          if (
+            Number.isInteger(found) &&
+            found > 0 &&
+            steps !== null &&
+            steps > 0 &&
+            Number.isInteger(sequence)
+          ) {
             const skipped = await tx`
               update execution_task_step
               set status = 'skipped', finished_at = now(), result = ${tx.json({ skippedBy: row.stepId })}
@@ -1662,8 +1700,12 @@ export const registerBoxLink = (
         select name from business_label where scope = 'device' and kind = 'group'
           and id = ${context.req.param("id")}::uuid and administrator_id = ${administratorId}::uuid for update`
       if (rows[0] === undefined) return context.json({ error: "not_found" }, 404)
-      const used = await tx`select 1 from device where box_group_id = ${context.req.param("id")}::uuid limit 1`
-      if (used.length > 0 || (await businessGroupInUse(tx, administratorId, "device", rows[0].name)))
+      const used =
+        await tx`select 1 from device where box_group_id = ${context.req.param("id")}::uuid limit 1`
+      if (
+        used.length > 0 ||
+        (await businessGroupInUse(tx, administratorId, "device", rows[0].name))
+      )
         return context.json({ error: "label_in_use" }, 409)
       await tx`delete from business_label where id = ${context.req.param("id")}::uuid`
       return context.body(null, 204)
@@ -1673,100 +1715,102 @@ export const registerBoxLink = (
   app.post("/api/devices/labels", async (context) => {
     try {
       return await sql.begin(async (sql) => {
-      const user = await userFromRequest(sql, context.req.raw)
-      if (user === null) return context.json({ error: "authentication_required" }, 401)
-      const administratorId = await administratorFor(sql, user)
-      const body = (await context.req.json().catch(() => null)) as {
-        boxGroupId?: string | null
-        deviceIds?: string[]
-        remarkId?: string | null
-        remarkIds?: string[]
-        remarkMode?: "add" | "replace"
-        sequenceNo?: number | null
-      } | null
-      const deviceIds = body?.deviceIds ?? []
-      if (administratorId === null || deviceIds.length === 0 || body === null)
-        return context.json({ error: "invalid_label" }, 400)
-      const setsRemarkIds = Object.hasOwn(body, "remarkIds")
-      const setsRemarkId = Object.hasOwn(body, "remarkId")
-      const remarkIds = setsRemarkIds
-        ? (body.remarkIds ?? [])
-        : setsRemarkId
-          ? body.remarkId === null || body.remarkId === undefined
-            ? []
-            : [body.remarkId]
-          : undefined
-      const remarkMode = body.remarkMode === "add" && setsRemarkIds ? "add" : "replace"
-      const setsGroup = Object.hasOwn(body, "boxGroupId")
-      const setsSequence = Object.hasOwn(body, "sequenceNo")
-      if (
-        setsSequence &&
-        body.sequenceNo !== null &&
-        (typeof body.sequenceNo !== "number" ||
-          !Number.isInteger(body.sequenceNo) ||
-          body.sequenceNo < 1 ||
-          body.sequenceNo > 999)
-      )
-        return context.json({ error: "invalid_label" }, 400)
-      if (remarkIds !== undefined && remarkIds.length > 0) {
-        const found = await sql<{ id: string }[]>`
+        const user = await userFromRequest(sql, context.req.raw)
+        if (user === null) return context.json({ error: "authentication_required" }, 401)
+        const administratorId = await administratorFor(sql, user)
+        const body = (await context.req.json().catch(() => null)) as {
+          boxGroupId?: string | null
+          deviceIds?: string[]
+          remarkId?: string | null
+          remarkIds?: string[]
+          remarkMode?: "add" | "replace"
+          sequenceNo?: number | null
+        } | null
+        const deviceIds = body?.deviceIds ?? []
+        if (administratorId === null || deviceIds.length === 0 || body === null)
+          return context.json({ error: "invalid_label" }, 400)
+        const setsRemarkIds = Object.hasOwn(body, "remarkIds")
+        const setsRemarkId = Object.hasOwn(body, "remarkId")
+        const remarkIds = setsRemarkIds
+          ? (body.remarkIds ?? [])
+          : setsRemarkId
+            ? body.remarkId === null || body.remarkId === undefined
+              ? []
+              : [body.remarkId]
+            : undefined
+        const remarkMode = body.remarkMode === "add" && setsRemarkIds ? "add" : "replace"
+        const setsGroup = Object.hasOwn(body, "boxGroupId")
+        const setsSequence = Object.hasOwn(body, "sequenceNo")
+        const sequenceNo = body.sequenceNo ?? null
+        if (
+          setsSequence &&
+          body.sequenceNo !== null &&
+          (typeof body.sequenceNo !== "number" ||
+            !Number.isInteger(body.sequenceNo) ||
+            body.sequenceNo < 1 ||
+            body.sequenceNo > 999)
+        )
+          return context.json({ error: "invalid_label" }, 400)
+        if (remarkIds !== undefined && remarkIds.length > 0) {
+          const found = await sql<{ id: string }[]>`
           select id from box_remark
           where administrator_id = ${administratorId}::uuid and id = any(${remarkIds}::uuid[])`
-        if (found.length !== new Set(remarkIds).size) return context.json({ error: "not_found" }, 404)
-      }
-      if (setsGroup && body.boxGroupId !== null && body.boxGroupId !== undefined) {
-        const found =
-          await sql`select id from box_group where id = ${body.boxGroupId}::uuid and administrator_id = ${administratorId}::uuid`
-        if (found.length === 0) return context.json({ error: "not_found" }, 404)
-      }
-      const owned = await sql<{ id: string }[]>`
+          if (found.length !== new Set(remarkIds).size)
+            return context.json({ error: "not_found" }, 404)
+        }
+        if (setsGroup && body.boxGroupId !== null && body.boxGroupId !== undefined) {
+          const found =
+            await sql`select id from box_group where id = ${body.boxGroupId}::uuid and administrator_id = ${administratorId}::uuid`
+          if (found.length === 0) return context.json({ error: "not_found" }, 404)
+        }
+        const owned = await sql<{ id: string }[]>`
       select id from device
       where id = any(${deviceIds}::uuid[]) and assignee_user_id = ${administratorId}::uuid
         and external_id is not null and enabled and not assignment_pending
       for update
     `
-      if (owned.length !== deviceIds.length) return context.json({ error: "not_found" }, 404)
-      if (remarkIds !== undefined && remarkMode === "replace") {
-        await sql`delete from device_remark where device_id = any(${deviceIds}::uuid[])`
-      }
-      if (remarkIds !== undefined && remarkIds.length > 0) {
-        await sql`
+        if (owned.length !== deviceIds.length) return context.json({ error: "not_found" }, 404)
+        if (remarkIds !== undefined && remarkMode === "replace") {
+          await sql`delete from device_remark where device_id = any(${deviceIds}::uuid[])`
+        }
+        if (remarkIds !== undefined && remarkIds.length > 0) {
+          await sql`
           insert into device_remark (device_id, label_id)
           select device_id, label_id
           from unnest(${deviceIds}::uuid[]) as device_id
           cross join unnest(${remarkIds}::uuid[]) as label_id
           on conflict do nothing
         `
-      }
-      if (remarkIds !== undefined && (remarkMode === "replace" || remarkIds.length > 0)) {
-        await sql`update device set updated_at = now() where id = any(${deviceIds}::uuid[])`
-      }
-      if (setsGroup) {
-        await sql`
+        }
+        if (remarkIds !== undefined && (remarkMode === "replace" || remarkIds.length > 0)) {
+          await sql`update device set updated_at = now() where id = any(${deviceIds}::uuid[])`
+        }
+        if (setsGroup) {
+          await sql`
         update device set box_group_id = ${body.boxGroupId ?? null}::uuid, updated_at = now()
         where id = any(${deviceIds}::uuid[])
       `
-      }
-      if (setsSequence) {
-        if (body.sequenceNo !== null && deviceIds.length > 1)
-          return context.json({ error: "duplicate_sequence" }, 409)
-        if (body.sequenceNo !== null) {
-          const taken = await sql`
+        }
+        if (setsSequence) {
+          if (sequenceNo !== null && deviceIds.length > 1)
+            return context.json({ error: "duplicate_sequence" }, 409)
+          if (sequenceNo !== null) {
+            const taken = await sql`
             select id from device
             where assignee_user_id = ${administratorId}::uuid
-              and sequence_no = ${body.sequenceNo}::integer
+              and sequence_no = ${sequenceNo}::integer
               and not (id = any(${deviceIds}::uuid[]))
             limit 1
           `
-          if (taken.length > 0) return context.json({ error: "duplicate_sequence" }, 409)
-        }
-        await sql`
-          update device set sequence_no = ${body.sequenceNo}::integer, updated_at = now()
+            if (taken.length > 0) return context.json({ error: "duplicate_sequence" }, 409)
+          }
+          await sql`
+          update device set sequence_no = ${sequenceNo}::integer, updated_at = now()
           where id = any(${deviceIds}::uuid[])
         `
-      }
-      return context.json({ ok: true })
-    })
+        }
+        return context.json({ ok: true })
+      })
     } catch (error) {
       if (isUniqueViolation(error)) return context.json({ error: "duplicate_sequence" }, 409)
       throw error
@@ -1794,9 +1838,9 @@ export const registerBoxLink = (
     `
     return context.json(
       rows.map((row) => {
-        const host = String(row.host ?? "")
+        const host = String(row["host"] ?? "")
         const current = fileBrowserFromHost(host)
-        return { ...row, fileBrowserUrl: current.length > 0 ? current : row.fileBrowserUrl }
+        return { ...row, fileBrowserUrl: current.length > 0 ? current : row["fileBrowserUrl"] }
       }),
     )
   })
@@ -1886,12 +1930,12 @@ export const registerBoxLink = (
       if (
         steps.some(
           (step) =>
-            ((isSharedVideoSkill(step.skill ?? "") &&
+            (isSharedVideoSkill(step.skill ?? "") &&
               sharedVideoCommand(step.skill ?? "", step.input ?? {}) === null) ||
-              (isCatalogPullSkill(step.skill ?? "") &&
-                sharedPullCommand(step.skill ?? "", step.input ?? {}) === null) ||
-              (step.skill === transferShareCode && !transferShareReady(step.input ?? {})) ||
-              (step.skill === stageShareCode && !stageShareReady(step.input ?? {}))),
+            (isCatalogPullSkill(step.skill ?? "") &&
+              sharedPullCommand(step.skill ?? "", step.input ?? {}) === null) ||
+            (step.skill === transferShareCode && !transferShareReady(step.input ?? {})) ||
+            (step.skill === stageShareCode && !stageShareReady(step.input ?? {})),
         )
       ) {
         return context.json({ error: "video_path_rejected" }, 400)

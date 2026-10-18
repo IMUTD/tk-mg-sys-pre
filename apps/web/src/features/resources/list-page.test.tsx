@@ -1,11 +1,11 @@
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it } from "vitest"
-
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AntdApp } from "../../app/antd-app"
+import { mockLabelCatalog } from "../labels/catalog.test-fixtures"
 import type { TextPoolApi } from "./api"
 import { ResourcesListPage } from "./list-page"
-import { materialLabelSet, type MytMaterial } from "./myt-material"
+import { type MytMaterial, materialLabelSet } from "./myt-material"
 
 const seed = (): MytMaterial[] => [
   {
@@ -143,7 +143,7 @@ describe("ResourcesListPage", () => {
     // Then
     expect(await screen.findByText("第一条素材")).toBeVisible()
     expect(screen.getByText("第二条素材")).toBeVisible()
-    expect(screen.getByText("导入成功！共导入 2 条素材")).toBeVisible()
+    expect(await screen.findByText("导入成功！共导入 2 条素材")).toBeVisible()
   })
 
   it("edits selected material content", async () => {
@@ -162,7 +162,7 @@ describe("ResourcesListPage", () => {
 
     // Then
     expect(await screen.findByText("记得开播通知我")).toBeVisible()
-    expect(screen.getByText("修改成功")).toBeVisible()
+    expect(await screen.findByText("修改成功")).toBeVisible()
   })
 
   it("filters content as the search box changes", async () => {
@@ -176,3 +176,7 @@ describe("ResourcesListPage", () => {
     expect(screen.queryByText("这个视频太好看了，已关注")).not.toBeInTheDocument()
   })
 }, 30_000)
+
+afterEach(() => vi.restoreAllMocks())
+
+beforeEach(mockLabelCatalog)

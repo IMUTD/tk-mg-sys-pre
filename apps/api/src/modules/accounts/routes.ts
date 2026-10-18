@@ -1,4 +1,4 @@
-import type { Hono } from "hono"
+import type { Context, Hono } from "hono"
 import { z } from "zod"
 
 import { Permission, type UserId } from "../../lib/authorization"
@@ -123,7 +123,10 @@ const NoteBatchSchema = z.object({
 })
 const RegionBatchSchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(500),
-  region: z.string().trim().regex(/^[A-Z]{2,3}$/),
+  region: z
+    .string()
+    .trim()
+    .regex(/^[A-Z]{2,3}$/),
 })
 const FavoriteBatchSchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(500),
@@ -161,7 +164,14 @@ const BackupSchema = CreateSchema.extend({
   deviceInstanceId: z.string().uuid(),
 })
 
-const deskError = (error: unknown): "confirm_required" | "invalid_account_binding" | "invalid_transfer" | "transfer_conflict" | null => {
+const deskError = (
+  error: unknown,
+):
+  | "confirm_required"
+  | "invalid_account_binding"
+  | "invalid_transfer"
+  | "transfer_conflict"
+  | null => {
   if (error instanceof AccountBindingError) return "invalid_account_binding"
   if (!(error instanceof AccountDeskError)) return null
   if (error.reason === "invalid_binding") return "invalid_account_binding"
@@ -446,9 +456,9 @@ export const registerAccountRoutes = (
     }
   })
   const writeDesk = async (
-    context: Parameters<Parameters<Hono["post"]>[1]>[0],
+    context: Context,
     action: string,
-    permission: typeof Permission.OperationsRead,
+    permission: typeof Permission.OperationsRead | typeof Permission.OperationsWrite,
     run: (authorization: {
       readonly groupId: string
       readonly principal: { readonly userId: UserId }
@@ -524,16 +534,20 @@ export const registerAccountRoutes = (
   app.post("/api/groups/:groupId/operations/accounts/statistics/delete", async (context) => {
     const input = await parseJson(context.req.raw, StatisticsTagSchema)
     if (input === null) return context.json({ error: "invalid_batch_request" }, 400)
-    return writeDesk(context, "account.statistics.delete", Permission.OperationsWrite, (authorization) =>
-      service
-        .deleteByTag(
-          authorization.principal.userId,
-          authorization.groupId,
-          input.tag,
-          input.bannedOnly,
-          input.confirm,
-        )
-        .then((affected) => ({ affected })),
+    return writeDesk(
+      context,
+      "account.statistics.delete",
+      Permission.OperationsWrite,
+      (authorization) =>
+        service
+          .deleteByTag(
+            authorization.principal.userId,
+            authorization.groupId,
+            input.tag,
+            input.bannedOnly,
+            input.confirm,
+          )
+          .then((affected) => ({ affected })),
     )
   })
   app.post("/api/groups/:groupId/operations/accounts/statistics/reset-banned", async (context) => {
@@ -607,84 +621,118 @@ export const registerAccountRoutes = (
   app.post("/api/groups/:groupId/operations/accounts/transfers", async (context) => {
     const input = await parseJson(context.req.raw, TransferCreateSchema)
     if (input === null) return context.json({ error: "invalid_batch_request" }, 400)
-    return writeDesk(context, "account.transfer.create", Permission.OperationsWrite, (authorization) =>
-      service.createTransfer(
-        authorization.principal.userId,
-        authorization.groupId,
-        input.ids,
-        input.code,
-      ),
+    return writeDesk(
+      context,
+      "account.transfer.create",
+      Permission.OperationsWrite,
+      (authorization) =>
+        service.createTransfer(
+          authorization.principal.userId,
+          authorization.groupId,
+          input.ids,
+          input.code,
+        ),
     )
   })
   app.post("/api/groups/:groupId/operations/accounts/transfers/revoke", async (context) => {
     const input = await parseJson(context.req.raw, TransferCodeSchema)
     if (input === null) return context.json({ error: "invalid_batch_request" }, 400)
-    return writeDesk(context, "account.transfer.revoke", Permission.OperationsWrite, (authorization) =>
-      service
-        .revokeTransfer(authorization.principal.userId, authorization.groupId, input.code)
-        .then((affected) => ({ affected })),
+    return writeDesk(
+      context,
+      "account.transfer.revoke",
+      Permission.OperationsWrite,
+      (authorization) =>
+        service
+          .revokeTransfer(authorization.principal.userId, authorization.groupId, input.code)
+          .then((affected) => ({ affected })),
     )
   })
   app.post("/api/groups/:groupId/operations/accounts/transfers/split", async (context) => {
     const input = await parseJson(context.req.raw, TransferSplitSchema)
     if (input === null) return context.json({ error: "invalid_batch_request" }, 400)
-    return writeDesk(context, "account.transfer.split", Permission.OperationsWrite, (authorization) =>
-      service.splitTransfer(
-        authorization.principal.userId,
-        authorization.groupId,
-        input.code,
-        input.size,
-      ),
+    return writeDesk(
+      context,
+      "account.transfer.split",
+      Permission.OperationsWrite,
+      (authorization) =>
+        service.splitTransfer(
+          authorization.principal.userId,
+          authorization.groupId,
+          input.code,
+          input.size,
+        ),
     )
   })
   app.post("/api/groups/:groupId/operations/accounts/transfers/merge", async (context) => {
     const input = await parseJson(context.req.raw, TransferMergeSchema)
     if (input === null) return context.json({ error: "invalid_batch_request" }, 400)
-    return writeDesk(context, "account.transfer.merge", Permission.OperationsWrite, (authorization) =>
-      service.mergeTransfers(
-        authorization.principal.userId,
-        authorization.groupId,
-        input.codes,
-        input.code,
-      ),
+    return writeDesk(
+      context,
+      "account.transfer.merge",
+      Permission.OperationsWrite,
+      (authorization) =>
+        service.mergeTransfers(
+          authorization.principal.userId,
+          authorization.groupId,
+          input.codes,
+          input.code,
+        ),
     )
   })
   app.post("/api/groups/:groupId/operations/accounts/transfers/redeem", async (context) => {
     const input = await parseJson(context.req.raw, TransferCodeSchema)
     if (input === null) return context.json({ error: "invalid_batch_request" }, 400)
-    return writeDesk(context, "account.transfer.redeem", Permission.OperationsWrite, (authorization) =>
-      service
-        .redeemTransfer(authorization.principal.userId, authorization.groupId, input.code)
-        .then((affected) => ({ affected })),
+    return writeDesk(
+      context,
+      "account.transfer.redeem",
+      Permission.OperationsWrite,
+      (authorization) =>
+        service
+          .redeemTransfer(authorization.principal.userId, authorization.groupId, input.code)
+          .then((affected) => ({ affected })),
     )
   })
   app.post("/api/groups/:groupId/operations/accounts/backups", async (context) => {
     const input = await parseJson(context.req.raw, BackupSchema)
     if (input === null) return context.json({ error: "invalid_account_request" }, 400)
-    return writeDesk(context, "account.backup", Permission.OperationsWrite, async (authorization) => {
-      const account = await service.create(authorization.principal.userId, authorization.groupId, {
-        ...input,
-        name: displayName(input),
-      })
-      return account
-    })
+    return writeDesk(
+      context,
+      "account.backup",
+      Permission.OperationsWrite,
+      async (authorization) => {
+        const account = await service.create(
+          authorization.principal.userId,
+          authorization.groupId,
+          {
+            ...input,
+            name: displayName(input),
+          },
+        )
+        return account
+      },
+    )
   })
   app.post("/api/groups/:groupId/operations/accounts/:accountId/start", async (context) => {
     const accountId = OperationAccountIdSchema.safeParse(context.req.param("accountId"))
     if (!accountId.success) return context.json({ error: "invalid_account_id" }, 400)
     const input = await parseJson(context.req.raw, StartSchema)
     if (input === null) return context.json({ error: "invalid_account_binding" }, 400)
-    return writeDesk(context, "account.start", Permission.OperationsWrite, async (authorization) => {
-      const updated = await service.start(
-        authorization.principal.userId,
-        authorization.groupId,
-        accountId.data,
-        input.deviceId,
-        input.deviceInstanceId,
-        input.proxyId,
-      )
-      if (!updated) throw new AccountDeskError("not_found")
-      return { updated: true }
-    })
+    return writeDesk(
+      context,
+      "account.start",
+      Permission.OperationsWrite,
+      async (authorization) => {
+        const updated = await service.start(
+          authorization.principal.userId,
+          authorization.groupId,
+          accountId.data,
+          input.deviceId,
+          input.deviceInstanceId,
+          input.proxyId,
+        )
+        if (!updated) throw new AccountDeskError("not_found")
+        return { updated: true }
+      },
+    )
   })
 }

@@ -1,4 +1,16 @@
-import { App, Button, Collapse, Empty, Input, Modal, Select, Space, Table, Tag, type TableColumnsType } from "antd"
+import {
+  App,
+  Button,
+  Collapse,
+  Empty,
+  Input,
+  Modal,
+  Select,
+  Space,
+  Table,
+  type TableColumnsType,
+  Tag,
+} from "antd"
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { filteredRowSelection } from "../../components/tables/filtered-selection"
 
@@ -103,10 +115,14 @@ export const BackupResourcesPage = (): ReactNode => {
       message.error("扫描没有下发")
       return
     }
-    const body = (await response.json()) as { scans: { host?: string; name?: string; status: string }[] }
+    const body = (await response.json()) as {
+      scans: { host?: string; name?: string; status: string }[]
+    }
     const offline = body.scans.filter((item) => item.status === "offline")
     const busy = body.scans.filter((item) => item.status === "busy").length
-    const sent = body.scans.filter((item) => item.status === "pending" || item.status === "running").length
+    const sent = body.scans.filter(
+      (item) => item.status === "pending" || item.status === "running",
+    ).length
     if (sent === 0 && offline.length > 0) {
       message.error("无法扫描")
       await load()
@@ -125,7 +141,9 @@ export const BackupResourcesPage = (): ReactNode => {
       return
     }
     message.success(
-      busy === 0 ? `已向 ${sent} 台盒子下发扫描` : `已向 ${sent} 台盒子下发扫描，另有 ${busy} 台正在扫描其他目录`,
+      busy === 0
+        ? `已向 ${sent} 台盒子下发扫描`
+        : `已向 ${sent} 台盒子下发扫描，另有 ${busy} 台正在扫描其他目录`,
     )
     await load()
   }
@@ -133,7 +151,11 @@ export const BackupResourcesPage = (): ReactNode => {
   const transfer = async (): Promise<void> => {
     setSending(true)
     const response = await fetch("/api/share-transfers", {
-      body: JSON.stringify({ fileIds: selected, targetDeviceId, targetDirectory: targetDirectory.trim() }),
+      body: JSON.stringify({
+        fileIds: selected,
+        targetDeviceId,
+        targetDirectory: targetDirectory.trim(),
+      }),
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       method: "POST",
@@ -183,7 +205,10 @@ export const BackupResourcesPage = (): ReactNode => {
                     />
                   ),
                   key: dir.path || "/",
-                  label: dir.path === "" ? `根目录（${dir.files.length}）` : `${dir.path}（${dir.files.length}）`,
+                  label:
+                    dir.path === ""
+                      ? `根目录（${dir.files.length}）`
+                      : `${dir.path}（${dir.files.length}）`,
                 }))}
               />
             ),
@@ -212,10 +237,13 @@ export const BackupResourcesPage = (): ReactNode => {
         <Space direction="vertical" style={{ width: "100%" }}>
           <Select
             onChange={setTargetDeviceId}
-            options={boxes.map((box) => ({ label: `${box.name || box.host} ${box.host}`, value: box.deviceId }))}
+            options={boxes.map((box) => ({
+              label: `${box.name || box.host} ${box.host}`,
+              value: box.deviceId,
+            }))}
             placeholder="目标盒子"
             style={{ width: "100%" }}
-            value={targetDeviceId || undefined}
+            value={targetDeviceId || null}
           />
           <Input
             onChange={(event) => setTargetDirectory(event.target.value)}

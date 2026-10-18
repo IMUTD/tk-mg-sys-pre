@@ -1,4 +1,4 @@
-import { type FilterMode, combineChecks } from "../../components/tables/operation-controls"
+import { combineChecks, type FilterMode } from "../../components/tables/operation-controls"
 import { formatRemarks, splitRemarks } from "../labels/remark-list"
 
 export const PROXY_TYPE_OPTIONS = [
@@ -381,7 +381,9 @@ export const filterProxies = (
       ...(query.unremarked ? [] : query.remarks.map((name) => remarkParts.includes(name))),
       query.favorite ? item.favorite : null,
       keyword.length > 0
-        ? [item.ip, item.port, item.remark, item.tag].some((field) => includesIgnoreCase(field, keyword))
+        ? [item.ip, item.port, item.remark, item.tag].some((field) =>
+            includesIgnoreCase(field, keyword),
+          )
         : null,
     ])
   })

@@ -31,9 +31,7 @@ const UpdateSchema = z.object({
   category: z.string().trim().max(80).optional(),
   name: z.string().trim().min(1).max(4000).optional(),
   note: z.string().max(2000).optional(),
-  status: z
-    .enum([OperationResourceStatus.Available, OperationResourceStatus.Inactive])
-    .optional(),
+  status: z.enum([OperationResourceStatus.Available, OperationResourceStatus.Inactive]).optional(),
   tags: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
 })
 const BatchSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(500) })
@@ -187,9 +185,7 @@ export const registerResourceRoutes = (
         input.ids,
         input.tags,
       )
-      return affected === 0
-        ? context.json({ error: "not_found" }, 404)
-        : context.json({ affected })
+      return affected === 0 ? context.json({ error: "not_found" }, 404) : context.json({ affected })
     } catch (error) {
       if (error instanceof ResourceTagLimitError)
         return context.json({ error: "invalid_batch_request" }, 400)
@@ -208,7 +204,11 @@ export const registerResourceRoutes = (
     if (hasOperationAuthorizationFailure(authorization)) return authorization.response
     const input = await parseJson(context.req.raw, ImportSchema)
     if (input === null) return context.json({ error: "invalid_resource_request" }, 400)
-    const items = await service.importTexts(authorization.principal.userId, authorization.groupId, input)
+    const items = await service.importTexts(
+      authorization.principal.userId,
+      authorization.groupId,
+      input,
+    )
     return context.json({ imported: items.length, items }, 201)
   })
   app.post("/api/groups/:groupId/operations/resources/batch/delete-scope", async (context) => {

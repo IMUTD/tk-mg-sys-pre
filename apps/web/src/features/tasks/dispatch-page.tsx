@@ -1,12 +1,12 @@
 import { PlayCircleOutlined, PlusOutlined } from "@ant-design/icons"
 import { App, Button, Space, Table, type TableColumnsType, Tag } from "antd"
 import type { ReactNode } from "react"
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
 import {
+  pageSlice,
   type SelectionScope,
   SelectionScopeSwitch,
-  pageSlice,
   useClientPagination,
 } from "../../components/tables/operation-controls"
 import { PageKey } from "../../lib/pages"
@@ -23,7 +23,8 @@ type DispatchPageProps = {
 }
 
 const statusLabel = (status: string, missing: readonly string[]): string => {
-  if (status === "incomplete") return missing.length === 0 ? "参数未齐" : `参数未齐：${missing.join("、")}`
+  if (status === "incomplete")
+    return missing.length === 0 ? "参数未齐" : `参数未齐：${missing.join("、")}`
   if (status === "ready") return "待开始"
   if (status === "started") return "已下发"
   return status
@@ -46,20 +47,18 @@ export const DispatchListPage = ({ canWrite, groupId }: DispatchPageProps): Reac
   const selectedRows = rows.filter((item) => selected.includes(item.id))
   const blocked = selectedRows.some((item) => item.status === "incomplete")
 
-  const reload = async (): Promise<void> => {
+  const reload = useCallback(async (): Promise<void> => {
     if (groupId.length === 0) return
     try {
       setRows(await createDispatchApi(groupId).list())
     } catch (error) {
       message.error(error instanceof Error ? error.message : "保存失败")
     }
-  }
+  }, [groupId, message])
 
   useEffect(() => {
     void reload()
-    // Reload when the group changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groupId])
+  }, [reload])
 
   const start = (): void => {
     if (selected.length === 0 || blocked) return
@@ -80,7 +79,9 @@ export const DispatchListPage = ({ canWrite, groupId }: DispatchPageProps): Reac
   const dispatchPaging = useClientPagination(groupId)
   const dispatchSelection = useFilteredRowSelection({
     onChange: (keys) => setSelected(keys.map((key) => String(key))),
-    pageKeys: pageSlice(rows, dispatchPaging.current, dispatchPaging.pageSize).map((item) => item.id),
+    pageKeys: pageSlice(rows, dispatchPaging.current, dispatchPaging.pageSize).map(
+      (item) => item.id,
+    ),
     rowKey: "id",
     rows,
     selectedKeys: selected,
@@ -92,7 +93,9 @@ export const DispatchListPage = ({ canWrite, groupId }: DispatchPageProps): Reac
       setRows((current) =>
         current.map((row) => ({
           ...row,
-          accounts: row.accounts.map((item) => (item.id === account.id ? { ...item, note: value } : item)),
+          accounts: row.accounts.map((item) =>
+            item.id === account.id ? { ...item, note: value } : item,
+          ),
         })),
       )
     }
@@ -191,7 +194,11 @@ export const DispatchListPage = ({ canWrite, groupId }: DispatchPageProps): Reac
         <Space wrap>
           <SelectionScopeSwitch onChange={setSelectionScope} scope={selectionScope} />
           {canWrite ? (
-            <Button icon={<PlusOutlined aria-hidden />} onClick={() => setCreating(true)} type="primary">
+            <Button
+              icon={<PlusOutlined aria-hidden />}
+              onClick={() => setCreating(true)}
+              type="primary"
+            >
               新增
             </Button>
           ) : null}

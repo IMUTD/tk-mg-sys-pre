@@ -35,6 +35,10 @@ describe("account page API wiring", () => {
             groups: [],
             remarks: [],
           })
+        if (url.pathname === "/api/devices" || url.pathname.endsWith("/transfers"))
+          return Response.json([])
+        if (url.pathname.endsWith("/devices")) return Response.json({ items: [] })
+        if (url.pathname.endsWith("/proxies")) return Response.json({ items: [], total: 0 })
         const groupId = url.pathname.includes(firstGroup) ? firstGroup : secondGroup
         if (url.pathname.endsWith("/credentials")) {
           const body = (await input.json()) as { ids: string[] }

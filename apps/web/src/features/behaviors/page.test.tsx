@@ -1,12 +1,20 @@
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AntdApp } from "../../app/antd-app"
+import { cloudDevice, mockBehaviorApi } from "./behavior-api.test-fixtures"
 import { getChains, resetChains } from "./chain-store"
 import { BehaviorsPage } from "./page"
-import { createSeedDevices, testOnDevice } from "./rpa-api"
+import { testOnDevice } from "./rpa-api"
+
+beforeEach(() => {
+  mockBehaviorApi()
+})
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 const renderPage = (canWrite = true): void => {
   resetChains()
@@ -29,8 +37,9 @@ describe("BehaviorsPage", () => {
     expect(screen.getByText("AI制定")).toBeVisible()
     expect(screen.getByText("RPA编排")).toBeVisible()
     expect(screen.getByText("接口测试")).toBeVisible()
-    expect(screen.getByLabelText("测试云机")).toBeVisible()
-    expect(screen.getAllByText(/264-亮17/).length).toBeGreaterThan(0)
+    expect(screen.getByLabelText("盒子")).toBeVisible()
+    expect(screen.getByLabelText("坑位")).toBeVisible()
+    expect((await screen.findAllByText(/264-亮17/)).length).toBeGreaterThan(0)
   })
 
   it("tests a chain on the selected cloud device", async () => {
@@ -42,8 +51,27 @@ describe("BehaviorsPage", () => {
     if (!(card instanceof HTMLElement)) throw new Error("missing card")
     await user.click(within(card).getByRole("button", { name: "测试" }))
 
-    expect(await screen.findByText("测试成功")).toBeVisible()
-    expect(screen.getByText(/已在 264-亮17/)).toBeVisible()
+    expect(await screen.findByText("云机测试 · 成功")).toBeVisible()
+    expect(screen.getByRole("heading", { name: "OpenApp · 成功" })).toBeVisible()
+    expect(screen.getByText("执行完成")).toBeVisible()
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/tasks",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          deviceId: cloudDevice.deviceId,
+          indexNum: 1,
+          steps: [
+            {
+              afterMs: 0,
+              guards: [],
+              input: { pkg: "com.zhiliaoapp.musically" },
+              skill: "OpenApp",
+            },
+          ],
+        }),
+      }),
+    )
   })
 
   it("lets AI draft a chain and save it after a successful test", async () => {
@@ -68,8 +96,7 @@ describe("BehaviorsPage", () => {
 
 describe("rpa-api", () => {
   it("rejects tests when the cloud device is offline", () => {
-    const device = createSeedDevices().find((item) => item.name === "270-亮18")
-    if (device === undefined) throw new Error("missing device")
+    const device = { ...cloudDevice, name: "270-亮18", online: false }
     expect(testOnDevice(device, "点击", "2026-09-17 18:00:00")).toMatchObject({ ok: false })
     expect(testOnDevice(null, "点击", "2026-09-17 18:00:00").message).toContain(
       "请先在右侧选择云机",

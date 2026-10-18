@@ -110,7 +110,10 @@ export const LabelsSchema = z
     sequenceNo: z.number().int().min(1).max(999).nullable().optional(),
   })
   .refine((value) => new Set(value.deviceIds).size === value.deviceIds.length)
-  .refine((value) => value.remarkIds === undefined || new Set(value.remarkIds).size === value.remarkIds.length)
+  .refine(
+    (value) =>
+      value.remarkIds === undefined || new Set(value.remarkIds).size === value.remarkIds.length,
+  )
 export const WatchSchema = z.object({ indexNums: z.array(Index).max(5) })
 
 export const fingerprint = (value: unknown): string => {

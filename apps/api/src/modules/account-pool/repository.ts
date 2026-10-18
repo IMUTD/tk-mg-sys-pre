@@ -99,7 +99,9 @@ const toAccount = (row: AccountRow): OperationAccount => {
     proxyName: null,
     region: "",
     instanceIndex: null,
-    status: z.enum(["ready", "suspended", "disabled", "expired", "hidden", "unregistered"]).parse(row.status),
+    status: z
+      .enum(["ready", "suspended", "disabled", "expired", "hidden", "unregistered"])
+      .parse(row.status),
     tags: row.tags,
     transferred: false,
     updatedAt: row.updatedAt,

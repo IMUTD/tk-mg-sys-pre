@@ -1,9 +1,28 @@
 import { render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import { AntdApp } from "../../app/antd-app"
 import { VideoPoolPage } from "./page"
+
+vi.mock(import("./catalog"), async (importOriginal) => ({
+  ...(await importOriginal()),
+  createSeedVideos: () => [
+    {
+      caption: "测试作品",
+      comments: 20,
+      cover: "",
+      group: "美国区",
+      id: 1,
+      likes: 100,
+      publishedAt: "2026-09-17",
+      uid: "74820119301",
+      updatedAt: "2026-09-17 12:00:00",
+      views: 1000,
+      workId: "video-1",
+    },
+  ],
+}))
 
 describe("VideoPoolPage", () => {
   it("renders 云大师 video management filters and works", () => {

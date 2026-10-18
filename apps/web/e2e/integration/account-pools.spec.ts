@@ -54,7 +54,11 @@ test("real account-pool writes, refresh persistence, rounds, exports and adminis
       .parse(await (await page.request.get(`${root}/devices`)).json())
     const device = devices.items[0]
     if (device === undefined) throw new Error("Missing test device")
-    await page.getByRole("button", { name: "新增", exact: true }).click()
+    await page
+      .getByRole("row")
+      .filter({ hasText: "验收-本地备份" })
+      .getByRole("button", { name: "复制", exact: true })
+      .click()
     let form = page.getByRole("dialog", { name: "新增账号池" })
     await form.getByLabel("账号池名", { exact: true }).fill(key)
     await form.getByLabel("重复次数", { exact: true }).fill("3")
@@ -73,7 +77,7 @@ test("real account-pool writes, refresh persistence, rounds, exports and adminis
     expect(pool).toMatchObject({ key, times: 3, count: 4 })
     await expect(form).not.toBeVisible()
     await page.reload()
-    let row = page.getByRole("row").filter({ hasText: key })
+    const row = page.getByRole("row").filter({ hasText: key })
     await expect(row).toBeVisible()
     const details = Details.parse(await (await page.request.get(`${root}/${pool.id}`)).json())
     const account = details.accounts.find((item) => item.status === "0")
@@ -121,7 +125,10 @@ test("real account-pool writes, refresh persistence, rounds, exports and adminis
     await expect(page.getByRole("button", { name: "创建账号池", exact: true })).toHaveCount(0)
     await page.getByRole("button", { name: "新增", exact: true }).click()
     const creator = page.getByRole("dialog", { name: "新增账号池" })
-    await creator.getByRole("group", { name: "账号状态", exact: true }).getByRole("button", { name: "正常", exact: true }).click()
+    await creator
+      .getByRole("group", { name: "账号状态", exact: true })
+      .getByRole("button", { name: "正常", exact: true })
+      .click()
     const selected = page.waitForResponse(
       (response) => response.url().endsWith(root) && response.request().method() === "POST",
     )

@@ -1,5 +1,5 @@
-import { App, Button, Input, Modal, Popover, Select, Space, Table } from "antd"
 import type { TableColumnsType } from "antd"
+import { App, Button, Input, Modal, Popover, Select, Space, Table } from "antd"
 import { type ReactNode, useEffect, useMemo, useState } from "react"
 
 import { PageKey } from "../../lib/pages"
@@ -66,11 +66,7 @@ type FilterDialogProps = {
   readonly onSubmit: (query: DeskPoolQuery, name: string) => Promise<void>
 }
 
-export const PoolFilterDialog = ({
-  groupId,
-  onCancel,
-  onSubmit,
-}: FilterDialogProps): ReactNode => {
+export const PoolFilterDialog = ({ groupId, onCancel, onSubmit }: FilterDialogProps): ReactNode => {
   const { message } = App.useApp()
   const [query, setQuery] = useState<DeskPoolQuery>(emptyDeskQuery)
   const [customName, setCustomName] = useState("")
@@ -264,7 +260,10 @@ export const PoolFilterDialog = ({
       <LabelFilterRow
         multiple
         onChange={(quick) => change({ quick })}
-        options={QUICK_FILTER_OPTIONS.map((option) => ({ label: option.label, value: option.value }))}
+        options={QUICK_FILTER_OPTIONS.map((option) => ({
+          label: option.label,
+          value: option.value,
+        }))}
         selected={query.quick}
         system
         title="快捷筛选"

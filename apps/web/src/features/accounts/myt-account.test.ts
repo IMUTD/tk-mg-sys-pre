@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-
 import {
   accountStatistics,
   accountsToCsv,
   assignProxies,
   createBackupAccount,
-  createSeedAccounts,
   emptyAccountQuery,
   filterAccounts,
   hideMiddle,
@@ -16,13 +14,14 @@ import {
   restoreAccounts,
   transferStatistics,
 } from "./myt-account"
+import { createTestAccounts } from "./myt-account.test-fixtures"
 
 describe("myt-account", () => {
   afterEach(() => vi.restoreAllMocks())
 
   it("hides the live list from recycled seed accounts", () => {
     vi.spyOn(Date, "now").mockReturnValue(new Date("2026-09-17T12:00:00").getTime())
-    const accounts = createSeedAccounts()
+    const accounts = createTestAccounts()
     const live = filterAccounts(accounts, emptyAccountQuery())
     const recycled = filterAccounts(accounts, emptyAccountQuery(), true)
 
@@ -48,7 +47,7 @@ describe("myt-account", () => {
   })
 
   it("applies 云大师 quick filters and UID query", () => {
-    const accounts = createSeedAccounts()
+    const accounts = createTestAccounts()
     const noPassword = filterAccounts(accounts, {
       ...emptyAccountQuery(),
       quick: ["noPassword"],
@@ -102,7 +101,13 @@ describe("myt-account", () => {
   })
 
   it("keeps only accounts missing a group, tag, or remark", () => {
-    const account = (id: number, username: string, tag: string, tagBucket: string[], remark: string) => ({
+    const account = (
+      id: number,
+      username: string,
+      tag: string,
+      tagBucket: string[],
+      remark: string,
+    ) => ({
       ...createBackupAccount({
         app: "tiktok",
         backType: "2",
@@ -123,24 +128,24 @@ describe("myt-account", () => {
       account(2, "blank", "", [], ""),
     ]
     expect(
-      filterAccounts(accounts, { ...emptyAccountQuery(), ungrouped: true }).map((item) => item.username),
+      filterAccounts(accounts, { ...emptyAccountQuery(), ungrouped: true }).map(
+        (item) => item.username,
+      ),
     ).toEqual(["blank"])
     expect(
-      filterAccounts(accounts, { ...emptyAccountQuery(), untagged: true }).map((item) => item.username),
+      filterAccounts(accounts, { ...emptyAccountQuery(), untagged: true }).map(
+        (item) => item.username,
+      ),
     ).toEqual(["blank"])
     expect(
-      filterAccounts(accounts, { ...emptyAccountQuery(), unremarked: true }).map((item) => item.username),
+      filterAccounts(accounts, { ...emptyAccountQuery(), unremarked: true }).map(
+        (item) => item.username,
+      ),
     ).toEqual(["blank"])
   })
 
   it("matches mixed identity, exact remark and every region", () => {
-    const row = (
-      id: number,
-      username: string,
-      uid: string,
-      remark: string,
-      region: string,
-    ) => ({
+    const row = (id: number, username: string, uid: string, remark: string, region: string) => ({
       ...createBackupAccount({
         app: "tiktok",
         backType: "2",
@@ -188,7 +193,7 @@ describe("myt-account", () => {
   })
 
   it("groups statistics and transfer codes from seed accounts", () => {
-    const accounts = createSeedAccounts()
+    const accounts = createTestAccounts()
     const stats = accountStatistics(accounts)
     const transfers = transferStatistics(accounts)
 
@@ -203,7 +208,7 @@ describe("myt-account", () => {
   })
 
   it("recycles then restores without echoing secrets into CSV", () => {
-    const accounts = recycleAccounts(createSeedAccounts(), [3001], "2026-09-17 12:00:00")
+    const accounts = recycleAccounts(createTestAccounts(), [3001], "2026-09-17 12:00:00")
     expect(filterAccounts(accounts, emptyAccountQuery()).some((item) => item.id === 3001)).toBe(
       false,
     )
@@ -218,7 +223,7 @@ describe("myt-account", () => {
   })
 
   it("resets banned accounts and assigns proxies by group", () => {
-    const reset = resetBannedStatus(createSeedAccounts(), "美国区", "2026-09-17 12:00:00")
+    const reset = resetBannedStatus(createTestAccounts(), "美国区", "2026-09-17 12:00:00")
     expect(reset.find((item) => item.id === 3005)?.status).toBe("0")
     const assigned = assignProxies(reset, ["亮2"], [101, 102], "average", "2026-09-17 12:00:00")
     expect(assigned.find((item) => item.username === "user.bravo")?.proxyId).toBe(102)

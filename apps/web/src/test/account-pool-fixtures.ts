@@ -6,7 +6,11 @@ import type {
   SourceFilter,
   StoredPoolDetails,
 } from "../features/account-pool/api"
-import { deskPoolKey, normalizeDeskQuery, resolveDeskPoolName } from "../features/account-pool/desk-pool"
+import {
+  deskPoolKey,
+  normalizeDeskQuery,
+  resolveDeskPoolName,
+} from "../features/account-pool/desk-pool"
 
 export const poolTestGroup = "11111111-1111-4111-8111-111111111111"
 export const poolTestDevice = {

@@ -3,7 +3,6 @@ import { type ReactNode, useState } from "react"
 
 import { joinRemarks, splitRemarks } from "../labels/remark-list"
 import { RemarkSelect } from "../labels/remark-tags"
-import { CreatableGroupSelect } from "./batch-dialogs"
 import {
   type AccountProxy,
   APP_OPTIONS,

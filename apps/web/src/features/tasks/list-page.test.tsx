@@ -1,10 +1,40 @@
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AntdApp } from "../../app/antd-app"
 import { TaskListPage } from "./list-page"
+
+import * as taskData from "./myt-task"
+import {
+  createTaskDeviceFixtures,
+  createTaskFixtures,
+  createTaskScriptFixtures,
+} from "./myt-task.test-fixtures"
+
+afterEach(() => vi.unstubAllGlobals())
+
+beforeEach(() => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), "http://localhost")
+      if (url.pathname !== "/api/labels/catalog")
+        throw new Error(`Unexpected task API request: ${url.pathname}`)
+      return Response.json({
+        administratorId: null,
+        canDelete: false,
+        scope: "device",
+        groups: [],
+        remarks: [],
+      })
+    }),
+  )
+  vi.spyOn(taskData, "createSeedTasks").mockImplementation(createTaskFixtures)
+  vi.spyOn(taskData, "createSeedTaskDevices").mockImplementation(createTaskDeviceFixtures)
+  vi.spyOn(taskData, "createSeedTaskScripts").mockImplementation(createTaskScriptFixtures)
+})
 
 const renderPage = (canWrite = true, path = "/operations/tasks"): void => {
   render(

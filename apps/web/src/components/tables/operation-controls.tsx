@@ -19,6 +19,7 @@ export const pageSlice = <RecordType,>(
 export const useClientPagination = (resetKey: string, initialPageSize = 10) => {
   const [current, setCurrent] = useState(1)
   const [pageSize, setPageSize] = useState(initialPageSize)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Filter changes reset pagination through resetKey.
   useEffect(() => {
     setCurrent(1)
   }, [resetKey])

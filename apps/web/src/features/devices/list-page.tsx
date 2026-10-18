@@ -1,5 +1,4 @@
 import { MinusOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons"
-import { HTTPError } from "ky"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Alert,
@@ -17,22 +16,27 @@ import {
   Typography,
 } from "antd"
 import type { ColumnsType } from "antd/es/table"
+import { HTTPError } from "ky"
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { type BoxLabel, createDevicesApi, type DevicesApi, type OwnedBox } from "./api"
 import { hideMiddle, shortDate } from "./myt-device"
 import "./devices.css"
 import {
-  type FilterMode,
-  type SelectionScope,
-  FilterModeSwitch,
-  SelectionScopeSwitch,
   combineChecks,
+  type FilterMode,
+  FilterModeSwitch,
   pageSlice,
+  type SelectionScope,
+  SelectionScopeSwitch,
   useClientPagination,
 } from "../../components/tables/operation-controls"
 import { labelsChanged } from "../labels/api"
-import { BatchAssignDialog, batchClearOption, type BatchAssignResult } from "../labels/batch-assign-dialog"
+import {
+  BatchAssignDialog,
+  type BatchAssignResult,
+  batchClearOption,
+} from "../labels/batch-assign-dialog"
 import { LabelFilterRow, usageLabel } from "../labels/filter-row"
 
 type DeviceListPageProps = {
@@ -201,7 +205,7 @@ const EditableTextTag = ({
             ),
           }
         : {})}
-      color={name === null ? undefined : color}
+      {...(name === null ? {} : { color })}
       onClick={() => {
         closed.current = false
         setDraft(name ?? "")
@@ -283,7 +287,9 @@ export const DeviceListPage = ({
   let ungroupedBoxes = 0
   for (const box of loadedBoxes) {
     if (box.remarks.length === 0) unremarkedBoxes += 1
-    else for (const item of box.remarks) remarkCounts.set(item.id, (remarkCounts.get(item.id) ?? 0) + 1)
+    else
+      for (const item of box.remarks)
+        remarkCounts.set(item.id, (remarkCounts.get(item.id) ?? 0) + 1)
     if (box.boxGroupId === null) ungroupedBoxes += 1
     else groupCounts.set(box.boxGroupId, (groupCounts.get(box.boxGroupId) ?? 0) + 1)
   }
@@ -372,12 +378,15 @@ export const DeviceListPage = ({
     const name = nameOrId.trim()
     if (name.length === 0 || name.length > 40) throw new Error("名称需为 1 到 40 个字")
     try {
-      const created = kind === "remark" ? await api.createRemark(name) : await api.createBoxGroup(name)
+      const created =
+        kind === "remark" ? await api.createRemark(name) : await api.createBoxGroup(name)
       return created.id
     } catch (error) {
       if (error instanceof HTTPError && error.response.status === 409) {
         const fresh = await api.labels()
-        const found = (kind === "remark" ? fresh.remarks : fresh.groups).find((item) => item.name === name)
+        const found = (kind === "remark" ? fresh.remarks : fresh.groups).find(
+          (item) => item.name === name,
+        )
         if (found !== undefined) return found.id
       }
       throw error
@@ -488,10 +497,15 @@ export const DeviceListPage = ({
       width: 96,
       sortDirections: ["ascend", "descend"],
       sorter: (left: OwnedBox, right: OwnedBox) =>
-        (left.sequenceNo ?? Number.MAX_SAFE_INTEGER) - (right.sequenceNo ?? Number.MAX_SAFE_INTEGER),
+        (left.sequenceNo ?? Number.MAX_SAFE_INTEGER) -
+        (right.sequenceNo ?? Number.MAX_SAFE_INTEGER),
       render: (_value, box) =>
         canWrite ? (
-          <SequenceEditor host={box.host} onCommit={(value) => saveSequence(box, value)} value={box.sequenceNo} />
+          <SequenceEditor
+            host={box.host}
+            onCommit={(value) => saveSequence(box, value)}
+            value={box.sequenceNo}
+          />
         ) : (
           <span>{box.sequenceNo ?? "-"}</span>
         ),
@@ -805,7 +819,10 @@ export const DeviceListPage = ({
         点击序列号或 IP 可以复制。全选范围决定勾选当前页，还是全部筛选结果。
       </Typography.Text>
       <BatchAssignDialog
-        groupOptions={[batchClearOption("清除分组"), ...groups.map((item) => ({ label: item.name, value: item.id }))]}
+        groupOptions={[
+          batchClearOption("清除分组"),
+          ...groups.map((item) => ({ label: item.name, value: item.id })),
+        ]}
         onCancel={() => setBatchOpen(false)}
         onSubmit={(choice) => void applyBatch(choice)}
         open={batchOpen}

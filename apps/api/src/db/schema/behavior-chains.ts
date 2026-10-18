@@ -37,6 +37,9 @@ export const behaviorChains = pgTable(
       "behavior_chain_anchor_pair_check",
       sql`(${table.anchorTable} = '' and ${table.anchorKey} = '') or (${table.anchorTable} = 'operation_account' and ${table.anchorKey} in ('id', 'identifier'))`,
     ),
-    check("behavior_chain_param_sources_array_check", sql`jsonb_typeof(${table.paramSources}) = 'array'`),
+    check(
+      "behavior_chain_param_sources_array_check",
+      sql`jsonb_typeof(${table.paramSources}) = 'array'`,
+    ),
   ],
 )

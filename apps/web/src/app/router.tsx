@@ -23,7 +23,6 @@ import { DeviceControlPage } from "../features/devices/control-page"
 import { DeviceCreatePage } from "../features/devices/create-page"
 import { DeviceListPage } from "../features/devices/list-page"
 import { TaskRecordsPage } from "../features/jobs/records-page"
-import { DispatchListPage } from "../features/tasks/dispatch-page"
 import { MallInvoicesPage } from "../features/mall/invoices-page"
 import { MallOrdersPage } from "../features/mall/orders-page"
 import { MallRecordsPage } from "../features/mall/records-page"
@@ -42,6 +41,7 @@ import { RobotsPage } from "../features/robots/page"
 import { ConfigListPage } from "../features/settings/list-page"
 import { StoragePage } from "../features/storage/page"
 import { StudioPage } from "../features/studio/page"
+import { DispatchListPage } from "../features/tasks/dispatch-page"
 import { VideoPoolPage } from "../features/video-pool/page"
 import { VideoResourcesPage } from "../features/video-resources/page"
 import type { SessionUser } from "../lib/api/auth-api"
@@ -74,7 +74,9 @@ const OperationsRegistrationRedirect = (): ReactNode => {
   return (
     <Navigate
       replace
-      to={search.length === 0 ? PageKey.StudioRegistration : `${PageKey.StudioRegistration}?${search}`}
+      to={
+        search.length === 0 ? PageKey.StudioRegistration : `${PageKey.StudioRegistration}?${search}`
+      }
     />
   )
 }
@@ -322,10 +324,7 @@ const AuthenticatedRoutes = (): ReactNode => (
         path="/studio/video-pool"
         element={guarded(PageKey.StudioVideoPool, <VideoPoolRoute />)}
       />
-      <Route
-        path="/studio/video-resources"
-        element={<SharedPoolRedirect />}
-      />
+      <Route path="/studio/video-resources" element={<SharedPoolRedirect />} />
       <Route
         path="/studio/share-video"
         element={guarded(PageKey.StudioShareVideo, <VideoResourcesPage view="video" />)}

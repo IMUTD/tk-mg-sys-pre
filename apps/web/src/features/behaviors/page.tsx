@@ -10,21 +10,21 @@ import { CloudPanel } from "./cloud-panel"
 import {
   type AnchorField,
   type AnchorKey,
-  fallbackAnchorKeys,
   type ChainStep,
   type CloudBox,
   type CloudDevice,
   type CloudSlot,
   fallbackAnchorFields,
+  fallbackAnchorKeys,
   nowText,
+  type SkillSpec,
   setAnchorFields,
   setSkillCatalog,
-  type SkillSpec,
   type TestResult,
 } from "./rpa-api"
 import { RpaStudio } from "./rpa-studio"
-import { type DevicePoint } from "./screen-map"
-import { type LabReport, taskFinished, TestResultCard } from "./test-result"
+import type { DevicePoint } from "./screen-map"
+import { type LabReport, TestResultCard, taskFinished } from "./test-result"
 
 type BehaviorsPageProps = {
   readonly canDelete?: boolean
@@ -116,7 +116,13 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
     const load = async () => {
       const response = await fetch("/api/devices", { credentials: "same-origin" })
       if (!response.ok || stop) return
-      const rows = (await response.json()) as ReadonlyArray<{ externalId: string; host: string; id: string; name: string; status: string }>
+      const rows = (await response.json()) as ReadonlyArray<{
+        externalId: string
+        host: string
+        id: string
+        name: string
+        status: string
+      }>
       const next: CloudBox[] = []
       for (const [offset, row] of rows.entries()) {
         const slots = await fetch(`/api/devices/${row.id}/slots`, { credentials: "same-origin" })
@@ -167,7 +173,7 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
         setWaiting(false)
         return
       }
-      const body = await response.json() as LabReport
+      const body = (await response.json()) as LabReport
       if (stop) return
       setReport(body)
       if (taskFinished(body.status)) {
@@ -189,7 +195,11 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
     setLogs((current) => [...current, { at: nowText(), message, ok }].slice(-20))
   }
 
-  const dispatch = async (label: string, steps: readonly ChainStep[], chainId?: string): Promise<string | null> => {
+  const dispatch = async (
+    label: string,
+    steps: readonly ChainStep[],
+    chainId?: string,
+  ): Promise<string | null> => {
     const ticket = requestTicket.current + 1
     requestTicket.current = ticket
     setTaskId(null)
@@ -202,7 +212,15 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
         errorCode: null,
         name: label,
         status: "failed",
-        steps: [{ errorCode: "请先在右侧选择云机", kind: label, result: null, sequence: 0, status: "failed" }],
+        steps: [
+          {
+            errorCode: "请先在右侧选择云机",
+            kind: label,
+            result: null,
+            sequence: 0,
+            status: "failed",
+          },
+        ],
       })
       return null
     }
@@ -223,7 +241,7 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
         method: "POST",
       })
       if (ticket !== requestTicket.current) return null
-      const body = await response.json().catch(() => null) as { taskId?: string } | null
+      const body = (await response.json().catch(() => null)) as { taskId?: string } | null
       const at = nowText()
       note(response.ok ? `${label} 已下发` : "下发失败", response.ok)
       if (response.ok && chainId !== undefined) touchChainTest(chainId, at)
@@ -233,7 +251,9 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
           errorCode: null,
           name: label,
           status: "failed",
-          steps: [{ errorCode: "下发失败", kind: label, result: null, sequence: 0, status: "failed" }],
+          steps: [
+            { errorCode: "下发失败", kind: label, result: null, sequence: 0, status: "failed" },
+          ],
         })
         return null
       }
@@ -247,7 +267,9 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
         errorCode: null,
         name: label,
         status: "failed",
-        steps: [{ errorCode: "下发失败", kind: label, result: null, sequence: 0, status: "failed" }],
+        steps: [
+          { errorCode: "下发失败", kind: label, result: null, sequence: 0, status: "failed" },
+        ],
       })
       return null
     }
@@ -276,14 +298,9 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
             value={tab}
           />
           {tab === "chains" ? (
-            <ChainList
-              {...(canDelete === undefined ? {} : { canDelete })}
-              onTest={runTest}
-            />
+            <ChainList {...(canDelete === undefined ? {} : { canDelete })} onTest={runTest} />
           ) : null}
-          {tab === "ai" ? (
-            <AiStudio canWrite={canWrite} onTest={runTest} />
-          ) : null}
+          {tab === "ai" ? <AiStudio canWrite={canWrite} onTest={runTest} /> : null}
           {tab === "rpa" ? (
             <RpaStudio
               anchorFields={anchorFields}
@@ -295,7 +312,12 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
             />
           ) : null}
           {tab === "lab" ? (
-            <ApiLab applyScreen={applyScreen} onEnqueue={(name, steps) => dispatch(name, steps)} pending={waiting} skills={skills} />
+            <ApiLab
+              applyScreen={applyScreen}
+              onEnqueue={(name, steps) => dispatch(name, steps)}
+              pending={waiting}
+              skills={skills}
+            />
           ) : null}
         </div>
         <CloudPanel

@@ -1,7 +1,7 @@
 import { PageKey } from "../../lib/pages"
-import { splitRemarks } from "../labels/remark-list"
-import { createAccountsApi, type AccountCredential, type OperationAccount } from "../accounts/api"
+import { type AccountCredential, createAccountsApi, type OperationAccount } from "../accounts/api"
 import { createLabelsApi, labelsChanged } from "../labels/api"
+import { splitRemarks } from "../labels/remark-list"
 import type { TkRegResource } from "./tk-reg-resource"
 
 const secretKeys = ["emailPassword", "msToken", "pop3Password"] as const
@@ -14,16 +14,18 @@ const resourceOf = (extra: Readonly<Record<string, unknown>>): Record<string, st
   const parsed = (task as { parsed_reg_resource?: unknown }).parsed_reg_resource
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {}
   return Object.fromEntries(
-    Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+    Object.entries(parsed).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
   )
 }
 
 export const poolAccountWrite = (resource: TkRegResource) => {
   const data = { ...resource.data }
-  const secret = data.password ?? ""
-  const totp = data.twoFA ?? ""
-  delete data.password
-  delete data.twoFA
+  const secret = data["password"] ?? ""
+  const totp = data["twoFA"] ?? ""
+  delete data["password"]
+  delete data["twoFA"]
   const resourceSecrets: Record<string, string> = {}
   for (const key of secretKeys) {
     const value = data[key] ?? ""
@@ -58,11 +60,11 @@ export const toPoolResource = (
 ): TkRegResource => {
   const data = resourceOf(account.extra)
   if (credential !== undefined) {
-    if (credential.password.length > 0) data.password = credential.password
-    if (credential.totp.length > 0) data.twoFA = credential.totp
-    if (credential.emailPassword.length > 0) data.emailPassword = credential.emailPassword
-    if (credential.msToken.length > 0) data.msToken = credential.msToken
-    if (credential.pop3Password.length > 0) data.pop3Password = credential.pop3Password
+    if (credential.password.length > 0) data["password"] = credential.password
+    if (credential.totp.length > 0) data["twoFA"] = credential.totp
+    if (credential.emailPassword.length > 0) data["emailPassword"] = credential.emailPassword
+    if (credential.msToken.length > 0) data["msToken"] = credential.msToken
+    if (credential.pop3Password.length > 0) data["pop3Password"] = credential.pop3Password
   }
   const assignTime = text(account.extra["poolAssignTime"])
   return {
@@ -154,14 +156,20 @@ export const assignPoolNotes = async (
   await createAccountsApi().setNote(groupId, ids, note)
 }
 
-export const updatePoolAccount = async (groupId: string, resource: TkRegResource): Promise<void> => {
+export const updatePoolAccount = async (
+  groupId: string,
+  resource: TkRegResource,
+): Promise<void> => {
   if (resource.recordId === undefined) return
   rememberGroup(resource.tag)
   rememberRemark(resource.remark)
   await createAccountsApi().update(groupId, resource.recordId, poolAccountWrite(resource))
 }
 
-export const removePoolAccounts = async (groupId: string, ids: readonly string[]): Promise<void> => {
+export const removePoolAccounts = async (
+  groupId: string,
+  ids: readonly string[],
+): Promise<void> => {
   if (ids.length === 0) return
   const api = createAccountsApi()
   await api.recycle(groupId, ids)

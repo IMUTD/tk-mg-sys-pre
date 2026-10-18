@@ -64,7 +64,8 @@ export const readStepSources = (
   anchor: ChainAnchor | null,
   skill: string,
 ): Record<string, string> | null => {
-  if (raw !== undefined && (raw === null || typeof raw !== "object" || Array.isArray(raw))) return null
+  if (raw !== undefined && (raw === null || typeof raw !== "object" || Array.isArray(raw)))
+    return null
   const given = (raw ?? {}) as Record<string, unknown>
   for (const key of Object.keys(given)) {
     if (!(key in input)) return null

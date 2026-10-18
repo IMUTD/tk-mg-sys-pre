@@ -2,14 +2,30 @@ import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { MemoryRouter } from "react-router-dom"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import { AntdApp } from "../../app/antd-app"
 import { AccountMarketPage } from "./account-market"
+import {
+  createAccountFixtures,
+  createNodeFixtures,
+  createOpsFixtures,
+  createSalesFixtures,
+  createTrendFixtures,
+} from "./catalog.test-fixtures"
 import { MarketingDashboard } from "./dashboard"
 import { NodeMarketPage } from "./node-market"
 import { OpsPage } from "./ops-page"
 import { SalesPage } from "./sales-page"
+
+vi.mock(import("./catalog"), async (importOriginal) => ({
+  ...(await importOriginal()),
+  createSeedAccounts: () => createAccountFixtures(),
+  createSeedNodes: () => createNodeFixtures(),
+  createSeedOps: () => createOpsFixtures(),
+  createSeedSales: () => createSalesFixtures(),
+  trendSeries: () => createTrendFixtures(),
+}))
 
 const renderPage = (page: ReactElement): void => {
   render(

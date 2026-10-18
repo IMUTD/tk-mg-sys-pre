@@ -2,9 +2,8 @@ import { createHash, randomUUID } from "node:crypto"
 
 import type { Hono } from "hono"
 import type { Sql } from "postgres"
-
-import { administratorFor } from "./business-labels"
 import { markBoxesWithoutHeartbeat } from "./box-presence"
+import { administratorFor } from "./business-labels"
 import { directoryOk, fileCategory, isBucket, splitRelative } from "./share-path"
 
 const unassignedGroup = "00000000-0000-4000-8000-000000000001"
@@ -79,7 +78,9 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
     if (buckets === null) return context.json({ error: "invalid_payload" }, 400)
     const scope = buckets === backupBuckets ? "backup" : "files"
     await markBoxesWithoutHeartbeat(sql)
-    const devices = await sql<{ deviceId: string; groupId: string; host: string; name: string; status: string }[]>`
+    const devices = await sql<
+      { deviceId: string; groupId: string; host: string; name: string; status: string }[]
+    >`
       select d.id as "deviceId", d.group_id as "groupId", d.host, d.name, d.status
       from device d
       where d.enabled = true and d.assignment_pending = false and d.external_id is not null
@@ -100,7 +101,9 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
         })
         continue
       }
-      const active = await sql<{ buckets: string; id: string; status: string; taskId: string | null }[]>`
+      const active = await sql<
+        { buckets: string; id: string; status: string; taskId: string | null }[]
+      >`
         select s.id::text as id, s.status, s.buckets,
           (select t.id::text from execution_task t
             where t.device_id = s.device_id and t.name = 'ScanShare' and t.status in ('queued','dispatching','running')
@@ -110,11 +113,23 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
         limit 1
       `
       if (active[0] !== undefined && active[0].buckets !== buckets) {
-        scans.push({ deviceId: device.deviceId, name: device.name, scanId: active[0].id, status: "busy", taskId: active[0].taskId })
+        scans.push({
+          deviceId: device.deviceId,
+          name: device.name,
+          scanId: active[0].id,
+          status: "busy",
+          taskId: active[0].taskId,
+        })
         continue
       }
       if (active[0]?.taskId) {
-        scans.push({ deviceId: device.deviceId, name: device.name, scanId: active[0].id, status: active[0].status, taskId: active[0].taskId })
+        scans.push({
+          deviceId: device.deviceId,
+          name: device.name,
+          scanId: active[0].id,
+          status: active[0].status,
+          taskId: active[0].taskId,
+        })
         continue
       }
       if (active[0] !== undefined) {
@@ -151,7 +166,13 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
         await tx`select pg_notify('agent_task', ${device.deviceId})`
       })
       wake(device.deviceId)
-      scans.push({ deviceId: device.deviceId, name: device.name, scanId, status: "pending", taskId })
+      scans.push({
+        deviceId: device.deviceId,
+        name: device.name,
+        scanId,
+        status: "pending",
+        taskId,
+      })
     }
     return context.json({ scans }, 202)
   })
@@ -172,7 +193,14 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
       return context.json({ error: "invalid_category" }, 400)
     const scope = backup ? backupBuckets : fileBuckets
     const devices = await sql<
-      { deviceId: string; host: string; name: string; scanStatus: string | null; finishedAt: Date | null; status: string }[]
+      {
+        deviceId: string
+        host: string
+        name: string
+        scanStatus: string | null
+        finishedAt: Date | null
+        status: string
+      }[]
     >`
       select d.id as "deviceId", d.host, d.name, d.status,
         s.status as "scanStatus", s.finished_at as "finishedAt"
@@ -187,7 +215,16 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
       order by d.host
     `
     const files = await sql<
-      { deviceId: string; id: string; mtime: Date | null; name: string; parent: string; path: string; sha256: string; size: string }[]
+      {
+        deviceId: string
+        id: string
+        mtime: Date | null
+        name: string
+        parent: string
+        path: string
+        sha256: string
+        size: string
+      }[]
     >`
       select e.device_id as "deviceId", e.id::text as id, e.mtime, e.name, e.parent_path as parent,
         e.relative_path as path, e.sha256, e.size_bytes::text as size
@@ -248,7 +285,10 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
     const targetDirectory = (body?.targetDirectory ?? "").trim()
     if (administratorId === null || fileIds.length === 0 || fileIds.length > 200)
       return context.json({ error: "invalid_payload" }, 400)
-    if (!fileIds.every((id) => /^[0-9a-f-]{36}$/i.test(id)) || !/^[0-9a-f-]{36}$/i.test(targetDeviceId))
+    if (
+      !fileIds.every((id) => /^[0-9a-f-]{36}$/i.test(id)) ||
+      !/^[0-9a-f-]{36}$/i.test(targetDeviceId)
+    )
       return context.json({ error: "invalid_payload" }, 400)
     if (!directoryOk(targetDirectory)) return context.json({ error: "invalid_directory" }, 400)
     const target = await sql<{ groupId: string; host: string }[]>`
@@ -259,7 +299,15 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
     `
     if (target[0] === undefined) return context.json({ error: "not_found" }, 404)
     const rows = await sql<
-      { bucket: string; deviceId: string; groupId: string; host: string; path: string; sha256: string; size: string }[]
+      {
+        bucket: string
+        deviceId: string
+        groupId: string
+        host: string
+        path: string
+        sha256: string
+        size: string
+      }[]
     >`
       select e.bucket, e.device_id as "deviceId", d.group_id as "groupId", d.host, e.relative_path as path, e.sha256, e.size_bytes::text as size
       from box_share_entry e
@@ -274,7 +322,7 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
     if (rows.length !== fileIds.length) return context.json({ error: "not_found" }, 404)
     const kinds = new Set(rows.map((row) => (row.bucket === "backup" ? "backup" : "files")))
     if (kinds.size !== 1) return context.json({ error: "invalid_payload" }, 400)
-    const bySource = new Map<string, typeof rows>()
+    const bySource = new Map<string, (typeof rows)[number][]>()
     for (const row of rows) {
       const list = bySource.get(row.deviceId) ?? []
       list.push(row)
@@ -288,7 +336,14 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
       const key = `share-move:${taskId}`
       const fingerprint = hashToken(key)
       const input = {
-        files: JSON.stringify(files.map((file) => ({ bucket: file.bucket, path: file.path, sha256: file.sha256, size: Number(file.size) }))),
+        files: JSON.stringify(
+          files.map((file) => ({
+            bucket: file.bucket,
+            path: file.path,
+            sha256: file.sha256,
+            size: Number(file.size),
+          })),
+        ),
         targetDeviceId,
         targetDirectory,
         targetHost: target[0].host,
@@ -319,14 +374,20 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
   })
 
   app.get("/agent/share-scans/:id/known", async (context) => {
-    const device = await agentDevice(sql, bearer(context.req.header("authorization")), context.req.query("boxId") ?? "")
+    const device = await agentDevice(
+      sql,
+      bearer(context.req.header("authorization")),
+      context.req.query("boxId") ?? "",
+    )
     if (device === null) return context.body(null, 401)
     const scanId = context.req.param("id")
     const scan = await sql<{ buckets: string; deviceId: string }[]>`
       select device_id as "deviceId", buckets from box_share_scan where id = ${scanId}::uuid
     `
     if (scan[0]?.deviceId !== device.deviceId) return context.body(null, 401)
-    const rows = await sql<{ bucket: string; mtime: Date | null; path: string; sha256: string; size: string }[]>`
+    const rows = await sql<
+      { bucket: string; mtime: Date | null; path: string; sha256: string; size: string }[]
+    >`
       select bucket, mtime, relative_path as path, sha256, size_bytes::text as size
       from box_share_entry
       where device_id = ${device.deviceId}::uuid and kind = 'file' and sha256 <> ''
@@ -355,11 +416,16 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
         size?: number
       }[]
     } | null
-    const device = await agentDevice(sql, bearer(context.req.header("authorization")), body?.boxId ?? "")
+    const device = await agentDevice(
+      sql,
+      bearer(context.req.header("authorization")),
+      body?.boxId ?? "",
+    )
     if (device === null) return context.body(null, 401)
     const scanId = context.req.param("id")
     const entries = body?.entries ?? []
-    if (entries.length === 0 || entries.length > 200) return context.json({ error: "invalid_payload" }, 400)
+    if (entries.length === 0 || entries.length > 200)
+      return context.json({ error: "invalid_payload" }, 400)
     const scan = await sql<{ buckets: string; status: string }[]>`
       select status, buckets from box_share_scan
       where id = ${scanId}::uuid and device_id = ${device.deviceId}::uuid
@@ -377,7 +443,8 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
       if (!isBucket(bucket) || (kind !== "file" && kind !== "dir") || parsed === null)
         return context.json({ error: "invalid_payload" }, 400)
       const sha = (entry.sha256 ?? "").toLowerCase()
-      if (sha !== "" && !/^[0-9a-f]{64}$/.test(sha)) return context.json({ error: "invalid_payload" }, 400)
+      if (sha !== "" && !/^[0-9a-f]{64}$/.test(sha))
+        return context.json({ error: "invalid_payload" }, 400)
       const size = Number(entry.size ?? 0)
       if (!Number.isFinite(size) || size < 0) return context.json({ error: "invalid_payload" }, 400)
       const mtime = entry.mtime ? new Date(entry.mtime) : null
@@ -417,7 +484,11 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
       fileCount?: number
       skippedCount?: number
     } | null
-    const device = await agentDevice(sql, bearer(context.req.header("authorization")), body?.boxId ?? "")
+    const device = await agentDevice(
+      sql,
+      bearer(context.req.header("authorization")),
+      body?.boxId ?? "",
+    )
     if (device === null) return context.body(null, 401)
     const scanId = context.req.param("id")
     const error = (body?.error ?? "").slice(0, 500)
@@ -458,9 +529,20 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
   app.post("/agent/share-moves", async (context) => {
     const body = (await context.req.json().catch(() => null)) as {
       boxId?: string
-      moves?: { bucket?: string; from?: string; sha256?: string; size?: number; to?: string; toDeviceId?: string }[]
+      moves?: {
+        bucket?: string
+        from?: string
+        sha256?: string
+        size?: number
+        to?: string
+        toDeviceId?: string
+      }[]
     } | null
-    const device = await agentDevice(sql, bearer(context.req.header("authorization")), body?.boxId ?? "")
+    const device = await agentDevice(
+      sql,
+      bearer(context.req.header("authorization")),
+      body?.boxId ?? "",
+    )
     if (device === null) return context.body(null, 401)
     const source = await sql<{ assignee: string | null }[]>`
       select assignee_user_id::text as assignee from device where id = ${device.deviceId}::uuid
@@ -508,7 +590,15 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
           category = excluded.category, size_bytes = excluded.size_bytes, seen_at = now()
       `
     }
-    const targets = [...new Set((body?.moves ?? []).flatMap((move) => (typeof move.toDeviceId === "string" && move.toDeviceId.length > 0 ? [move.toDeviceId] : [])))]
+    const targets = [
+      ...new Set(
+        (body?.moves ?? []).flatMap((move) =>
+          typeof move.toDeviceId === "string" && move.toDeviceId.length > 0
+            ? [move.toDeviceId]
+            : [],
+        ),
+      ),
+    ]
     for (const deviceId of targets) {
       await sql`select pg_notify('agent_task', ${deviceId})`
       wake(deviceId)
