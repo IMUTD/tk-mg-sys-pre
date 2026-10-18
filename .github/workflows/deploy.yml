@@ -108,7 +108,6 @@ jobs:
           tags: ${{ steps.image.outputs.name }}-${{ matrix.target }}:sha-${{ github.sha }}
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha,scope=${{ matrix.target }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
 
   deploy:
     needs: build

@@ -39,11 +39,39 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Deployment scripts and Compose contracts
+        run: bash infra/deploy.test.sh
+
       - name: Test API and adapters
         run: pnpm --filter @tk-mg/api --filter @tk-mg/storage-adapter --filter @tk-mg/device-adapter --filter @tk-mg/task-execution --filter @tk-mg/worker --recursive run test
 
       - name: Build Web
         run: pnpm build:web
+
+  image-build:
+    name: Docker image build (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [api, web, postgres, redis]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build production image without publishing
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: infra/Dockerfile
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: tk-mg-ci-${{ matrix.target }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.target }}
 
   web-unit:
     name: Web unit tests (${{ matrix.shard }}/4)
