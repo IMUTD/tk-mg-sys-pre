@@ -2,11 +2,11 @@
 set -euo pipefail
 umask 077
 
-deploy_root=${1:?Usage: deploy.sh /opt/tk-mg-sys sha-COMMIT [--rollback]}
+deploy_root=${1:?Usage: deploy.sh /opt/tk-mg-sys sha-COMMIT [--preloaded|--rollback]}
 image_tag=${2:?Image tag is required}
 mode=${3:-deploy}
 [[ "$image_tag" =~ ^sha-[0-9a-f]{40}$ ]] || { echo "Expected sha- followed by a full commit SHA" >&2; exit 64; }
-[[ "$mode" = deploy || "$mode" = --rollback ]] || { echo "Unknown deployment mode" >&2; exit 64; }
+[[ "$mode" = deploy || "$mode" = --preloaded || "$mode" = --rollback ]] || { echo "Unknown deployment mode" >&2; exit 64; }
 [[ "$deploy_root" = /* && "$deploy_root" != / ]] || { echo "Use an absolute deployment directory" >&2; exit 64; }
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 env_file="$deploy_root/shared/.env"
@@ -26,9 +26,17 @@ report_failure() {
 }
 trap report_failure ERR
 compose config --quiet
-if [[ "$mode" != --rollback ]]; then
+if [[ "$mode" = deploy ]]; then
   echo "Pulling release images ($image_tag)..."
   compose --profile bootstrap pull
+fi
+if [[ "$mode" = --preloaded ]]; then
+  echo "Checking downloaded release images ($image_tag)..."
+  images=$(compose --profile bootstrap config --images)
+  [[ -n "$images" ]] || { echo "No release images were resolved" >&2; exit 1; }
+  while IFS= read -r image; do
+    docker image inspect "$image" > /dev/null || { echo "Release image is missing: $image" >&2; exit 1; }
+  done <<< "$images"
 fi
 echo "Starting PostgreSQL and Redis..."
 compose up -d --pull never --wait --wait-timeout 180 postgres redis

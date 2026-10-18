@@ -2,7 +2,7 @@
 set -euo pipefail
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-test_root=$(mktemp -d)
+test_root=$(mktemp -d "${TMPDIR:-/tmp}/tk-mg-deploy-contract-XXXXXX")
 trap 'rm -rf "$test_root"' EXIT
 root="$test_root/deployment"
 tag_one=sha-1111111111111111111111111111111111111111
@@ -23,6 +23,9 @@ bun -e '
   const assert = (condition, message) => { if (!condition) throw new Error(message); };
   const imageStep = (job) => job.steps.find((step) => step.uses?.startsWith("docker/build-push-action@"));
   const productionBuild = imageStep(workflow.jobs.build);
+  assert(workflow.jobs.deploy["timeout-minutes"] >= 35, "Deploy job must cover image downloads, activation and cleanup");
+  const deployStep = workflow.jobs.deploy.steps.find((step) => step.name === "Upload release and deploy over SSH");
+  await Bun.write(process.argv[5], deployStep.run);
   assert(!productionBuild.with["cache-to"], "Merged-PR builds must not export to the read-only GitHub Actions cache");
   assert(!productionBuild["continue-on-error"] && !workflow.jobs.build["continue-on-error"], "Image build and push failures must block deployment");
   const ciBuildJob = ci.jobs["image-build"];
@@ -81,7 +84,7 @@ bun -e '
   if (JSON.stringify(c.services.worker.command) !== JSON.stringify(["bun", "apps/worker/src/main.ts"])) throw new Error("Shared worker image must start the worker entry point");
   if (c.services.initialize.depends_on.api) throw new Error("Initialization waits for API readiness");
   if (c.services.api.environment.AUTH_COOKIE_SECURE !== "false") throw new Error("HTTP cookies not configured");
-' "$test_root/compose.json" "$script_dir/../.github/workflows/deploy.yml" "$tag_one" "$script_dir/../.github/workflows/ci.yml"
+' "$test_root/compose.json" "$script_dir/../.github/workflows/deploy.yml" "$tag_one" "$script_dir/../.github/workflows/ci.yml" "$test_root/workflow.sh"
 
 mkdir "$test_root/bin"
 export DEPLOY_TEST_LOG="$test_root/docker.log"
@@ -90,6 +93,11 @@ cat > "$test_root/bin/docker" <<'EOF'
 set -eu
 printf '%s\n' "$*" >> "$DEPLOY_TEST_LOG"
 case "$*" in
+  *"config --images"*)
+    [[ "${DEPLOY_TEST_FAILURE:-}" != config-images ]] || exit 1
+    [[ "${DEPLOY_TEST_FAILURE:-}" != empty-images ]] || exit 0
+    for target in api web postgres redis; do printf 'ghcr.io/imutd/tk-mg-sys-%s:%s\n' "$target" "$IMAGE_TAG"; done ;;
+  "image inspect "*) [[ "${DEPLOY_TEST_FAILURE:-}" != missing-image ]] ;;
   *"bootstrap pull"*) [[ "${DEPLOY_TEST_FAILURE:-}" != pull ]] ;;
   *"run --rm --no-deps --pull never initialize"*) [[ "${DEPLOY_TEST_FAILURE:-}" != initialize ]] ;;
   *"pg_dump"*) echo "test-backup" ;;
@@ -112,13 +120,22 @@ for tag in "$tag_one" "$tag_two"; do
   mkdir -p "$root/releases/$tag/infra"
   cp "$script_dir/deploy.sh" "$script_dir/compose.prod.yml" "$script_dir/smoke-test.sh" "$root/releases/$tag/infra/"
 done
-deploy() { bash "$root/releases/$1/infra/deploy.sh" "$root" "$1"; }
+deploy() { bash "$root/releases/$1/infra/deploy.sh" "$root" "$@"; }
 if deploy latest 2>/dev/null; then echo "Accepted a mutable image tag" >&2; exit 1; fi
 [[ ! -f "$DEPLOY_TEST_LOG" ]]
 deploy "$tag_one" > "$test_root/first.log"
 [[ $(cat "$root/current-release") = "$tag_one" ]]
 [[ ! -f "$root/previous-release" ]]
 [[ -z $(ls -A "$root/backups") ]]
+for failure in missing-image config-images empty-images; do
+  : > "$DEPLOY_TEST_LOG"
+  export DEPLOY_TEST_FAILURE="$failure"
+  if deploy "$tag_two" --preloaded > /dev/null 2>&1; then echo "Ignored $failure before activation" >&2; exit 1; fi
+  [[ $(cat "$root/current-release") = "$tag_one" ]]
+  [[ ! -f "$root/pending-release" ]]
+  [[ -z $(ls -A "$root/backups") ]]
+  ! grep -Eq 'bootstrap pull| up | stop |pg_dump| initialize' "$DEPLOY_TEST_LOG"
+done
 export DEPLOY_TEST_FAILURE=pull
 if deploy "$tag_two" > /dev/null 2>&1; then echo "Ignored pull failure" >&2; exit 1; fi
 [[ $(cat "$root/current-release") = "$tag_one" ]]
@@ -134,6 +151,7 @@ bash "$script_dir/rollback.sh" "$root" > "$test_root/recover.log"
 ! grep -q 'initialize\|bootstrap pull' "$DEPLOY_TEST_LOG"
 export DEPLOY_TEST_LOCKED=true
 if deploy "$tag_two" > /dev/null 2>&1; then echo "Ignored deployment lock" >&2; exit 1; fi
+if deploy "$tag_two" --preloaded > /dev/null 2>&1; then echo "Preloaded deployment ignored lock" >&2; exit 1; fi
 unset DEPLOY_TEST_LOCKED
 deploy "$tag_two" > "$test_root/second.log"
 [[ $(cat "$root/current-release") = "$tag_two" ]]
@@ -143,4 +161,64 @@ bash "$script_dir/rollback.sh" "$root" > "$test_root/rollback.log"
 [[ $(cat "$root/current-release") = "$tag_one" ]]
 ! grep -q 'initialize\|bootstrap pull' "$DEPLOY_TEST_LOG"
 ! grep -q 'down' "$DEPLOY_TEST_LOG"
-echo "Deployment contracts passed: main merge gates, credentials, isolation, first start, backup, failure, lock and rollback"
+: > "$DEPLOY_TEST_LOG"
+deploy "$tag_two" --preloaded > "$test_root/preloaded.log"
+[[ $(cat "$root/current-release") = "$tag_two" ]]
+[[ $(grep -c '^image inspect ghcr.io/imutd/tk-mg-sys-' "$DEPLOY_TEST_LOG") -eq 4 ]]
+! grep -q 'bootstrap pull' "$DEPLOY_TEST_LOG"
+grep -q 'run --rm --no-deps --pull never initialize' "$DEPLOY_TEST_LOG"
+
+# Execute the workflow shell against a temporary server with mocked transports.
+cat > "$test_root/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+while [[ $# -gt 1 ]]; do shift; done
+bash -c "$1"
+EOF
+cat > "$test_root/bin/scp" <<'EOF'
+#!/usr/bin/env bash
+for destination; do :; done
+cp release.tar.gz "${destination#*:}"
+EOF
+cat > "$test_root/bin/git" <<'EOF'
+#!/usr/bin/env bash
+tar -czf release.tar.gz -C "$DEPLOY_TEST_SOURCE" infra
+EOF
+cat > "$test_root/bin/timeout" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+[[ "$1" = --signal=TERM && "$2" = --kill-after=30s ]]
+budget=$3
+shift 3
+printf 'timeout:%s %s\n' "$budget" "$*" >> "$DEPLOY_TEST_LOG"
+if [[ "$budget" = 20m && "${DEPLOY_TEST_FAILURE:-}" = pull-timeout ]]; then exit 124; fi
+"$@"
+EOF
+chmod 700 "$test_root/bin/"*
+export DEPLOY_TEST_SOURCE="$script_dir/.."
+export DEPLOY_HOST=test.invalid DEPLOY_USER=deploy DEPLOY_PORT=22 DEPLOY_PATH="$root"
+export DEPLOY_WEB_PORT=8080 ADMIN_EMAIL=admin@example.com GHCR_USER=test GHCR_TOKEN=test-only
+export DEPLOY_SSH_KEY=test-only DEPLOY_KNOWN_HOSTS=test-only
+export RUNNER_TEMP="$test_root" GITHUB_STEP_SUMMARY="$test_root/summary"
+export COMMIT_SHA=${tag_one#sha-}
+mkdir "$test_root/runner"
+for failure in pull pull-timeout; do
+  : > "$DEPLOY_TEST_LOG"
+  export DEPLOY_TEST_FAILURE="$failure"
+  status=0
+  (cd "$test_root/runner" && bash "$test_root/workflow.sh") > "$test_root/workflow-$failure.log" 2>&1 || status=$?
+  [[ "$status" -ne 0 ]]
+  if [[ "$failure" = pull-timeout ]]; then [[ "$status" -eq 124 ]]; fi
+  [[ $(cat "$root/current-release") = "$tag_two" ]]
+  [[ ! -f "$root/pending-release" && ! -f "$root/releases/$tag_one/.docker/config.json" ]]
+  ! grep -Eq 'timeout:12m| up | stop |pg_dump| initialize' "$DEPLOY_TEST_LOG"
+done
+unset DEPLOY_TEST_FAILURE
+: > "$DEPLOY_TEST_LOG"
+(cd "$test_root/runner" && bash "$test_root/workflow.sh") > "$test_root/workflow-success.log" 2>&1
+[[ $(cat "$root/current-release") = "$tag_one" ]]
+[[ $(grep -c '^compose .*bootstrap pull$' "$DEPLOY_TEST_LOG") -eq 1 ]]
+grep -q '^timeout:20m docker compose .*bootstrap pull$' "$DEPLOY_TEST_LOG"
+grep -q '^timeout:12m bash .*deploy.sh .* --preloaded$' "$DEPLOY_TEST_LOG"
+[[ $(grep -c '^image inspect ghcr.io/imutd/tk-mg-sys-' "$DEPLOY_TEST_LOG") -eq 4 ]]
+cmp "$test_root/original.env" "$root/shared/.env"
+echo "Deployment contracts passed: main merge gates, separate download/activation budgets, preloaded images, credentials, isolation, first start, backup, failure, lock and rollback"
