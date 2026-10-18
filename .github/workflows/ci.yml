@@ -115,6 +115,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Test deployment database initialization and retries
+        run: pnpm --filter @tk-mg/api test:deployment-postgres
+
       - name: Run PostgreSQL integration tests
         run: pnpm test:postgres
 
