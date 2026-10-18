@@ -206,7 +206,11 @@ it("looks up a newly created proxy immediately without repeating lookup on edits
   )
   expect(await screen.findByText("Auto lookup")).toBeVisible()
   await user.click(proxyRow("Auto lookup").getByRole("button", { name: "编辑" }))
-  const editor = await screen.findByRole("dialog")
+  const editor = await waitFor(() => {
+    const dialog = screen.getByRole("dialog")
+    expect(within(dialog).getByText("修改代理")).toBeVisible()
+    return dialog
+  })
   await user.click(section(editor, ".dialog-footer").getByRole("button", { name: "确认" }))
   await waitFor(() => expect(save).toHaveBeenCalledTimes(2))
   expect(detect).toHaveBeenCalledTimes(1)
