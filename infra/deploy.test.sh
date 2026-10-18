@@ -19,7 +19,23 @@ IMAGE_TAG="$tag_one" docker compose --env-file "$root/shared/.env" -f "$script_d
 bun -e '
   const c = await Bun.file(process.argv[1]).json();
   const workflow = Bun.YAML.parse(await Bun.file(process.argv[2]).text());
+  const ci = Bun.YAML.parse(await Bun.file(process.argv[4]).text());
   const assert = (condition, message) => { if (!condition) throw new Error(message); };
+  const imageStep = (job) => job.steps.find((step) => step.uses?.startsWith("docker/build-push-action@"));
+  const productionBuild = imageStep(workflow.jobs.build);
+  assert(!productionBuild.with["cache-to"], "Merged-PR builds must not export to the read-only GitHub Actions cache");
+  assert(!productionBuild["continue-on-error"] && !workflow.jobs.build["continue-on-error"], "Image build and push failures must block deployment");
+  const ciBuildJob = ci.jobs["image-build"];
+  assert(ciBuildJob, "PR CI must validate production image builds");
+  const ciBuild = imageStep(ciBuildJob);
+  assert(JSON.stringify(ciBuildJob.strategy.matrix.target) === JSON.stringify(workflow.jobs.build.strategy.matrix.target), "CI must build every production image target");
+  for (const input of ["context", "file", "target", "platforms", "cache-from"]) {
+    assert(ciBuild.with[input] === productionBuild.with[input], `CI and Deploy image ${input} differ`);
+  }
+  assert(ciBuild.with.push === false && ciBuild.with.load === true, "CI must load images locally without publishing them");
+  assert(!ciBuild.with["cache-to"] && !ciBuild["continue-on-error"] && !ciBuildJob["continue-on-error"], "CI image validation must preserve read-only caching and fail on build errors");
+  assert(JSON.stringify(ciBuildJob.permissions) === JSON.stringify({contents: "read"}), "CI image builds must not require package write permissions");
+  assert(ci.jobs.quality.steps.some((step) => step.run === "bash infra/deploy.test.sh"), "PR CI must run deployment contracts");
   assert(JSON.stringify(workflow.on) === JSON.stringify({pull_request: {branches: ["main"], types: ["closed"]}}), "Deploy must only listen for PRs closed against main");
   const github = {event_name: "pull_request", ref: "refs/heads/main", event: {action: "closed", pull_request: {merged: true, base: {ref: "main"}}}};
   const needs = {verify: {result: "success"}, "production-ci": {result: "success"}, build: {result: "success"}};
@@ -65,7 +81,7 @@ bun -e '
   if (JSON.stringify(c.services.worker.command) !== JSON.stringify(["bun", "apps/worker/src/main.ts"])) throw new Error("Shared worker image must start the worker entry point");
   if (c.services.initialize.depends_on.api) throw new Error("Initialization waits for API readiness");
   if (c.services.api.environment.AUTH_COOKIE_SECURE !== "false") throw new Error("HTTP cookies not configured");
-' "$test_root/compose.json" "$script_dir/../.github/workflows/deploy.yml" "$tag_one"
+' "$test_root/compose.json" "$script_dir/../.github/workflows/deploy.yml" "$tag_one" "$script_dir/../.github/workflows/ci.yml"
 
 mkdir "$test_root/bin"
 export DEPLOY_TEST_LOG="$test_root/docker.log"
