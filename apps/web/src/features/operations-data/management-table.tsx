@@ -1,6 +1,6 @@
 import { Button, Table, type TableColumnsType, Tag } from "antd"
-import { FilteredSelectCheckbox } from "../../components/tables/filtered-selection"
 import type { ReactNode } from "react"
+import { FilteredSelectCheckbox } from "../../components/tables/filtered-selection"
 
 import type { ManagedPage, ManagedRecord } from "./api"
 
@@ -105,7 +105,7 @@ export const ManagementTable = ({
     })
   }
   return (
-    <Table
+    <Table<ManagedRecord>
       columns={columns}
       dataSource={[...page.items]}
       locale={{ emptyText: `暂无${title}数据` }}

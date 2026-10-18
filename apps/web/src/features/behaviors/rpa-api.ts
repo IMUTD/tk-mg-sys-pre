@@ -287,12 +287,14 @@ export const stepText = (step: ChainStep): string => {
 }
 
 export const chainFingerprint = (steps: readonly ChainStep[]): string =>
-  JSON.stringify(steps.map((item) => ({
-    api: item.api,
-    delayMs: item.delayMs ?? 0,
-    guards: item.guards ?? [],
-    params: item.params,
-  })))
+  JSON.stringify(
+    steps.map((item) => ({
+      api: item.api,
+      delayMs: item.delayMs ?? 0,
+      guards: item.guards ?? [],
+      params: item.params,
+    })),
+  )
 
 export const normalizeDelay = (value: number | undefined): number => {
   if (value === undefined || !Number.isFinite(value)) return 0
@@ -323,7 +325,10 @@ export const publishChainSteps = (steps: readonly ChainStep[]): ChainStep[] =>
     delayMs: normalizeDelay(step.delayMs),
     guards: guardOrder.filter((code) => (step.guards ?? []).includes(code)),
     params: Object.fromEntries(
-      Object.entries(step.params).map(([key, value]) => [key, step.scopes?.[key] === "external" ? "" : value]),
+      Object.entries(step.params).map(([key, value]) => [
+        key,
+        step.scopes?.[key] === "external" ? "" : value,
+      ]),
     ),
     scopes: { ...(step.scopes ?? {}) },
     sources: Object.fromEntries(

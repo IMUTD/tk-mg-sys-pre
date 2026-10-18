@@ -55,15 +55,18 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
   const [proxyName, setProxyName] = useState<string | null>(null)
   const [pitIndexes, setPitIndexes] = useState<number[]>([])
   const [files, setFiles] = useState<Record<string, FilePick>>({})
-  const [texts, setTexts] = useState<Record<number, { mode: "random" | "sequence" | "tag"; tag?: string }>>({})
+  const [texts, setTexts] = useState<
+    Record<number, { mode: "random" | "sequence" | "tag"; tag?: string }>
+  >({})
   const [saving, setSaving] = useState(false)
   const chain = options.chains.find((item) => item.id === chainId)
   const textSteps = (chain?.steps ?? [])
     .map((step, sequence) => ({ sequence, step }))
     .filter((item) => item.step.api === "SendText")
   const fileSteps = (chain?.steps ?? []).flatMap((step, sequence) => {
-    const sources = Object.entries(step.sources).flatMap(([key, source]) =>
-      step.scopes[key] === "external" && (source === "pool.video" || source === "pool.image" || source === "pool.backup")
+    const sources = Object.entries(step.sources).flatMap<FileSource>(([key, source]) =>
+      step.scopes[key] === "external" &&
+      (source === "pool.video" || source === "pool.image" || source === "pool.backup")
         ? [source]
         : [],
     )
@@ -88,11 +91,20 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
       message.error(accountBy === "group" ? "请选择账号分组" : "请选择账号标签")
       return
     }
-    if (textSteps.some((item) => texts[item.sequence]?.mode === "tag" && (texts[item.sequence]?.tag ?? "").length === 0)) {
+    if (
+      textSteps.some(
+        (item) =>
+          texts[item.sequence]?.mode === "tag" && (texts[item.sequence]?.tag ?? "").length === 0,
+      )
+    ) {
       message.error("请选择文本池分组")
       return
     }
-    if (fileSteps.some((item) => (files[`${item.sequence}:${item.source}`]?.deviceId ?? "").length === 0)) {
+    if (
+      fileSteps.some(
+        (item) => (files[`${item.sequence}:${item.source}`]?.deviceId ?? "").length === 0,
+      )
+    ) {
       message.error("请选择文件所在盒子")
       return
     }
@@ -112,11 +124,14 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
           }
         }),
         pitIndexes,
-        texts: textSteps.map((item) => ({
-          mode: texts[item.sequence]?.mode ?? "sequence",
-          sequence: item.sequence,
-          ...(texts[item.sequence]?.tag === undefined ? {} : { tag: texts[item.sequence]?.tag }),
-        })),
+        texts: textSteps.map((item) => {
+          const picked = texts[item.sequence]
+          return {
+            mode: picked?.mode ?? "sequence",
+            sequence: item.sequence,
+            ...(picked?.tag === undefined ? {} : { tag: picked.tag }),
+          }
+        }),
         ...(boxName === null ? {} : { boxes: { by: boxBy, name: boxName } }),
         ...(proxyName === null ? {} : { proxies: { by: proxyBy, name: proxyName } }),
       })
@@ -159,7 +174,13 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
           />
         </Form.Item>
         <Form.Item label="选择账号" required>
-          <Radio.Group onChange={(event) => { setAccountBy(event.target.value); setAccountName(null) }} value={accountBy}>
+          <Radio.Group
+            onChange={(event) => {
+              setAccountBy(event.target.value)
+              setAccountName(null)
+            }}
+            value={accountBy}
+          >
             <Radio value="group">分组</Radio>
             <Radio value="tag">标签</Radio>
           </Radio.Group>
@@ -167,10 +188,12 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
             allowClear
             aria-label="账号范围"
             onChange={(value: string | null) => setAccountName(value)}
-            options={(accountBy === "group" ? options.accountGroups : options.accountTags).map((item) => ({
-              label: item,
-              value: item,
-            }))}
+            options={(accountBy === "group" ? options.accountGroups : options.accountTags).map(
+              (item) => ({
+                label: item,
+                value: item,
+              }),
+            )}
             placeholder={accountBy === "group" ? "选择账号分组" : "选择账号标签"}
             style={{ marginTop: 8, width: "100%" }}
             value={accountName}
@@ -178,7 +201,13 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
           />
         </Form.Item>
         <Form.Item label="选择盒子">
-          <Radio.Group onChange={(event) => { setBoxBy(event.target.value); setBoxName(null) }} value={boxBy}>
+          <Radio.Group
+            onChange={(event) => {
+              setBoxBy(event.target.value)
+              setBoxName(null)
+            }}
+            value={boxBy}
+          >
             <Radio value="group">分组</Radio>
             <Radio value="remark">备注</Radio>
           </Radio.Group>
@@ -186,7 +215,10 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
             allowClear
             aria-label="盒子范围"
             onChange={(value: string | null) => setBoxName(value)}
-            options={(boxBy === "group" ? options.boxGroups : options.boxRemarks).map((item) => ({ label: item, value: item }))}
+            options={(boxBy === "group" ? options.boxGroups : options.boxRemarks).map((item) => ({
+              label: item,
+              value: item,
+            }))}
             placeholder="不选则用账号上一次的盒子"
             style={{ marginTop: 8, width: "100%" }}
             value={boxName}
@@ -206,7 +238,13 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
           />
         </Form.Item>
         <Form.Item label="选择代理">
-          <Radio.Group onChange={(event) => { setProxyBy(event.target.value); setProxyName(null) }} value={proxyBy}>
+          <Radio.Group
+            onChange={(event) => {
+              setProxyBy(event.target.value)
+              setProxyName(null)
+            }}
+            value={proxyBy}
+          >
             <Radio value="group">分组</Radio>
             <Radio value="remark">备注</Radio>
           </Radio.Group>
@@ -214,10 +252,12 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
             allowClear
             aria-label="代理范围"
             onChange={(value: string | null) => setProxyName(value)}
-            options={(proxyBy === "group" ? options.proxyGroups : options.proxyRemarks).map((item) => ({
-              label: item,
-              value: item,
-            }))}
+            options={(proxyBy === "group" ? options.proxyGroups : options.proxyRemarks).map(
+              (item) => ({
+                label: item,
+                value: item,
+              }),
+            )}
             placeholder="不选则用账号上一次的代理"
             style={{ marginTop: 8, width: "100%" }}
             value={proxyName}
@@ -228,9 +268,16 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
           <FileDirectoryField
             groupId={groupId}
             key={`${item.sequence}:${item.source}`}
-            onChange={(pick) => setFiles((current) => ({ ...current, [`${item.sequence}:${item.source}`]: pick }))}
+            onChange={(pick) =>
+              setFiles((current) => ({ ...current, [`${item.sequence}:${item.source}`]: pick }))
+            }
             options={options}
-            picked={files[`${item.sequence}:${item.source}`] ?? { directory: rootDirectory, mode: "sequence" }}
+            picked={
+              files[`${item.sequence}:${item.source}`] ?? {
+                directory: rootDirectory,
+                mode: "sequence",
+              }
+            }
             sequence={item.sequence}
             source={item.source}
           />
@@ -262,7 +309,7 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
                 options={options.textTags.map((tag) => ({ label: tag, value: tag }))}
                 placeholder="选择文本池分组"
                 style={{ marginTop: 8, width: "100%" }}
-                value={texts[item.sequence]?.tag}
+                value={texts[item.sequence]?.tag ?? null}
                 virtual={false}
               />
             ) : null}
@@ -288,7 +335,9 @@ const FileDirectoryField = ({
   readonly sequence: number
   readonly source: FileSource
 }): ReactNode => {
-  const [directories, setDirectories] = useState<readonly { readonly count: number; readonly directory: string }[]>([])
+  const [directories, setDirectories] = useState<
+    readonly { readonly count: number; readonly directory: string }[]
+  >([])
   useEffect(() => {
     if (picked.deviceId === undefined) {
       setDirectories([])
@@ -304,10 +353,12 @@ const FileDirectoryField = ({
     <Form.Item label={`第 ${sequence + 1} 步${fileLabel(source)}`}>
       <Select
         aria-label={`第 ${sequence + 1} 步文件盒子`}
-        onChange={(value: string) => onChange({ ...picked, deviceId: value, directory: rootDirectory })}
+        onChange={(value: string) =>
+          onChange({ ...picked, deviceId: value, directory: rootDirectory })
+        }
         options={options.devices.map((item) => ({ label: boxLabel(item), value: item.id }))}
         placeholder="选择文件所在盒子"
-        value={picked.deviceId}
+        value={picked.deviceId ?? null}
         virtual={false}
       />
       <Select
@@ -323,13 +374,19 @@ const FileDirectoryField = ({
           },
           ...directories
             .filter((item) => item.directory.length > 0)
-            .map((item) => ({ label: `${item.directory}（${item.count}）`, value: item.directory })),
+            .map((item) => ({
+              label: `${item.directory}（${item.count}）`,
+              value: item.directory,
+            })),
         ]}
         style={{ marginTop: 8, width: "100%" }}
         value={picked.directory}
         virtual={false}
       />
-      <Radio.Group onChange={(event) => onChange({ ...picked, mode: event.target.value })} value={picked.mode}>
+      <Radio.Group
+        onChange={(event) => onChange({ ...picked, mode: event.target.value })}
+        value={picked.mode}
+      >
         <Radio value="sequence">顺序</Radio>
         <Radio value="random">随机</Radio>
       </Radio.Group>

@@ -16,13 +16,11 @@ const QuickFilters = [
   "favorite",
 ] as const
 const sortedText = (values: readonly string[]): string[] =>
-  [...new Set(values.map((item) => item.trim()).filter((item) => item.length > 0))].sort((left, right) =>
-    left.localeCompare(right, "zh-CN"),
+  [...new Set(values.map((item) => item.trim()).filter((item) => item.length > 0))].sort(
+    (left, right) => left.localeCompare(right, "zh-CN"),
   )
-const identityTokens = (value: string): string[] =>
-  sortedText(value.split(/[,，;；、|\s]+/))
-const countText = (value: string): string =>
-  value.length === 0 ? "" : String(Number(value))
+const identityTokens = (value: string): string[] => sortedText(value.split(/[,，;；、|\s]+/))
+const countText = (value: string): string => (value.length === 0 ? "" : String(Number(value)))
 
 export const DeskPoolQuerySchema = z.object({
   app: z.enum(["", "tiktok", "youtube", "facebook", "instagram", "twitter"]).default(""),
@@ -30,7 +28,11 @@ export const DeskPoolQuerySchema = z.object({
   deviceId: z.string().uuid().nullable().default(null),
   followerGT: z.string().regex(/^\d*$/).max(12).default("").transform(countText),
   followingGT: z.string().regex(/^\d*$/).max(12).default("").transform(countText),
-  identity: z.string().max(2000).default("").transform((value) => identityTokens(value).join("、")),
+  identity: z
+    .string()
+    .max(2000)
+    .default("")
+    .transform((value) => identityTokens(value).join("、")),
   proxyId: z.string().uuid().nullable().default(null),
   quick: z
     .array(z.enum(QuickFilters))
@@ -79,7 +81,12 @@ const APP_LABELS = {
   twitter: "Twitter",
   youtube: "Youtube",
 } as const
-const BACKUP_LABELS = { "2": "本地备份", "3": "私有云备份", "4": "云端备份", "5": "全量备份" } as const
+const BACKUP_LABELS = {
+  "2": "本地备份",
+  "3": "私有云备份",
+  "4": "云端备份",
+  "5": "全量备份",
+} as const
 
 export const deskPoolKey = (
   query: DeskPoolQuery,
@@ -93,9 +100,9 @@ export const deskPoolKey = (
   if (query.unremarked) parts.push("用户备注=未备注")
   else if (query.userRemarks.length > 0) parts.push(`用户备注=${query.userRemarks.join("、")}`)
   else if (query.userRemark.length > 0) parts.push(`用户备注=${query.userRemark}`)
-  if (query.status.length > 0) parts.push(`账号状态=${STATUS_LABELS[query.status]}`)
-  if (query.app.length > 0) parts.push(`APP类型=${APP_LABELS[query.app]}`)
-  if (query.backType.length > 0) parts.push(`备份方式=${BACKUP_LABELS[query.backType]}`)
+  if (query.status !== "") parts.push(`账号状态=${STATUS_LABELS[query.status]}`)
+  if (query.app !== "") parts.push(`APP类型=${APP_LABELS[query.app]}`)
+  if (query.backType !== "") parts.push(`备份方式=${BACKUP_LABELS[query.backType]}`)
   if (query.quick.length > 0)
     parts.push(`快捷筛选=${query.quick.map((item) => QUICK_LABELS[item]).join("、")}`)
   if (query.region.length > 0) parts.push(`归属地=${query.region.join("、")}`)

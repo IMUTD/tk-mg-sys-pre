@@ -1,6 +1,6 @@
 import { DeleteOutlined, EditOutlined, UploadOutlined } from "@ant-design/icons"
 import { App, Button, Card, Checkbox, Input, Space, Table } from "antd"
-import { type ReactNode, useEffect, useMemo, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import {
   type FilterMode,
   FilterModeSwitch,
@@ -19,8 +19,8 @@ import {
   emptyMaterialQuery,
   filterTextPool,
   type MaterialQuery,
-  materialLabelSet,
   type MytMaterial,
+  materialLabelSet,
   materialStatistics,
   uniqueTags,
 } from "./myt-material"
@@ -81,9 +81,12 @@ export const ResourcesListPage = ({
     if (labels.length === 0) untaggedCount += 1
     for (const tag of labels) tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1)
   }
-  const tagOptions = tags.map((tag) => ({ label: usageLabel(tag, tagCounts.get(tag) ?? 0), value: tag }))
+  const tagOptions = tags.map((tag) => ({
+    label: usageLabel(tag, tagCounts.get(tag) ?? 0),
+    value: tag,
+  }))
   const statistics = materialStatistics(materials)
-  const reload = async (): Promise<void> => {
+  const reload = useCallback(async (): Promise<void> => {
     if (api === undefined && groupId.length === 0) {
       setMaterials([])
       return
@@ -96,13 +99,11 @@ export const ResourcesListPage = ({
     } finally {
       setLoading(false)
     }
-  }
+  }, [api, groupId, message, pool])
 
   useEffect(() => {
     void reload()
-    // Reload when the saved pool or group changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pool])
+  }, [reload])
 
   useEffect(() => {
     const allowed = new Set(filtered.map((item) => item.id))
@@ -229,7 +230,11 @@ export const ResourcesListPage = ({
         <Space wrap>
           <SelectionScopeSwitch onChange={setSelectionScope} scope={selectionScope} />
           {canWrite ? (
-            <Button disabled={selected.length === 0} onClick={() => setAssignOpen(true)} type="primary">
+            <Button
+              disabled={selected.length === 0}
+              onClick={() => setAssignOpen(true)}
+              type="primary"
+            >
               批量分配（{selected.length}）
             </Button>
           ) : null}

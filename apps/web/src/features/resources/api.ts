@@ -18,7 +18,10 @@ type ResourcePage = {
 
 export type TextPoolApi = {
   assignTags(ids: readonly string[], tags: readonly string[]): Promise<number>
-  setLabels(id: string, input: { readonly category?: string; readonly tags?: readonly string[] }): Promise<void>
+  setLabels(
+    id: string,
+    input: { readonly category?: string; readonly tags?: readonly string[] },
+  ): Promise<void>
   deleteIds(ids: readonly string[]): Promise<number>
   deleteScope(tag?: string): Promise<number>
   importLines(tag: string, contents: readonly string[]): Promise<number>

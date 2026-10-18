@@ -83,7 +83,12 @@ export interface AccountService {
   resetBanned(actorId: UserId, groupId: string, tag: string): Promise<number>
   setGroup(actorId: UserId, groupId: string, ids: readonly string[], tag: string): Promise<number>
   setNote(actorId: UserId, groupId: string, ids: readonly string[], note: string): Promise<number>
-  setRegion(actorId: UserId, groupId: string, ids: readonly string[], region: string): Promise<number>
+  setRegion(
+    actorId: UserId,
+    groupId: string,
+    ids: readonly string[],
+    region: string,
+  ): Promise<number>
   setFavorite(
     actorId: UserId,
     groupId: string,
@@ -96,9 +101,14 @@ export interface AccountService {
     oldTags: readonly string[],
     newTag: string,
   ): Promise<number>
-  listTransfers(
-    groupId: string,
-  ): Promise<readonly { readonly accountIds: readonly string[]; readonly code: string; readonly count: number; readonly tags: string }[]>
+  listTransfers(groupId: string): Promise<
+    readonly {
+      readonly accountIds: readonly string[]
+      readonly code: string
+      readonly count: number
+      readonly tags: string
+    }[]
+  >
   createTransfer(
     actorId: UserId,
     groupId: string,
@@ -208,7 +218,8 @@ const codeHash = (code: string): string => createHash("sha256").update(code).dig
 const newTransferCode = (): string => randomBytes(16).toString("hex")
 
 const parseTransferCode = (code: string | undefined): string => {
-  const next = code === undefined || code.trim().length === 0 ? newTransferCode() : code.trim().toLowerCase()
+  const next =
+    code === undefined || code.trim().length === 0 ? newTransferCode() : code.trim().toLowerCase()
   if (!/^[a-f0-9]{32}$/.test(next)) throw new AccountDeskError("invalid_transfer")
   return next
 }
@@ -218,7 +229,13 @@ const sealCode = (cipher: SecretCipher, code: string) => ({
   hash: codeHash(code),
 })
 
-const normalizeFilter = (filter: AccountListFilter): AccountListFilter => {
+const normalizeFilter = <
+  Filter extends Omit<AccountListFilter, "groupId" | "page" | "pageSize"> & {
+    readonly groupId: string
+  },
+>(
+  filter: Filter,
+) => {
   const { transferKey, ...rest } = filter
   const key = transferKey?.trim().toLowerCase() ?? ""
   return {
@@ -388,12 +405,22 @@ export const createAccountService = (dependencies: Dependencies): AccountService
     const groupId = GroupIdSchema.parse(rawGroupId)
     const ids = await dependencies.repository.deleteByTag(groupId, tag, bannedOnly)
     const count = await dependencies.repository.recycle(groupId, parseIds(ids))
-    await audit(dependencies.auditRepository, actorId, "account.statistics.delete", `group:${rawGroupId}`)
+    await audit(
+      dependencies.auditRepository,
+      actorId,
+      "account.statistics.delete",
+      `group:${rawGroupId}`,
+    )
     return count
   },
   resetBanned: async (actorId, rawGroupId, tag) => {
     const count = await dependencies.repository.resetBanned(GroupIdSchema.parse(rawGroupId), tag)
-    await audit(dependencies.auditRepository, actorId, "account.statistics.reset", `group:${rawGroupId}`)
+    await audit(
+      dependencies.auditRepository,
+      actorId,
+      "account.statistics.reset",
+      `group:${rawGroupId}`,
+    )
     return count
   },
   setGroup: async (actorId, rawGroupId, ids, tag) => {
@@ -406,16 +433,16 @@ export const createAccountService = (dependencies: Dependencies): AccountService
     return count
   },
   setNote: async (actorId, rawGroupId, ids, note) => {
-    const count = await dependencies.repository.setNote(
-      GroupIdSchema.parse(rawGroupId),
-      ids,
-      note,
-    )
+    const count = await dependencies.repository.setNote(GroupIdSchema.parse(rawGroupId), ids, note)
     await audit(dependencies.auditRepository, actorId, "account.note", `group:${rawGroupId}`)
     return count
   },
   setRegion: async (actorId, rawGroupId, ids, region) => {
-    const count = await dependencies.repository.setRegion(GroupIdSchema.parse(rawGroupId), ids, region)
+    const count = await dependencies.repository.setRegion(
+      GroupIdSchema.parse(rawGroupId),
+      ids,
+      region,
+    )
     await audit(dependencies.auditRepository, actorId, "account.region", `group:${rawGroupId}`)
     return count
   },
@@ -454,7 +481,12 @@ export const createAccountService = (dependencies: Dependencies): AccountService
       ids,
       sealCode(dependencies.cipher, next),
     )
-    await audit(dependencies.auditRepository, actorId, "account.transfer.create", `group:${rawGroupId}`)
+    await audit(
+      dependencies.auditRepository,
+      actorId,
+      "account.transfer.create",
+      `group:${rawGroupId}`,
+    )
     return { code: next, count }
   },
   revokeTransfer: async (actorId, rawGroupId, code) => {
@@ -462,14 +494,21 @@ export const createAccountService = (dependencies: Dependencies): AccountService
       GroupIdSchema.parse(rawGroupId),
       codeHash(parseTransferCode(code)),
     )
-    await audit(dependencies.auditRepository, actorId, "account.transfer.revoke", `group:${rawGroupId}`)
+    await audit(
+      dependencies.auditRepository,
+      actorId,
+      "account.transfer.revoke",
+      `group:${rawGroupId}`,
+    )
     return count
   },
   splitTransfer: async (actorId, rawGroupId, code, size) => {
     const parsed = parseTransferCode(code)
     const chunks = Math.max(1, size)
     const existing = await dependencies.repository.listTransfers(GroupIdSchema.parse(rawGroupId))
-    const match = existing.find((row) => decryptOptional(dependencies.cipher, row.encryptedCode) === parsed)
+    const match = existing.find(
+      (row) => decryptOptional(dependencies.cipher, row.encryptedCode) === parsed,
+    )
     if (match === undefined || chunks >= match.count) throw new AccountDeskError("invalid_transfer")
     const pieceCount = Math.ceil(match.count / chunks)
     const codes = Array.from({ length: pieceCount }, () => newTransferCode())
@@ -480,7 +519,12 @@ export const createAccountService = (dependencies: Dependencies): AccountService
       chunks,
       codes.map((item) => sealCode(dependencies.cipher, item)),
     )
-    await audit(dependencies.auditRepository, actorId, "account.transfer.split", `group:${rawGroupId}`)
+    await audit(
+      dependencies.auditRepository,
+      actorId,
+      "account.transfer.split",
+      `group:${rawGroupId}`,
+    )
     return { codes }
   },
   mergeTransfers: async (actorId, rawGroupId, codes, code) => {
@@ -492,7 +536,12 @@ export const createAccountService = (dependencies: Dependencies): AccountService
       hashes,
       sealCode(dependencies.cipher, next),
     )
-    await audit(dependencies.auditRepository, actorId, "account.transfer.merge", `group:${rawGroupId}`)
+    await audit(
+      dependencies.auditRepository,
+      actorId,
+      "account.transfer.merge",
+      `group:${rawGroupId}`,
+    )
     return { code: next, count }
   },
   redeemTransfer: async (actorId, rawGroupId, code) => {
@@ -500,7 +549,12 @@ export const createAccountService = (dependencies: Dependencies): AccountService
       GroupIdSchema.parse(rawGroupId),
       codeHash(parseTransferCode(code)),
     )
-    await audit(dependencies.auditRepository, actorId, "account.transfer.redeem", `group:${rawGroupId}`)
+    await audit(
+      dependencies.auditRepository,
+      actorId,
+      "account.transfer.redeem",
+      `group:${rawGroupId}`,
+    )
     return count
   },
   start: async (actorId, rawGroupId, accountId, deviceId, deviceInstanceId, proxyId) => {

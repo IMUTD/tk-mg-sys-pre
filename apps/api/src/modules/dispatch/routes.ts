@@ -1,11 +1,10 @@
 import type { Hono } from "hono"
 import type { Sql } from "postgres"
 import { z } from "zod"
-
-import type { SecretCipher } from "../../lib/crypto"
 import { Permission } from "../../lib/authorization"
+import type { SecretCipher } from "../../lib/crypto"
 import { PageKey } from "../../lib/pages"
-import { writeAuditEvent, type AuditRepository } from "../audit/service"
+import { type AuditRepository, writeAuditEvent } from "../audit/service"
 import type { AuthService } from "../auth/service"
 import { administratorFor } from "../business-labels"
 import {
@@ -112,8 +111,20 @@ const groupRecords = (
     readonly taskId: string
   }[],
 ) => {
-  type Step = { parameters: Record<string, string>; sequence: number; skill: string; status: string }
-  type Task = { account: string; id: string; name: string; started: boolean; status: string; steps: Step[] }
+  type Step = {
+    parameters: Record<string, string>
+    sequence: number
+    skill: string
+    status: string
+  }
+  type Task = {
+    account: string
+    id: string
+    name: string
+    started: boolean
+    status: string
+    steps: Step[]
+  }
   const boxes = new Map<string, { id: string; name: string; tasks: Map<string, Task> }>()
   const boxFor = (id: string | null, name: string, host: string) => {
     const key = id ?? ""
@@ -121,7 +132,12 @@ const groupRecords = (
     if (current !== undefined) return current
     const created = {
       id: key,
-      name: key.length === 0 ? "未分配盒子" : name.length > 0 && name !== host ? `${name} ${host}` : host,
+      name:
+        key.length === 0
+          ? "未分配盒子"
+          : name.length > 0 && name !== host
+            ? `${name} ${host}`
+            : host,
       tasks: new Map<string, Task>(),
     }
     boxes.set(key, created)
@@ -205,7 +221,10 @@ export const registerDispatchRoutes = (
     if (hasOperationAuthorizationFailure(authorization)) return authorization.response
     const deviceId = context.req.query("deviceId") ?? ""
     const source = context.req.query("source") ?? ""
-    if (!/^[0-9a-f-]{36}$/i.test(deviceId) || (source !== "pool.video" && source !== "pool.image" && source !== "pool.backup")) {
+    if (
+      !/^[0-9a-f-]{36}$/i.test(deviceId) ||
+      (source !== "pool.video" && source !== "pool.image" && source !== "pool.backup")
+    ) {
       return context.json({ error: "invalid_dispatch_request" }, 400)
     }
     return context.json({

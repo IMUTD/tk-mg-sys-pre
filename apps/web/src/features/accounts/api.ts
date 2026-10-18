@@ -154,9 +154,21 @@ export interface AccountsApi {
     mode: AccountTagBatchMode,
     tags?: readonly string[],
   ): Promise<{ readonly affected: number }>
-  setGroup(groupId: string, ids: readonly string[], tag: string): Promise<{ readonly affected: number }>
-  setNote(groupId: string, ids: readonly string[], note: string): Promise<{ readonly affected: number }>
-  setRegion(groupId: string, ids: readonly string[], region: string): Promise<{ readonly affected: number }>
+  setGroup(
+    groupId: string,
+    ids: readonly string[],
+    tag: string,
+  ): Promise<{ readonly affected: number }>
+  setNote(
+    groupId: string,
+    ids: readonly string[],
+    note: string,
+  ): Promise<{ readonly affected: number }>
+  setRegion(
+    groupId: string,
+    ids: readonly string[],
+    region: string,
+  ): Promise<{ readonly affected: number }>
   setFavorite(
     groupId: string,
     ids: readonly string[],
@@ -287,9 +299,9 @@ export const createAccountsApi = (apiBaseUrl = "/api"): AccountsApi => {
         await client.post(`${groupPath(groupId)}/batch/proxy`, { json: { ids, proxyId } }).json(),
       ),
     credentials: async (groupId, ids) =>
-      z.array(CredentialSchema).parse(
-        await client.post(`${groupPath(groupId)}/credentials`, { json: { ids } }).json(),
-      ),
+      z
+        .array(CredentialSchema)
+        .parse(await client.post(`${groupPath(groupId)}/credentials`, { json: { ids } }).json()),
     create: async (groupId, input) =>
       AccountSchema.parse(await client.post(groupPath(groupId), { json: input }).json()),
     delete: async (groupId, ids) =>
@@ -336,7 +348,9 @@ export const createAccountsApi = (apiBaseUrl = "/api"): AccountsApi => {
       ),
     setFavorite: async (groupId, ids, starred) =>
       BatchResultSchema.parse(
-        await client.post(`${groupPath(groupId)}/batch/favorite`, { json: { ids, starred } }).json(),
+        await client
+          .post(`${groupPath(groupId)}/batch/favorite`, { json: { ids, starred } })
+          .json(),
       ),
     moveGroupTags: async (groupId, oldTags, newTag) =>
       BatchResultSchema.parse(
@@ -396,7 +410,9 @@ export const createAccountsApi = (apiBaseUrl = "/api"): AccountsApi => {
       z
         .object({ codes: z.array(z.string()) })
         .parse(
-          await client.post(`${groupPath(groupId)}/transfers/split`, { json: { code, size } }).json(),
+          await client
+            .post(`${groupPath(groupId)}/transfers/split`, { json: { code, size } })
+            .json(),
         ),
     mergeTransfers: async (groupId, codes, code) =>
       z
@@ -411,7 +427,9 @@ export const createAccountsApi = (apiBaseUrl = "/api"): AccountsApi => {
         await client.post(`${groupPath(groupId)}/transfers/redeem`, { json: { code } }).json(),
       ),
     backup: async (groupId, input) =>
-      AccountSchema.parse(await client.post(`${groupPath(groupId)}/backups`, { json: input }).json()),
+      AccountSchema.parse(
+        await client.post(`${groupPath(groupId)}/backups`, { json: input }).json(),
+      ),
     start: async (groupId, accountId, input) =>
       z
         .object({ updated: z.boolean() })

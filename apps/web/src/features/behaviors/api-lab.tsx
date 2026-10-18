@@ -40,7 +40,9 @@ const rememberLabUse = (userId: string, code: string, known: ReadonlySet<string>
   const previous = readLabUses(userId).find((item) => item.code === code)
   const next = readLabUses(userId)
     .filter((item) => known.has(item.code) && item.code !== code)
-    .concat(known.has(code) ? [{ code, count: (previous?.count ?? 0) + 1, lastUsedAt: Date.now() }] : [])
+    .concat(
+      known.has(code) ? [{ code, count: (previous?.count ?? 0) + 1, lastUsedAt: Date.now() }] : [],
+    )
     .sort(byUse)
     .slice(0, 5)
   localStorage.setItem(labUseKey(userId), JSON.stringify(next))
@@ -165,7 +167,10 @@ export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps)
   const [frequent, setFrequent] = useState<LabUse[]>(() => readLabUses(userId))
   const spec = apiByCode(code)
   const known = new Set(list.map((item) => item.code))
-  const shortcuts = frequent.filter((item) => known.has(item.code)).sort(byUse).slice(0, 5)
+  const shortcuts = frequent
+    .filter((item) => known.has(item.code))
+    .sort(byUse)
+    .slice(0, 5)
   const [params, setParams] = useState<Record<string, string>>({
     ...createStep("TouchClick", 1).params,
   })
@@ -291,7 +296,7 @@ export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps)
   return (
     <div className="behaviors-pane api-lab">
       {shortcuts.length === 0 ? null : (
-        <div aria-label="常用接口" className="api-lab-frequent">
+        <section aria-label="常用接口" className="api-lab-frequent">
           {shortcuts.map((item) => {
             const skill = list.find((specItem) => specItem.code === item.code)
             if (skill === undefined) return null
@@ -307,7 +312,7 @@ export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps)
               </button>
             )
           })}
-        </div>
+        </section>
       )}
       <p className="behaviors-meta">
         这里是行为链最底层的单元，对应魔云腾 RPA 接口。AI 制定和 RPA 编排都建立在这些接口上。

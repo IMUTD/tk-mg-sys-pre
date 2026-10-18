@@ -66,7 +66,11 @@ const accountService: AccountService = {
   reveal: async () => [],
   update: async () => account,
   updateTags: async () => 0,
-  facets: async () => ({ devices: [], groups: [], statuses: ["ready", "suspended", "disabled", "expired", "hidden", "unregistered"] }),
+  facets: async () => ({
+    devices: [],
+    groups: [],
+    statuses: ["ready", "suspended", "disabled", "expired", "hidden", "unregistered"],
+  }),
   statistics: async () => [],
   deleteByTag: async () => 0,
   resetBanned: async () => 0,

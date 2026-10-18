@@ -1,4 +1,4 @@
-import { type FilterMode, combineChecks } from "../../components/tables/operation-controls"
+import { combineChecks, type FilterMode } from "../../components/tables/operation-controls"
 
 export const CONFIG_KEY_OPTIONS = [
   {

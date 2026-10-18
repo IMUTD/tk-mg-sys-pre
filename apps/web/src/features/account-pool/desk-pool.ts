@@ -1,5 +1,5 @@
-import { remarkMatches, splitRemarks } from "../labels/remark-list"
 import type { OperationAccount } from "../accounts/api"
+import { remarkMatches, splitRemarks } from "../labels/remark-list"
 import type { DeskPoolQuery } from "./api"
 
 const QUICK_ORDER = [
@@ -124,7 +124,7 @@ export const resolveDeskPoolName = (auto: string, custom: string): string => {
   return auto.length > 0 ? auto : ALL_ACCOUNTS_POOL_NAME
 }
 
-export const proxyEndpoint = (host: string, port: number): string =>
+export const proxyEndpoint = (host: string, port: string | number): string =>
   `${host.includes(":") ? `[${host}]` : host}:${port}`
 
 export type DeskAccountPreview = {
@@ -200,7 +200,8 @@ export const matchesDeskQuery = (account: DeskAccountPreview, query: DeskPoolQue
   if (
     query.untagged
       ? account.tagBucket.some((tag) => tag.trim().length > 0)
-      : query.tagBucket.length > 0 && !query.tagBucket.every((tag) => account.tagBucket.includes(tag))
+      : query.tagBucket.length > 0 &&
+        !query.tagBucket.every((tag) => account.tagBucket.includes(tag))
   )
     return false
   const remarkParts = splitRemarks(account.remark)

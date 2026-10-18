@@ -9,18 +9,28 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
 import {
   type FilterMode,
-  type SelectionScope,
   FilterModeSwitch,
-  SelectionScopeSwitch,
   pageSlice,
+  type SelectionScope,
+  SelectionScopeSwitch,
   useClientPagination,
 } from "../../components/tables/operation-controls"
 import { PageKey } from "../../lib/pages"
-import { BatchAssignDialog, batchClearOption, type BatchAssignResult } from "../labels/batch-assign-dialog"
+import { createLabelsApi } from "../labels/api"
+import {
+  BatchAssignDialog,
+  type BatchAssignResult,
+  batchClearOption,
+} from "../labels/batch-assign-dialog"
+import {
+  BusinessLabelFilter,
+  LabelFilterRow,
+  UNASSIGNED_VALUE,
+  unionLabelNames,
+  usageLabel,
+} from "../labels/filter-row"
 import { addRemarks, joinRemarks, splitRemarks } from "../labels/remark-list"
 import { RemarkTags } from "../labels/remark-tags"
-import { createLabelsApi } from "../labels/api"
-import { BusinessLabelFilter, LabelFilterRow, UNASSIGNED_VALUE, unionLabelNames, usageLabel } from "../labels/filter-row"
 import {
   assignPoolGroups,
   assignPoolNotes,
@@ -141,7 +151,7 @@ const EditableTextTag = ({
             ),
           }
         : {})}
-      color={name === null ? undefined : color}
+      {...(name === null ? {} : { color })}
       onClick={() => {
         closed.current = false
         setDraft(name ?? "")
@@ -197,7 +207,9 @@ export const RegistrationResourceListPage = ({
     .sort(([left], [right]) => left.localeCompare(right, "zh-CN"))
     .map(([tag, count]) => ({ label: usageLabel(tag, count), value: tag }))
   const ungroupedCount = resources.filter((resource) => resource.tag.trim().length === 0).length
-  const unremarkedCount = resources.filter((resource) => splitRemarks(resource.remark).length === 0).length
+  const unremarkedCount = resources.filter(
+    (resource) => splitRemarks(resource.remark).length === 0,
+  ).length
   const remarkCounts = new Map<string, number>()
   for (const resource of resources) {
     for (const remark of splitRemarks(resource.remark)) {
@@ -235,6 +247,7 @@ export const RegistrationResourceListPage = ({
   const statistics = resourceStatistics(resources)
   const nextId = Math.max(0, ...resources.map((resource) => resource.id)) + 1
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey reloads persisted rows after writes.
   useEffect(() => {
     if (!persisted) return
     let stop = false
@@ -272,8 +285,7 @@ export const RegistrationResourceListPage = ({
       message.error(field === "tag" ? "分组名称不能包含 + 符号" : "备注名称不能包含 + 符号")
       return
     }
-    const next =
-      field === "tag" ? { ...resource, tag: trimmed } : { ...resource, remark: trimmed }
+    const next = field === "tag" ? { ...resource, tag: trimmed } : { ...resource, remark: trimmed }
     const apply = (current: readonly TkRegResource[]): TkRegResource[] =>
       current.map((item) => (item.id === resource.id ? next : item))
     if (!persisted) {
@@ -317,7 +329,8 @@ export const RegistrationResourceListPage = ({
             ...(choice.remarks.kind === "skip"
               ? {}
               : {
-                  remark: choice.remarks.kind === "clear" ? "" : addRemarks(resource.remark, remarkNames),
+                  remark:
+                    choice.remarks.kind === "clear" ? "" : addRemarks(resource.remark, remarkNames),
                 }),
           }
         }),
@@ -337,7 +350,8 @@ export const RegistrationResourceListPage = ({
         const notes = new Map<string, string[]>()
         for (const resource of selected) {
           if (resource.recordId === undefined) continue
-          const note = choice.remarks.kind === "clear" ? "" : addRemarks(resource.remark, remarkNames)
+          const note =
+            choice.remarks.kind === "clear" ? "" : addRemarks(resource.remark, remarkNames)
           notes.set(note, [...(notes.get(note) ?? []), resource.recordId])
         }
         for (const [note, ids] of notes) await assignPoolNotes(groupId, ids, note)
@@ -388,7 +402,10 @@ export const RegistrationResourceListPage = ({
           message.success("删除成功")
           return
         }
-        await removePoolAccounts(groupId, resource.recordId === undefined ? [] : [resource.recordId])
+        await removePoolAccounts(
+          groupId,
+          resource.recordId === undefined ? [] : [resource.recordId],
+        )
         setReloadKey((current) => current + 1)
         message.success("删除成功")
       },
@@ -517,7 +534,9 @@ export const RegistrationResourceListPage = ({
       "aria-label": `选择 ${resource.email}`,
     }),
     onChange: (keys) => setSelectedIds(keys.map((key) => String(key))),
-    pageKeys: pageSlice(filtered, resourcePaging.current, resourcePaging.pageSize).map(selectionKey),
+    pageKeys: pageSlice(filtered, resourcePaging.current, resourcePaging.pageSize).map(
+      selectionKey,
+    ),
     rowKey: selectionKey,
     rows: filtered,
     selectedKeys: selectedIds,
@@ -865,7 +884,10 @@ export const RegistrationResourceListPage = ({
       <BatchAssignDialog
         groupOptions={[
           batchClearOption("清除分组"),
-          ...unionLabelNames(catalogGroups, groupNames).map((name) => ({ label: name, value: name })),
+          ...unionLabelNames(catalogGroups, groupNames).map((name) => ({
+            label: name,
+            value: name,
+          })),
         ]}
         onCancel={() => setBatchAssignOpen(false)}
         onSubmit={applyRegistrationBatch}

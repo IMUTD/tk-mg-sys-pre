@@ -5,10 +5,10 @@ import { type ReactNode, useMemo, useState } from "react"
 import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
 import {
   type FilterMode,
-  type SelectionScope,
   FilterModeSwitch,
-  SelectionScopeSwitch,
   pageSlice,
+  type SelectionScope,
+  SelectionScopeSwitch,
   useClientPagination,
 } from "../../components/tables/operation-controls"
 import { EditableTextTag } from "../labels/editable-text-tag"
@@ -190,7 +190,9 @@ export const ConfigListPage = ({ canDelete, canWrite }: ConfigListPageProps): Re
       "aria-label": `选择 ${item.name}`,
     }),
     onChange: (keys) => setSelectedIds(keys.map((key) => Number(key))),
-    pageKeys: pageSlice(filtered, configPaging.current, configPaging.pageSize).map((item) => item.id),
+    pageKeys: pageSlice(filtered, configPaging.current, configPaging.pageSize).map(
+      (item) => item.id,
+    ),
     rowKey: "id",
     rows: filtered,
     selectedKeys: selectedIds,

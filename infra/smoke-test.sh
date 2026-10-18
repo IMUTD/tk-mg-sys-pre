@@ -2,12 +2,13 @@
 set -eu
 
 usage() {
-  echo "Usage: smoke-test.sh [--env-file PATH] [--web-url URL]"
+  echo "Usage: smoke-test.sh [--env-file PATH] [--web-url URL] [--compose-file PATH]"
 }
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 env_file="$script_dir/.env"
 web_url=""
+compose_file="$script_dir/docker-compose.yml"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -17,6 +18,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --web-url)
       web_url="$2"
+      shift 2
+      ;;
+    --compose-file)
+      compose_file="$2"
       shift 2
       ;;
     --help)
@@ -36,7 +41,7 @@ if [ ! -f "$env_file" ]; then
 fi
 
 compose() {
-  docker compose --env-file "$env_file" -f "$script_dir/docker-compose.yml" "$@"
+  docker compose --env-file "$env_file" -f "$compose_file" "$@"
 }
 
 wait_for() {
@@ -61,7 +66,7 @@ wait_for() {
 wait_for_status() {
   expected_status="$1"
   url="$2"
-  status=$(curl -sS -o /dev/null -w "%{http_code}" "$url" || true)
+  status=$(curl --connect-timeout 3 --max-time 5 -sS -o /dev/null -w "%{http_code}" "$url" || true)
   test "$status" = "$expected_status"
 }
 
@@ -74,7 +79,7 @@ if [ -z "$web_url" ]; then
   web_url="http://127.0.0.1:${web_port:-8080}"
 fi
 web_url=${web_url%/}
-wait_for "web" curl -fsS "$web_url/health"
+wait_for "web" curl --connect-timeout 3 --max-time 5 -fsS "$web_url/health"
 wait_for "Nginx proxied API" wait_for_status 401 "$web_url/api/auth/session"
 
 echo "TK-MG smoke test passed."

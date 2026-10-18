@@ -6,13 +6,9 @@ type RowSelection<RecordType> = NonNullable<TableProps<RecordType>["rowSelection
 const rowKeys = <RecordType,>(
   rows: readonly RecordType[],
   rowKey: keyof RecordType | ((record: RecordType) => Key),
-): Key[] =>
-  rows.map((row) => (typeof rowKey === "function" ? rowKey(row) : (row[rowKey] as Key)))
+): Key[] => rows.map((row) => (typeof rowKey === "function" ? rowKey(row) : (row[rowKey] as Key)))
 
-export const toggleFilteredKeys = (
-  selected: readonly Key[],
-  filtered: readonly Key[],
-): Key[] => {
+export const toggleFilteredKeys = (selected: readonly Key[], filtered: readonly Key[]): Key[] => {
   const allowed = new Set(filtered)
   const chosen = selected.filter((key) => allowed.has(key)).length
   if (filtered.length > 0 && chosen === filtered.length)
@@ -90,12 +86,12 @@ export const useFilteredRowSelection = <RecordType,>(options: {
 }): RowSelection<RecordType> => {
   const filtered = rowKeys(options.rows, options.rowKey)
   const signature = filtered.map((key) => String(key)).join("\u0000")
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Only drop hidden rows when the filtered key list changes.
   useEffect(() => {
     if (options.prune === false) return
     const allowed = new Set(filtered)
     const next = options.selectedKeys.filter((key) => allowed.has(key))
     if (next.length !== options.selectedKeys.length) options.onChange(next)
-    // biome-ignore lint/correctness/useExhaustiveDependencies: Only drop hidden rows when the filtered key list changes.
   }, [signature, options.prune])
   return filteredRowSelection(options)
 }

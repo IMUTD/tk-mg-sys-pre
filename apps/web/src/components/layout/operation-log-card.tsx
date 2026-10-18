@@ -1,7 +1,12 @@
 import { Button, Card, Typography } from "antd"
 import { type ReactNode, useEffect, useState } from "react"
 
-type LogItem = { readonly at: string; readonly id: string; readonly level: string; readonly text: string }
+type LogItem = {
+  readonly at: string
+  readonly id: string
+  readonly level: string
+  readonly text: string
+}
 
 export const OperationLogCard = (): ReactNode => {
   const [open, setOpen] = useState(() => localStorage.getItem("tk-mg.log.open") !== "0")
@@ -12,7 +17,9 @@ export const OperationLogCard = (): ReactNode => {
     let after = 0
     let stop = false
     const pull = async () => {
-      const response = await fetch(`/api/operation-logs?after=${after}`, { credentials: "same-origin" })
+      const response = await fetch(`/api/operation-logs?after=${after}`, {
+        credentials: "same-origin",
+      })
       if (!response.ok) return
       const body = (await response.json()) as { items?: LogItem[] }
       const next = body.items ?? []
@@ -42,13 +49,26 @@ export const OperationLogCard = (): ReactNode => {
 
   return (
     <Card
-      extra={<Button onClick={toggle} size="small">{open ? "收起" : "展开"}</Button>}
+      extra={
+        <Button onClick={toggle} size="small">
+          {open ? "收起" : "展开"}
+        </Button>
+      }
       style={{ marginBottom: 16 }}
       title={open ? "日志" : `日志${unread > 0 ? `（${unread}）` : ""}`}
     >
       {open ? (
-        <div style={{ fontFamily: "ui-monospace, Consolas, monospace", fontSize: 12, maxHeight: 220, overflow: "auto" }}>
-          {items.length === 0 ? <Typography.Text type="secondary">操作进度和错误会显示在这里</Typography.Text> : null}
+        <div
+          style={{
+            fontFamily: "ui-monospace, Consolas, monospace",
+            fontSize: 12,
+            maxHeight: 220,
+            overflow: "auto",
+          }}
+        >
+          {items.length === 0 ? (
+            <Typography.Text type="secondary">操作进度和错误会显示在这里</Typography.Text>
+          ) : null}
           {items.map((item) => (
             <div key={item.id} style={{ color: item.level === "error" ? "#cf1322" : undefined }}>
               {item.text}

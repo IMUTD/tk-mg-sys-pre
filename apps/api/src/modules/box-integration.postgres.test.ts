@@ -46,23 +46,9 @@ afterEach(async () => {
   database = undefined
 })
 
-const setup = async (beforeScopeMigration = false) => {
+const setup = async () => {
   database = await createMigratedTestDatabase()
   const sql = database.client
-  if (beforeScopeMigration) {
-    const directory = new URL("../db/migrations/", import.meta.url)
-    const journal = z
-      .object({ entries: z.array(z.object({ idx: z.number(), tag: z.string() })) })
-      .parse(JSON.parse(await readFile(new URL("meta/_journal.json", directory), "utf8")))
-    // The guarded test helper owns the disposable database and its advisory lock.
-    await sql.begin(async (tx) => {
-      await tx`drop schema public cascade`
-      await tx`create schema public`
-      for (const entry of journal.entries.filter((entry) => entry.idx < 37)) {
-        await tx.unsafe(await readFile(new URL(`${entry.tag}.sql`, directory), "utf8"))
-      }
-    })
-  }
   const passwordHash = await Bun.password.hash(secret, { algorithm: "bcrypt", cost: 4 })
   const snapshot: InitializerSnapshot = {
     admins: ["first", "second"].map((id) => ({
@@ -285,6 +271,27 @@ describe("initializer and box software integration", () => {
             headers: { cookie: env.cookie },
           })
         ).status,
+      ).toBe(409)
+      expect(
+        (await env.sql`select box_group_id from device where id = ${env.device.id}`)[0]?.[
+          "box_group_id"
+        ],
+      ).toBe(group.id)
+      expect(
+        (
+          await env.post("/api/devices/labels", {
+            deviceIds: [env.device.id],
+            boxGroupId: null,
+          })
+        ).status,
+      ).toBe(200)
+      expect(
+        (
+          await env.app.request(`/api/labels/catalog/${group.id}?page=/operations/tasks`, {
+            method: "DELETE",
+            headers: { cookie: env.cookie },
+          })
+        ).status,
       ).toBe(204)
       expect(
         (
@@ -403,7 +410,7 @@ describe("initializer and box software integration", () => {
   })
 
   pgTest(
-    "collects each business domain without notes and protects only its own used categories",
+    "collects scoped groups and supported remarks and protects each domain's used categories",
     async () => {
       const env = await setup()
       const name = "same-name"
@@ -428,7 +435,13 @@ describe("initializer and box software integration", () => {
         "resource",
       ])
       expect(new Set(rows.map((row) => row.id)).size).toBe(6)
-      expect(await env.sql`select id from business_label where name = 'note-only'`).toHaveLength(0)
+      expect([
+        ...(await env.sql`select scope, kind from business_label
+          where name = 'note-only' order by scope`),
+      ]).toEqual([
+        { scope: "account", kind: "remark" },
+        { scope: "proxy", kind: "remark" },
+      ])
       const pages: Record<string, string> = {
         account: "/operations/accounts",
         "account-tag": "/operations/account-pool",
@@ -545,7 +558,31 @@ describe("initializer and box software integration", () => {
   pgTest(
     "upgrades legacy catalogs without losing IDs, device references or record data",
     async () => {
-      const env = await setup(true)
+      database = await createMigratedTestDatabase()
+      const env = {
+        sql: database.client,
+        first: { userId: crypto.randomUUID(), groupId: crypto.randomUUID() },
+        device: { id: crypto.randomUUID() },
+      }
+      const directory = new URL("../db/migrations/", import.meta.url)
+      const journal = z
+        .object({ entries: z.array(z.object({ idx: z.number(), tag: z.string() })) })
+        .parse(JSON.parse(await readFile(new URL("meta/_journal.json", directory), "utf8")))
+      // Seed the historical schema directly; current synchronization requires later migrations.
+      await env.sql.begin(async (tx) => {
+        await tx`drop schema public cascade`
+        await tx`create schema public`
+        for (const entry of journal.entries.filter((entry) => entry.idx < 38)) {
+          await tx.unsafe(await readFile(new URL(`${entry.tag}.sql`, directory), "utf8"))
+        }
+        await tx`insert into access_group(id, name) values (${env.first.groupId}, 'legacy')`
+        await tx`insert into app_user(id, email, password_hash, role, provisioned_by)
+          values (${env.first.userId}, 'legacy@example.test', 'unused', 'administrator', 'init-tool')`
+        await tx`insert into user_group(user_id, group_id)
+          values (${env.first.userId}, ${env.first.groupId})`
+        await tx`insert into device(id, group_id, host, model, name, assignee_user_id)
+          values (${env.device.id}, ${env.first.groupId}, '192.0.2.10', 'fixture', 'Legacy', ${env.first.userId})`
+      })
       const groupId = crypto.randomUUID()
       const orphanId = crypto.randomUUID()
       const source = crypto.randomUUID()
@@ -598,6 +635,26 @@ describe("initializer and box software integration", () => {
       ).toBe("account-tag")
       expect(await env.sql`select id from box_remark where id = ${orphanId}`).toHaveLength(0)
       expect(await env.sql`select id from business_label where name = 'proxy note'`).toHaveLength(0)
+    },
+  )
+  pgTest(
+    "synchronizes device status from recent agent heartbeats using the database enum",
+    async () => {
+      const { sql, snapshot, device } = await setup()
+      expect((await sql`select status from device where id = ${device.id}`)[0]?.["status"]).toBe(
+        "offline",
+      )
+      await sql`update device_agent set last_heartbeat_at = now() where device_id = ${device.id}`
+      await applyInitializerSnapshot(sql, "fixture", snapshot)
+      expect((await sql`select status from device where id = ${device.id}`)[0]?.["status"]).toBe(
+        "online",
+      )
+      await sql`update device_agent set last_heartbeat_at = now() - interval '2 minutes'
+        where device_id = ${device.id}`
+      await applyInitializerSnapshot(sql, "fixture", snapshot)
+      expect((await sql`select status from device where id = ${device.id}`)[0]?.["status"]).toBe(
+        "offline",
+      )
     },
   )
   pgTest(
@@ -998,19 +1055,19 @@ describe("initializer and box software integration", () => {
           "assignment_pending"
         ],
       ).toBe(true)
-      expect(
-        (await sql`select box_group_id from device where id = ${device.id}`)[0],
-      ).toMatchObject({ box_group_id: groupId })
-      expect(await sql`select label_id from device_remark where device_id = ${device.id}`).toEqual([
-        { label_id: remarkId },
-      ])
+      expect((await sql`select box_group_id from device where id = ${device.id}`)[0]).toMatchObject(
+        { box_group_id: groupId },
+      )
+      expect([
+        ...(await sql`select label_id from device_remark where device_id = ${device.id}`),
+      ]).toEqual([{ label_id: remarkId }])
       await applyInitializerSnapshot(sql, "fixture", moved)
-      expect(
-        (await sql`select box_group_id from device where id = ${device.id}`)[0],
-      ).toMatchObject({ box_group_id: groupId })
-      expect(await sql`select label_id from device_remark where device_id = ${device.id}`).toEqual([
-        { label_id: remarkId },
-      ])
+      expect((await sql`select box_group_id from device where id = ${device.id}`)[0]).toMatchObject(
+        { box_group_id: groupId },
+      )
+      expect([
+        ...(await sql`select label_id from device_remark where device_id = ${device.id}`),
+      ]).toEqual([{ label_id: remarkId }])
       expect(await (await app.request("/api/devices", { headers: { cookie } })).json()).toEqual([])
       expect((await enqueue("old-owner")).status).toBe(404)
       expect((await sql`select status from execution_task`)[0]?.["status"]).toBe(
@@ -1023,10 +1080,12 @@ describe("initializer and box software integration", () => {
       expect(
         (await sql`select group_id from device where id = ${device.id}`)[0]?.["group_id"],
       ).toBe(second.groupId)
-      expect(
-        (await sql`select box_group_id from device where id = ${device.id}`)[0],
-      ).toMatchObject({ box_group_id: null })
-      expect(await sql`select label_id from device_remark where device_id = ${device.id}`).toEqual([])
+      expect((await sql`select box_group_id from device where id = ${device.id}`)[0]).toMatchObject(
+        { box_group_id: null },
+      )
+      expect([
+        ...(await sql`select label_id from device_remark where device_id = ${device.id}`),
+      ]).toEqual([])
       expect(
         await sql`select id from business_label where id = any(${[groupId, remarkId]}::uuid[])`,
       ).toHaveLength(2)
@@ -1191,7 +1250,9 @@ describe("initializer and box software integration", () => {
         task_id: z.string().uuid(),
         checkpoint: z.object({ step_id: z.string().uuid() }),
         templateDoc: z.object({
-          steps: z.array(z.object({ skill: z.string(), input: z.record(z.string()).optional() })),
+          steps: z.array(
+            z.object({ skill: z.string(), input: z.record(z.string(), z.string()).optional() }),
+          ),
         }),
       })
       .parse(await (await claim()).json())
@@ -1199,7 +1260,7 @@ describe("initializer and box software integration", () => {
       skill: "JumpNodes",
       input: { text: "Home", contentDesc: "" },
     })
-    expect(pointer.templateDoc.steps[0]?.input?.steps).toBeUndefined()
+    expect(pointer.templateDoc.steps[0]?.input?.["steps"]).toBeUndefined()
     expect(
       (
         await post(

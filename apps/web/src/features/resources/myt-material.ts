@@ -47,10 +47,7 @@ export const uniqueTags = (materials: readonly MytMaterial[]): string[] =>
     left.localeCompare(right, "zh-CN"),
   )
 
-export const matchesMaterialTags = (
-  item: MytMaterial,
-  query: MaterialQuery,
-): boolean | null => {
+export const matchesMaterialTags = (item: MytMaterial, query: MaterialQuery): boolean | null => {
   if (query.tags.length === 0 && !query.untagged) return null
   const tag = item.tag.trim()
   return query.tags.includes(tag) || (query.untagged && tag.length === 0)

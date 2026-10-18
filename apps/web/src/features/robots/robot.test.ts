@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest"
 
 import {
   advanceRun,
-  createSeedRobots,
   displayStatus,
   duplicateRobot,
   emptyRobot,
@@ -11,10 +10,11 @@ import {
   toggleEnabled,
   validateRobot,
 } from "./robot"
+import { createRobotFixtures } from "./robot.test-fixtures"
 
 describe("robot", () => {
   it("lists all robots without splitting AI and automatic kinds", () => {
-    expect(sortRobots(createSeedRobots()).map((item) => item.name)).toEqual([
+    expect(sortRobots(createRobotFixtures()).map((item) => item.name)).toEqual([
       "夜间巡检",
       "晚班日更",
       "英文区补号",
@@ -27,14 +27,14 @@ describe("robot", () => {
     expect(validateRobot(invalid)).toBe("请填写名称")
     const named = { ...invalid, name: "试运行" }
     expect(validateRobot(named)).toBe("请选择行为链")
-    const ready = createSeedRobots().find((item) => item.name === "美区养号")
+    const ready = createRobotFixtures().find((item) => item.name === "美区养号")
     if (ready === undefined) throw new Error("missing seed")
     expect(displayStatus(ready)).toBe("idle")
     expect(ready.chainName).toBe("早班养号")
   })
 
   it("advances a running cycle to completion", () => {
-    const robot = createSeedRobots().find((item) => item.name === "美区养号")
+    const robot = createRobotFixtures().find((item) => item.name === "美区养号")
     if (robot === undefined) throw new Error("missing seed")
     let current = startRun(robot)
     for (let index = 0; index < 8; index += 1) {
@@ -46,7 +46,7 @@ describe("robot", () => {
   })
 
   it("pauses a running robot when disabled and copies without the live run", () => {
-    const robot = createSeedRobots().find((item) => item.name === "美区养号")
+    const robot = createRobotFixtures().find((item) => item.name === "美区养号")
     if (robot === undefined) throw new Error("missing seed")
     const running = startRun(robot)
     const paused = toggleEnabled(running, false, "2026-09-17 18:01:00")

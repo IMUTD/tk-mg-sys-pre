@@ -1,0 +1,175 @@
+name: Deploy
+
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tk-mg-server-deployment
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: >-
+      github.event_name == 'pull_request' && github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: tk_mg_test_deploy
+          POSTGRES_USER: tk_mg
+          POSTGRES_PASSWORD: test-only-password
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U tk_mg -d tk_mg_test_deploy"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.13
+      - run: pnpm install --frozen-lockfile
+      - name: Check deployment TypeScript
+        run: >-
+          pnpm exec biome check
+          apps/api/src/main.ts apps/api/src/main.test.ts
+          apps/api/src/app.ts apps/api/src/composition.ts
+          apps/api/src/bootstrap-deployment.ts
+          apps/api/src/bootstrap-deployment.postgres.test.ts
+          apps/api/src/modules/auth/routes.ts
+          apps/api/src/modules/auth/routes-cookie.test.ts
+      - name: Deployment scripts and Compose contracts
+        run: bash infra/deploy.test.sh
+      - name: Test API, adapters and worker
+        run: pnpm --filter @tk-mg/api --filter @tk-mg/storage-adapter --filter @tk-mg/device-adapter --filter @tk-mg/task-execution --filter @tk-mg/worker --recursive run test
+      - name: Test first deployment against PostgreSQL
+        env:
+          TEST_DATABASE_URL: postgres://tk_mg:test-only-password@127.0.0.1:5432/tk_mg_test_deploy
+        run: bun test apps/api/src/bootstrap-deployment.postgres.test.ts
+
+  production-ci:
+    if: >-
+      github.event_name == 'pull_request' && github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: [verify, production-ci]
+    if: >-
+      ${{ !cancelled() && github.event_name == 'pull_request' &&
+          github.event.action == 'closed' && github.event.pull_request.merged == true &&
+          github.event.pull_request.base.ref == 'main' && github.ref == 'refs/heads/main' &&
+          needs.verify.result == 'success' && needs['production-ci'].result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [api, web, postgres, redis]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image name
+        id: image
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: echo "name=ghcr.io/${REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: infra/Dockerfile
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.name }}-${{ matrix.target }}:sha-${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+
+  deploy:
+    needs: build
+    if: >-
+      ${{ !cancelled() && github.event_name == 'pull_request' &&
+          github.event.action == 'closed' && github.event.pull_request.merged == true &&
+          github.event.pull_request.base.ref == 'main' && github.ref == 'refs/heads/main' &&
+          needs.build.result == 'success' && vars.DEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Upload release and deploy over SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/tk-mg-sys' }}
+          DEPLOY_WEB_PORT: ${{ vars.DEPLOY_WEB_PORT || '8080' }}
+          ADMIN_EMAIL: ${{ vars.ADMIN_EMAIL || 'admin@example.internal' }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]
+          [[ "$DEPLOY_PORT" =~ ^[0-9]{1,5}$ ]] && ((10#$DEPLOY_PORT >= 1 && 10#$DEPLOY_PORT <= 65535))
+          [[ "$DEPLOY_WEB_PORT" =~ ^[0-9]{1,5}$ ]] && ((10#$DEPLOY_WEB_PORT >= 1 && 10#$DEPLOY_WEB_PORT <= 65535))
+          [[ "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9/_-]+$ && "$DEPLOY_PATH" != / ]]
+          [[ "$ADMIN_EMAIL" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]
+          [[ -n "$DEPLOY_SSH_KEY" && -n "$DEPLOY_KNOWN_HOSTS" ]]
+          umask 077
+          key="$RUNNER_TEMP/deploy-key"
+          hosts="$RUNNER_TEMP/deploy-known-hosts"
+          trap 'rm -f "$key" "$hosts"' EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$hosts"
+          options=(-i "$key" -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$hosts" -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+          target="$DEPLOY_USER@$DEPLOY_HOST"
+          release="$DEPLOY_PATH/releases/sha-$COMMIT_SHA"
+          git archive --format=tar.gz --output=release.tar.gz HEAD infra
+          ssh "${options[@]}" -p "$DEPLOY_PORT" "$target" "umask 077; mkdir -p $release/.docker"
+          scp "${options[@]}" -P "$DEPLOY_PORT" release.tar.gz "$target:$release/release.tar.gz"
+          printf '%s' "$GHCR_TOKEN" | ssh "${options[@]}" -p "$DEPLOY_PORT" "$target" "
+            set -eu
+            if [ -d ~/.docker/cli-plugins ] && [ ! -e $release/.docker/cli-plugins ]; then
+              ln -s ~/.docker/cli-plugins $release/.docker/cli-plugins
+            fi
+            export DOCKER_CONFIG=$release/.docker
+            trap 'rm -f $release/.docker/config.json' EXIT
+            docker login ghcr.io --username '$GHCR_USER' --password-stdin
+            tar -xzf $release/release.tar.gz -C $release
+            if [ ! -f $DEPLOY_PATH/shared/.env ]; then
+              WEB_PORT=$DEPLOY_WEB_PORT bash $release/infra/setup-deploy-env.sh $DEPLOY_PATH '$ADMIN_EMAIL'
+            fi
+            timeout --signal=TERM --kill-after=30s 12m bash $release/infra/deploy.sh $DEPLOY_PATH sha-$COMMIT_SHA
+          "
+          echo "Deployed sha-$COMMIT_SHA. Open http://$DEPLOY_HOST:$DEPLOY_WEB_PORT/login" >> "$GITHUB_STEP_SUMMARY"

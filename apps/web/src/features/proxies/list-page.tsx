@@ -10,25 +10,15 @@ import {
   StarOutlined,
   UploadOutlined,
 } from "@ant-design/icons"
-import {
-  Alert,
-  App,
-  Button,
-  Card,
-  Input,
-  Select,
-  Space,
-  Table,
-  Tag,
-} from "antd"
+import { Alert, App, Button, Card, Input, Select, Space, Table, Tag } from "antd"
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
 import {
   type FilterMode,
-  type SelectionScope,
   FilterModeSwitch,
-  SelectionScopeSwitch,
   pageSlice,
+  type SelectionScope,
+  SelectionScopeSwitch,
   useClientPagination,
 } from "../../components/tables/operation-controls"
 import { createProxiesApi, type ProxiesApi, proxyRequestError } from "./api"
@@ -77,11 +67,21 @@ import {
 import "./proxies.css"
 import { PageKey } from "../../lib/pages"
 import { createLabelsApi, labelsChanged } from "../labels/api"
-import { BatchAssignDialog, batchClearOption, type BatchAssignResult } from "../labels/batch-assign-dialog"
+import {
+  BatchAssignDialog,
+  type BatchAssignResult,
+  batchClearOption,
+} from "../labels/batch-assign-dialog"
 import { EditableTextTag } from "../labels/editable-text-tag"
+import {
+  BusinessLabelFilter,
+  LabelFilterRow,
+  UNASSIGNED_VALUE,
+  unionLabelNames,
+  usageLabel,
+} from "../labels/filter-row"
 import { addRemarks, formatRemarks, splitRemarks } from "../labels/remark-list"
 import { RemarkTags } from "../labels/remark-tags"
-import { BusinessLabelFilter, LabelFilterRow, UNASSIGNED_VALUE, unionLabelNames, usageLabel } from "../labels/filter-row"
 
 type ProxiesListPageProps = {
   readonly groupIds?: readonly string[]
@@ -102,15 +102,6 @@ const downloadCsv = (csv: string, filename: string): void => {
   link.href = url
   link.click()
   URL.revokeObjectURL(url)
-}
-
-const copyText = async (value: string, onSuccess: () => void): Promise<void> => {
-  try {
-    await navigator.clipboard.writeText(value)
-  } catch {
-    /* jsdom and restricted clipboard still show success like 云大师 */
-  }
-  onSuccess()
 }
 
 const rowLabel = (proxy: MytProxy): string => {
@@ -222,7 +213,9 @@ export const ProxiesListPage = ({
       const persisted = next.filter((item) => item.uuid !== undefined && item.groupId !== undefined)
       const local = next.filter((item) => item.uuid === undefined || item.groupId === undefined)
       if (local.length > 0) {
-        setProxies((current) => current.map((row) => local.find((item) => item.id === row.id) ?? row))
+        setProxies((current) =>
+          current.map((row) => local.find((item) => item.id === row.id) ?? row),
+        )
       }
       if (persisted.length > 0) await persistBatch(persisted)
       else if (local.length > 0) message.success("已分配")
@@ -289,7 +282,11 @@ export const ProxiesListPage = ({
     .sort(([left], [right]) => left.localeCompare(right, "zh-CN"))
     .map(([remark, count]) => ({ label: usageLabel(remark, count), value: remark }))
   const remarkNames = [
-    ...new Set([...catalogRemarks, ...remarkCounts.keys()].map((name) => name.trim()).filter((name) => name.length > 0)),
+    ...new Set(
+      [...catalogRemarks, ...remarkCounts.keys()]
+        .map((name) => name.trim())
+        .filter((name) => name.length > 0),
+    ),
   ].sort((left, right) => left.localeCompare(right, "zh-CN"))
   const turboOptions = turboNodeProxies(proxies).map((item) => ({
     label: turboNodeLabel(item),
@@ -410,7 +407,10 @@ export const ProxiesListPage = ({
     selectionScope,
   })
 
-  const saveProxyText = (item: MytProxy, patch: { readonly tag?: string; readonly remark?: string }): void => {
+  const saveProxyText = (
+    item: MytProxy,
+    patch: { readonly tag?: string; readonly remark?: string },
+  ): void => {
     if (patch.tag?.includes("+")) {
       message.error("分组名称不能包含 + 符号")
       return
@@ -451,10 +451,7 @@ export const ProxiesListPage = ({
       {loadError === null ? null : <Alert message={loadError} showIcon type="error" />}
       <Card className="condition-panel filter-bar" size="small">
         <BusinessLabelFilter
-          blankLabel={usageLabel(
-            "未分组",
-            proxies.filter((item) => item.tag.length === 0).length,
-          )}
+          blankLabel={usageLabel("未分组", proxies.filter((item) => item.tag.length === 0).length)}
           canDelete={allowDelete}
           canWrite={canWrite}
           onChange={(tag) =>
@@ -495,7 +492,10 @@ export const ProxiesListPage = ({
         />
         <LabelFilterRow
           onChange={(values) => changeSelectQuery({ type: values[0] ?? "" })}
-          options={PROXY_TYPE_OPTIONS.map((option) => ({ label: option.label, value: option.value }))}
+          options={PROXY_TYPE_OPTIONS.map((option) => ({
+            label: option.label,
+            value: option.value,
+          }))}
           selected={choice(draft.type)}
           system
           title="类型"
@@ -772,13 +772,14 @@ export const ProxiesListPage = ({
           },
           {
             key: "remark",
-            render: (_value: unknown, item: MytProxy) =>
+            render: (_value: unknown, item: MytProxy) => (
               <RemarkTags
                 canWrite={canWrite}
                 onChange={(name) => saveProxyText(item, { remark: name })}
                 removeLabel={(name) => `移除备注 ${name}`}
                 value={item.remark}
-              />,
+              />
+            ),
             title: "备注",
             width: 160,
           },

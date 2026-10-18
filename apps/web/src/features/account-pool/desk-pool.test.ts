@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  type DeskAccountPreview,
   emptyDeskQuery,
   matchesDeskQuery,
   normalizeDeskQuery,
   resolveDeskPoolName,
-  type DeskAccountPreview,
 } from "./desk-pool"
 
 const preview = (patch: Partial<DeskAccountPreview> = {}): DeskAccountPreview => ({
@@ -40,9 +40,9 @@ describe("desk pool preview", () => {
 
   it("matches every account when no condition is selected", () => {
     expect(matchesDeskQuery(preview(), normalizeDeskQuery(emptyDeskQuery()))).toBe(true)
-    expect(matchesDeskQuery(preview({ status: "0", tag: "其他" }), normalizeDeskQuery(emptyDeskQuery()))).toBe(
-      true,
-    )
+    expect(
+      matchesDeskQuery(preview({ status: "0", tag: "其他" }), normalizeDeskQuery(emptyDeskQuery())),
+    ).toBe(true)
   })
 
   it("includes an unregistered account when the condition does not ask for another status", () => {

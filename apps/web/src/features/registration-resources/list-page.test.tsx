@@ -1,9 +1,11 @@
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it } from "vitest"
-
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AntdApp } from "../../app/antd-app"
+import { mockLabelCatalog } from "../labels/catalog.test-fixtures"
 import { RegistrationResourceListPage } from "./list-page"
+import * as resourcesSource from "./tk-reg-resource"
+import { createTestResources } from "./tk-reg-resource.test-fixtures"
 
 const renderPage = (canWrite = true): void => {
   render(
@@ -92,3 +94,10 @@ describe("RegistrationResourceListPage", () => {
     expect(await screen.findByText("重置成功,共重置1个账号")).toBeVisible()
   })
 }, 30_000)
+
+beforeEach(() =>
+  vi.spyOn(resourcesSource, "createSeedResources").mockImplementation(createTestResources),
+)
+afterEach(() => vi.restoreAllMocks())
+
+beforeEach(mockLabelCatalog)

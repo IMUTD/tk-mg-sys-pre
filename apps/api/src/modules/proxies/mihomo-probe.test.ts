@@ -18,8 +18,8 @@ const node = (id: string, overrides = {}): StoredProxy => ({
   status: "ready",
   configuration: ProxyConfigurationSchema.parse({ host: "1.1.1.1", port: 3000, ...overrides }),
 })
-const landingId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-const relayId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+const landingId = ProxyIdSchema.parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+const relayId = ProxyIdSchema.parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
 const options = { channel: "us" as const, mode: "detailed" as const, useTurbo: false }
 const pin = async () => "8.8.8.8"
 

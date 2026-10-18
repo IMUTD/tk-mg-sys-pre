@@ -73,13 +73,13 @@ const v2Proxy = (
     network,
   }
   if (outbound.type === "vmess") {
-    proxy.alterId = outbound.alter_id ?? 0
-    proxy.cipher = outbound.security ?? "auto"
+    proxy["alterId"] = outbound.alter_id ?? 0
+    proxy["cipher"] = outbound.security ?? "auto"
   }
-  if (outbound.flow) proxy.flow = outbound.flow
+  if (outbound.flow) proxy["flow"] = outbound.flow
   if (outbound.tls?.enabled) {
-    proxy.tls = true
-    proxy.servername = outbound.tls.server_name || hostname
+    proxy["tls"] = true
+    proxy["servername"] = outbound.tls.server_name || hostname
     if (outbound.tls.utls?.enabled) proxy["client-fingerprint"] = outbound.tls.utls.fingerprint
     if (outbound.tls.reality?.enabled) {
       proxy["reality-opts"] = {
@@ -122,8 +122,8 @@ const toMihomoProxy = async (
     udp: configuration.protocol === "socks5",
   }
   if (node.secret.username.length > 0) {
-    proxy.username = node.secret.username
-    proxy.password = node.secret.password
+    proxy["username"] = node.secret.username
+    proxy["password"] = node.secret.password
   }
   return proxy
 }
@@ -321,7 +321,8 @@ export const detectDial = async (
   decrypt: (proxy: StoredProxy) => { username: string; password: string; extra: string },
 ): Promise<ProxyCheck> => {
   const started = Date.now()
-  const chained = (snapshot.proxy.configuration?.acceleratorId ?? null) !== null ||
+  const chained =
+    (snapshot.proxy.configuration?.acceleratorId ?? null) !== null ||
     (snapshot.proxy.configuration?.acceleratorIds.length ?? 0) > 0
   const result: ProxyCheck = {
     detection_type: "proxy_connectivity",

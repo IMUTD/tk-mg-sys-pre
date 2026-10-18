@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react"
-import { Table } from "antd"
 import userEvent from "@testing-library/user-event"
+import { Table } from "antd"
 import { useState } from "react"
 import { describe, expect, it } from "vitest"
 

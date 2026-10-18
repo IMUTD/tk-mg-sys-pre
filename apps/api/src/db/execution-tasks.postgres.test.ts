@@ -103,6 +103,7 @@ describe("execution task schema", () => {
             "error_code",
             "error_message",
             "result",
+            "account_id",
           ],
         )
         expect(

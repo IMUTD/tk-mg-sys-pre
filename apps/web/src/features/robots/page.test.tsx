@@ -1,10 +1,43 @@
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AntdApp } from "../../app/antd-app"
+import { loadChains, resetChains } from "../behaviors/chain-store"
 import { RobotsPage } from "./page"
+import { createRobotFixtures } from "./robot.test-fixtures"
+
+vi.mock(import("./robot"), async (importOriginal) => ({
+  ...(await importOriginal()),
+  createSeedRobots: () => createRobotFixtures(),
+}))
+
+beforeEach(async () => {
+  resetChains()
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(async (input) => {
+      if (input !== "/api/behavior-chains") throw new Error(`Unexpected request: ${String(input)}`)
+      return Response.json([
+        {
+          id: "1",
+          lastTestedAt: null,
+          name: "早班养号",
+          origin: "rpa",
+          steps: [],
+          updatedAt: "2026-09-17T12:00:00.000Z",
+        },
+      ])
+    }),
+  )
+  await loadChains()
+})
+
+afterEach(() => {
+  resetChains()
+  vi.unstubAllGlobals()
+})
 
 const renderPage = (canWrite = true): void => {
   render(

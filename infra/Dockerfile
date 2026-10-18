@@ -1,3 +1,7 @@
+FROM postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea AS postgres
+
+FROM redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499 AS redis
+
 FROM oven/bun:1.3.13 AS dependencies
 
 WORKDIR /workspace

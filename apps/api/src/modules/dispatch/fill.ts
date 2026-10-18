@@ -106,13 +106,20 @@ export const refreshDeviceHosts = (
 ): { readonly changed: boolean; readonly parameters: Record<string, string> } => {
   const sourceMap =
     sources !== null && typeof sources === "object" && !Array.isArray(sources)
-      ? Object.entries(sources).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+      ? Object.entries(sources).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string",
+        )
       : []
   const next = { ...parameters }
   let changed = false
   for (const [key, source] of sourceMap) {
     if (!(key in next)) continue
-    const host = source === "device.host" ? hosts.deviceHost : source === "account.backup_device" ? hosts.backupHost : ""
+    const host =
+      source === "device.host"
+        ? hosts.deviceHost
+        : source === "account.backup_device"
+          ? hosts.backupHost
+          : ""
     if (host.length === 0 || next[key] === host) continue
     next[key] = host
     changed = true
@@ -138,7 +145,8 @@ export const fillStep = (step: FillStep, context: FillContext): FilledStep => {
     }
     parameters[key] = sourceValue(step.sources[key] ?? "", context)
     if (parameters[key].length === 0) missingKeys.push(key)
-    if (step.sources[key] === "pool.text" && context.text !== null) textResourceId = context.text.resourceId
+    if (step.sources[key] === "pool.text" && context.text !== null)
+      textResourceId = context.text.resourceId
   }
   return { missingKeys, parameters, textResourceId }
 }
@@ -173,7 +181,8 @@ export const drawTexts = (
   count: number,
   random: () => number = Math.random,
 ): { readonly content: string; readonly resourceId: string }[] => {
-  const filtered = mode === "tag" ? materials.filter((item) => item.category === tag) : [...materials]
+  const filtered =
+    mode === "tag" ? materials.filter((item) => item.category === tag) : [...materials]
   const ordered = mode === "random" ? shuffle(filtered, random) : [...filtered].sort(byAge)
   return cycleDraw(ordered, count).map((item) => ({
     content: item?.content ?? "",
@@ -182,7 +191,9 @@ export const drawTexts = (
 }
 
 const cycleDraw = <T>(ordered: readonly T[], count: number): (T | undefined)[] =>
-  Array.from({ length: count }, (_, index) => (ordered.length === 0 ? undefined : ordered[index % ordered.length]))
+  Array.from({ length: count }, (_, index) =>
+    ordered.length === 0 ? undefined : ordered[index % ordered.length],
+  )
 
 export type ShareDrawFile = {
   readonly deviceId: string
@@ -207,6 +218,12 @@ export const drawShareFiles = (
   const ordered =
     mode === "random"
       ? shuffle(matched, random)
-      : [...matched].sort((left, right) => left.path.localeCompare(right.path) || left.host.localeCompare(right.host))
-  return cycleDraw(ordered, count).map((item) => ({ host: item?.host ?? "", path: item?.path ?? "" }))
+      : [...matched].sort(
+          (left, right) =>
+            left.path.localeCompare(right.path) || left.host.localeCompare(right.host),
+        )
+  return cycleDraw(ordered, count).map((item) => ({
+    host: item?.host ?? "",
+    path: item?.path ?? "",
+  }))
 }

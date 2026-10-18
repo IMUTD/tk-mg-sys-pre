@@ -11,6 +11,8 @@ const config = z
 
 const labelId = z.object({ id: z.string().uuid() })
 
+test.use({ actionTimeout: 10000 })
+
 test("scoped categories persist, reuse the right objects and isolate administrators", async ({
   page,
   browser,
@@ -27,6 +29,7 @@ test("scoped categories persist, reuse the right objects and isolate administrat
     registration: `${groupName}-registration`,
   }
   const created: { id: string; page: string; scope: string }[] = []
+  let originalDevice: { id: string; boxGroupId: string | null } | undefined
   await page.goto("/operations/devices")
   await page.getByRole("textbox", { name: "邮箱" }).fill(config.E2E_EMAIL)
   await page.getByLabel("密码", { exact: true }).fill(config.E2E_PASSWORD)
@@ -75,10 +78,9 @@ test("scoped categories persist, reuse the right objects and isolate administrat
     ).toBeVisible()
     for (const [path, title, scope, name] of [
       ["/operations/accounts", "账号分组", "account", names.account],
-      ["/operations/accounts", "标签", "account-tag", names.tag],
+      ["/operations/accounts", "账号标签", "account-tag", names.tag],
       ["/operations/proxies", "分组", "proxy", names.proxy],
       ["/studio/text-pool", "标签", "resource", names.resource],
-      ["/studio/registration", "标签", "registration", names.registration],
     ] as const) {
       await page.goto(path)
       await page.getByRole("button", { name: `添加${title}`, exact: true }).click()
@@ -107,9 +109,35 @@ test("scoped categories persist, reuse the right objects and isolate administrat
         await expect(unassigned).toHaveAttribute("aria-pressed", "false")
       }
     }
+    const registrationQuery = new URLSearchParams({
+      page: "/studio/registration",
+      scope: "registration",
+    })
+    const registration = await page.request.post(`/api/labels/catalog?${registrationQuery}`, {
+      data: { kind: "group", name: names.registration },
+    })
+    expect(registration.status()).toBe(201)
+    const registrationId = labelId.parse(await registration.json()).id
+    created.push({ id: registrationId, page: "/studio/registration", scope: "registration" })
+    const registrationCatalog = await (
+      await page.request.get(`/api/labels/catalog?${registrationQuery}`)
+    ).json()
+    expect(registrationCatalog).toMatchObject({
+      scope: "registration",
+      groups: expect.arrayContaining([
+        expect.objectContaining({
+          id: registrationId,
+          name: names.registration,
+          scope: "registration",
+        }),
+      ]),
+    })
+    expect(JSON.stringify(registrationCatalog)).not.toContain(names.account)
+    await page.goto("/studio/registration")
+    await verify("账号分组", names.account)
     await page.goto("/operations/accounts")
     await verify("账号分组", names.account)
-    await verify("标签", names.tag)
+    await verify("账号标签", names.tag)
     await page.getByRole("button", { name: "分配代理", exact: true }).click()
     await verify("代理分组", names.proxy)
     await verify("分配账号分组", names.account)
@@ -117,8 +145,37 @@ test("scoped categories persist, reuse the right objects and isolate administrat
     await page.getByRole("button", { name: "新增", exact: true }).click()
     await verify("账号分组", names.account)
     await verify("账号标签", names.tag)
+    originalDevice = z
+      .array(z.object({ id: z.string().uuid(), boxGroupId: z.string().uuid().nullable() }))
+      .parse(await (await page.request.get("/api/devices")).json())[0]
+    const deviceGroup = created[0]
+    if (originalDevice === undefined || deviceGroup === undefined)
+      throw new Error("Missing disposable device or device label")
+    expect(
+      (
+        await page.request.post("/api/devices/labels", {
+          data: { deviceIds: [originalDevice.id], boxGroupId: deviceGroup.id },
+        })
+      ).ok(),
+    ).toBe(true)
     await page.goto("/operations/tasks")
-    await verify("设备分组", names.device)
+    await page.getByRole("button", { name: "新增", exact: true }).click()
+    const task = page.getByRole("dialog", { name: "新增任务", exact: true })
+    const boxes = task.getByRole("combobox", { name: "盒子范围", exact: true })
+    await boxes.click()
+    const boxGroup = page.getByRole("option", { name: names.device, exact: true })
+    await expect(boxGroup).toBeVisible()
+    for (const hidden of Object.values(names).filter((name) => name !== names.device))
+      await expect(page.getByRole("option", { name: hidden, exact: true })).toHaveCount(0)
+    await boxGroup.click()
+    await expect(task.getByText(names.device, { exact: true })).toBeVisible()
+    const boxSelector = task.locator(".ant-select").filter({
+      has: page.getByRole("combobox", { name: "盒子范围", exact: true }),
+    })
+    await boxSelector.hover()
+    await boxSelector.locator(".ant-select-clear").click()
+    await expect(task.getByText(names.device, { exact: true })).toHaveCount(0)
+    await task.getByRole("button", { name: "取消", exact: true }).click()
     const other = await browser.newContext({
       baseURL: test.info().project.use.baseURL,
       ignoreHTTPSErrors: true,
@@ -174,7 +231,7 @@ test("scoped categories persist, reuse the right objects and isolate administrat
     await page.goto("/operations/accounts")
     const row = page.getByRole("group", { name: "账号分组", exact: true })
     await verify("账号分组", names.account)
-    await verify("标签", names.tag)
+    await verify("账号标签", names.tag)
     const bounds = await row.boundingBox()
     expect(bounds).not.toBeNull()
     const tags = await row.getByRole("button").all()
@@ -195,6 +252,15 @@ test("scoped categories persist, reuse the right objects and isolate administrat
       ).toHaveCount(0)
     }
   } finally {
+    test.info().setTimeout(test.info().timeout + 15000)
+    if (originalDevice !== undefined)
+      expect(
+        (
+          await page.request.post("/api/devices/labels", {
+            data: { deviceIds: [originalDevice.id], boxGroupId: originalDevice.boxGroupId },
+          })
+        ).ok(),
+      ).toBe(true)
     for (const label of created) {
       const query = new URLSearchParams({ page: label.page, scope: label.scope })
       expect((await page.request.delete(`/api/labels/catalog/${label.id}?${query}`)).status()).toBe(

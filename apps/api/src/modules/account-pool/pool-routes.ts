@@ -108,7 +108,8 @@ export const registerPoolRoutes = (
     try {
       body = await context.req.json()
     } catch (error) {
-      if (error instanceof SyntaxError) return context.json({ error: "invalid_account_pool_request" }, 400)
+      if (error instanceof SyntaxError)
+        return context.json({ error: "invalid_account_pool_request" }, 400)
       throw error
     }
     if (body !== null && typeof body === "object" && "desk" in body) {

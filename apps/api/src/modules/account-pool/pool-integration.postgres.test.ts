@@ -12,6 +12,7 @@ const groupId = "11111111-1111-4111-8111-111111111111"
 const otherGroup = "22222222-2222-4222-8222-222222222222"
 const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 const deviceId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+const instanceId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 let database: MigratedTestDatabase | null = null
 afterEach(async () => {
   await database?.close()
@@ -26,13 +27,16 @@ const setup = async () => {
     (${actorId},'pool.integration@example.test','unused','administrator')`
   await sql`insert into device(id,group_id,host,model,name)
     values (${deviceId},${groupId},'192.0.2.40','fixture','Pool fixture')`
+  await sql`insert into device_instance(id,device_id,instance_index,label)
+    values (${instanceId},${deviceId},1,'Pool fixture pit')`
   const ids = Array.from({ length: 7 }, () => crypto.randomUUID())
   for (const [index, id] of ids.entries()) {
     await sql`insert into operation_account
-      (id,group_id,name,identifier,encrypted_secret,backup_type,device_id,tags,extra,transferred,deleted,status)
+      (id,group_id,name,identifier,encrypted_secret,backup_type,device_id,device_instance_id,tags,extra,transferred,deleted,status)
       values (${id},${index === 6 ? otherGroup : groupId},'Pool fixture',${`pool.${index}`},
         'fixture-ciphertext',${index === 0 ? "local" : "private_cloud"}::operation_account_backup_type,
-        ${index === 0 ? deviceId : null},${["pool-group", index === 1 ? "red" : "blue"]},
+        ${index === 0 ? deviceId : null},${index === 0 ? instanceId : null},
+        ${["pool-group", index === 1 ? "red" : "blue"]},
         ${sql.json({ playTotal: 123, password: "fixture-do-not-expose" })},
         ${index === 3},${index === 4},${index === 5 ? "disabled" : "ready"}::operation_account_status)`
   }
@@ -201,7 +205,8 @@ describe("account pool catalog PostgreSQL", () => {
       code: "account_pool_invalid_source",
     })
     await sql`update device set enabled = true where id = ${deviceId}`
-    await sql`update operation_account set backup_type = 'private_cloud', device_id = null where id = ${accountId}`
+    await sql`update operation_account set backup_type = 'private_cloud', device_id = null,
+      device_instance_id = null where id = ${accountId}`
     await expect(repository.consume(groupId, actorId, pool.id, receipt)).rejects.toMatchObject({
       code: "account_pool_invalid_source",
     })

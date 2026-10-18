@@ -1,14 +1,69 @@
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AntdApp } from "../../app/antd-app"
+import { mockLabelCatalog } from "../labels/catalog.test-fixtures"
+import type { ProxiesApi } from "./api"
 import { ProxiesListPage } from "./list-page"
+import type { MytProxy, ProxyCheckResult } from "./myt-proxy"
+import { createTestProxies } from "./myt-proxy.test-fixtures"
+
+const groupId = "11111111-1111-4111-8111-111111111111"
+const proxyApi = (): ProxiesApi => {
+  let rows = createTestProxies().map((row) => ({
+    ...row,
+    groupId,
+    uuid: `aaaaaaaa-aaaa-4aaa-8aaa-${String(row.id).padStart(12, "0")}`,
+  }))
+  const persist = (record: MytProxy): MytProxy => {
+    const id = record.id === 0 ? Math.max(...rows.map((row) => row.id)) + 1 : record.id
+    const saved = {
+      ...record,
+      id,
+      groupId,
+      uuid: record.uuid ?? `aaaaaaaa-aaaa-4aaa-8aaa-${String(id).padStart(12, "0")}`,
+    }
+    rows = [...rows.filter((row) => row.id !== id), saved]
+    return saved
+  }
+  return {
+    list: async () => rows,
+    credentials: async (row) => row,
+    save: async (row) => persist(row),
+    delete: async (records) => {
+      rows = rows.filter((row) => !records.some((record) => record.id === row.id))
+    },
+    detect: async (record) => {
+      const result: ProxyCheckResult = {
+        detection_type: "ip_lookup",
+        connectivity_checked: false,
+        target_ip: record.ip,
+        channel: "cn",
+        check_time: Date.now(),
+        failures: 0,
+        successes: 1,
+        include_response: true,
+        message: "ip_information_found",
+        mode: "detailed",
+        ok: true,
+        status: 200,
+        results: [],
+        use_turbo: false,
+      }
+      persist({ ...record, result: JSON.stringify(result) })
+      return result
+    },
+  }
+}
+
+beforeEach(mockLabelCatalog)
+afterEach(() => vi.restoreAllMocks())
 
 const renderPage = (canWrite = true): void => {
   render(
     <AntdApp>
-      <ProxiesListPage canWrite={canWrite} />
+      <ProxiesListPage canWrite={canWrite} groupIds={[groupId]} api={proxyApi()} />
     </AntdApp>,
   )
 }
@@ -34,7 +89,7 @@ describe("ProxiesListPage", () => {
     expect(screen.getByRole("columnheader", { name: "绑定数量" })).toBeVisible()
     expect(screen.getByText("10.0.0.5:8080")).toBeVisible()
     expect(screen.getByText("备用线路")).toBeVisible()
-    expect(screen.getByText("剩余动态流量：12.60 GB")).toBeVisible()
+    expect(screen.getByText("剩余动态流量：0 GB")).toBeVisible()
     expect(screen.queryByText("proxy-east-secret")).not.toBeInTheDocument()
     expect(screen.queryByText("proxy-backup-secret")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "新建代理" })).not.toBeInTheDocument()
@@ -79,8 +134,8 @@ describe("ProxiesListPage", () => {
     await user.type(within(dialog).getByLabelText("备注"), "备用线路-改")
     await user.click(within(dialog).getByRole("button", { name: "确认" }))
 
+    expect(await screen.findByText("修改成功")).toBeVisible()
     expect(await screen.findByText("备用线路-改")).toBeVisible()
-    expect(screen.getByText("修改成功")).toBeVisible()
   })
 
   it("opens FAQ and locally detects a seed proxy", async () => {

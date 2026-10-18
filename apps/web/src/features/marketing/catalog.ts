@@ -118,7 +118,13 @@ export const createSeedSales = (): SalesRow[] => []
 
 export const createSeedOps = (): OpsRow[] => []
 
-const TRENDS: Record<TrendRange, TrendPoint[]> = { day: [], week: [], month: [], quarter: [], year: [] }
+const TRENDS: Record<TrendRange, TrendPoint[]> = {
+  day: [],
+  week: [],
+  month: [],
+  quarter: [],
+  year: [],
+}
 
 export const trendSeries = (range: TrendRange): TrendPoint[] => TRENDS[range]
 

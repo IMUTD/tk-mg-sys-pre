@@ -31,6 +31,7 @@ import { registerTaskExecutionRoutes } from "./modules/task-execution/routes"
 import type { TaskExecutionService } from "./modules/task-execution/service"
 
 type AppOptions = {
+  readonly authCookieSecure?: boolean
   readonly auditExplorerRepository?: AuditExplorerRepository
   readonly auditRepository?: AuditRepository
   readonly authService?: AuthService
@@ -55,7 +56,7 @@ export const createApp = (options: AppOptions = {}): Hono => {
   app.get("/health", (context) => context.json({ status: "ok" }))
 
   if (options.authService !== undefined && options.auditRepository !== undefined) {
-    registerAuthRoutes(app, options.authService)
+    registerAuthRoutes(app, options.authService, options.authCookieSecure ?? true)
     registerFoundationAccessRoutes(
       app,
       options.authService,

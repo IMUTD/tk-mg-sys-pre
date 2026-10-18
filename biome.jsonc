@@ -1,5 +1,6 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.13/schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "linter": {
     "enabled": true,
@@ -45,7 +46,9 @@
       "!**/.superpowers",
       "!**/coverage",
       "!**/dist",
-      "!**/node_modules"
+      "!**/node_modules",
+      // Preserve the external browser-player bundle, including its minified SDKs.
+      "!apps/web/public/webplayer"
     ]
   }
 }

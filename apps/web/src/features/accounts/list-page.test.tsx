@@ -1,10 +1,16 @@
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
-import { afterEach, describe, expect, it, vi } from "vitest"
-
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AntdApp } from "../../app/antd-app"
+import { mockLabelCatalog } from "../labels/catalog.test-fixtures"
 import { AccountsListPage } from "./list-page"
+import * as fixturesSource from "./myt-account"
+import {
+  createTestAccountDevices,
+  createTestAccountProxies,
+  createTestAccounts,
+} from "./myt-account.test-fixtures"
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -117,3 +123,11 @@ describe("AccountsListPage", () => {
     expect(screen.getByRole("columnheader", { name: "封号率" })).toBeInTheDocument()
   })
 }, 30_000)
+
+beforeEach(() => {
+  vi.spyOn(fixturesSource, "createSeedAccounts").mockImplementation(createTestAccounts)
+  vi.spyOn(fixturesSource, "createSeedAccountDevices").mockImplementation(createTestAccountDevices)
+  vi.spyOn(fixturesSource, "createSeedAccountProxies").mockImplementation(createTestAccountProxies)
+})
+
+beforeEach(mockLabelCatalog)

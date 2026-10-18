@@ -2,13 +2,25 @@ import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { MemoryRouter } from "react-router-dom"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import { AntdApp } from "../../app/antd-app"
+import {
+  createOrderFixtures,
+  createPointFixtures,
+  createProductFixtures,
+} from "./catalog.test-fixtures"
 import { MallInvoicesPage } from "./invoices-page"
 import { MallOrdersPage } from "./orders-page"
 import { MallRecordsPage } from "./records-page"
 import { MallRedeemPage } from "./redeem-page"
+
+vi.mock(import("./catalog"), async (importOriginal) => ({
+  ...(await importOriginal()),
+  createSeedOrders: () => createOrderFixtures(),
+  createSeedPoints: () => createPointFixtures(),
+  createSeedProducts: () => createProductFixtures(),
+}))
 
 const wrap = (page: ReactElement): void => {
   render(

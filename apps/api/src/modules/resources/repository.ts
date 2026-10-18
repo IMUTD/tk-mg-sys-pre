@@ -142,7 +142,9 @@ export const createPostgresResourceRepository = (client: Sql): ResourceRepositor
           `
         }
       }
-      const current = await transaction<{ readonly id: string; readonly tags: readonly string[] }[]>`
+      const current = await transaction<
+        { readonly id: string; readonly tags: readonly string[] }[]
+      >`
         select id, tags from operation_resource
         where group_id = ${groupId} and id = any(${ids})
         for update

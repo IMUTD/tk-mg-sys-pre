@@ -4,11 +4,14 @@ export type GuardCode = (typeof guardOrder)[number]
 
 const nodeProbe = { input: { timeout: "3000", useNewMode: "true" }, skill: "DumpNodeXmlEx" }
 
-export const guardCatalog: Record<GuardCode, {
-  readonly label: string
-  readonly marker: string
-  readonly probe: { readonly input: Record<string, string>; readonly skill: string }
-}> = {
+export const guardCatalog: Record<
+  GuardCode,
+  {
+    readonly label: string
+    readonly marker: string
+    readonly probe: { readonly input: Record<string, string>; readonly skill: string }
+  }
+> = {
   ad: { label: "广告通过", marker: "Settings", probe: nodeProbe },
   transcode: { label: "转码通过", marker: "Apps", probe: nodeProbe },
 }

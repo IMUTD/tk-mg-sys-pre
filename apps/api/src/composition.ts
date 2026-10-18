@@ -16,11 +16,11 @@ import { createPostgresAuditRepository } from "./modules/audit/service"
 import { createPostgresAuthRepository } from "./modules/auth/postgres-repository"
 import { createAuthService } from "./modules/auth/service"
 import { registerBoxLink } from "./modules/box-link"
-import { registerDispatchRoutes } from "./modules/dispatch/routes"
 import { createPostgresDeviceCommandRepository } from "./modules/device-commands/postgres-repository"
 import { createDeviceCommandService } from "./modules/device-commands/service"
 import { createPostgresDeviceRepository } from "./modules/devices/postgres-repository"
 import { createDeviceService } from "./modules/devices/service"
+import { registerDispatchRoutes } from "./modules/dispatch/routes"
 import { createPostgresPagePermissionRepository } from "./modules/members/page-permission-repository"
 import { createPostgresMemberRepository } from "./modules/members/repository"
 import { createMemberService } from "./modules/members/service"
@@ -39,6 +39,7 @@ import { createPostgresExecutionTaskRepository } from "./modules/task-execution/
 import { createTaskExecutionService } from "./modules/task-execution/service"
 
 export type ProductionAppConfig = {
+  readonly authCookieSecure?: boolean
   readonly databaseUrl: string
   readonly redisUrl: string
   readonly secretEncryptionKey: string
@@ -123,6 +124,7 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
   })
 
   const app = createApp({
+    authCookieSecure: config.authCookieSecure ?? true,
     auditRepository,
     auditExplorerRepository: auditRepository,
     accessGroupRepository: memberRepository,

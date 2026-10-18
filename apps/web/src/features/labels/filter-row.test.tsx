@@ -29,7 +29,7 @@ describe("classification rows", () => {
     fireEvent.click(screen.getByRole("button", { name: /第一组/ }))
     expect(change).toHaveBeenLastCalledWith([])
     change.mockClear()
-    fireEvent.click(screen.getByLabelText(/^close$/i))
+    fireEvent.click(screen.getByLabelText(/^(?:close|关闭)$/i))
     expect(remove).toHaveBeenCalledWith("one")
     expect(change).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: "全部" }))
@@ -127,7 +127,9 @@ describe("classification rows", () => {
     expect(
       within(rows[0] as HTMLElement).getByRole("button", { name: "共享分组(2)" }),
     ).toBeVisible()
-    expect(within(rows[0] as HTMLElement).queryByLabelText(/^close$/i)).not.toBeInTheDocument()
+    expect(
+      within(rows[0] as HTMLElement).queryByLabelText(/^(?:close|关闭)$/i),
+    ).not.toBeInTheDocument()
     expect(within(rows[2] as HTMLElement).getByRole("button", { name: "代理专用" })).toBeVisible()
     expect(
       within(rows[2] as HTMLElement).queryByRole("button", { name: /共享分组/ }),
@@ -167,7 +169,7 @@ describe("classification rows", () => {
       </AntdApp>,
     )
     expect(await screen.findByRole("button", { name: "只读分类" })).toBeVisible()
-    expect(screen.queryByLabelText(/^close$/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^(?:close|关闭)$/i)).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "添加分组" })).not.toBeInTheDocument()
   })
   it("maps references to their object domain and rejects a mixed or mismatched catalog", async () => {
@@ -221,7 +223,7 @@ describe("classification rows", () => {
       </AntdApp>,
     )
     expect(await screen.findByRole("button", { name: "测试(50)" })).toBeVisible()
-    expect(screen.getByLabelText(/^close$/i)).toBeVisible()
+    expect(await screen.findByLabelText(/^(?:close|关闭)$/i)).toBeVisible()
   })
 
   it("puts an unassigned chip ahead of catalog chips and keeps it exclusive", () => {

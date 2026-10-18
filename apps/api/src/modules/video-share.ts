@@ -19,7 +19,8 @@ const printfArg = (value: string): string => {
   return `$(printf '${out}')`
 }
 
-export const isSharedVideoSkill = (skill: string): boolean => skill === copySkill || skill === moveSkill
+export const isSharedVideoSkill = (skill: string): boolean =>
+  skill === copySkill || skill === moveSkill
 
 export const isCatalogPullSkill = (skill: string): boolean =>
   skill === videoPull || skill === imagePull || skill === backupPull
@@ -45,7 +46,8 @@ export const stageShareReady = (input: Record<string, string> | null | undefined
   const bucket = raw.slice(0, slash)
   const relative = raw.slice(slash + 1)
   const parsed = splitRelative(relative)
-  if (!isBucket(bucket) || parsed === null || pullSkillFor(bucket, parsed.name) === null) return false
+  if (!isBucket(bucket) || parsed === null || pullSkillFor(bucket, parsed.name) === null)
+    return false
   return hostOk((input?.["源主机"] ?? "").trim())
 }
 
@@ -84,7 +86,11 @@ export const stageShareAction = (input: {
   if (input.sourceHost === input.localHost) return { action: "pull", path: input.path, skill }
   if (!/^[0-9a-f]{64}$/.test(input.sourceSha)) return { action: "fail" }
   if (input.localSha === input.sourceSha) return { action: "pull", path: input.path, skill }
-  if (input.moveStatus === "failed" || input.moveStatus === "cancelled" || input.moveStatus === "succeeded") {
+  if (
+    input.moveStatus === "failed" ||
+    input.moveStatus === "cancelled" ||
+    input.moveStatus === "succeeded"
+  ) {
     return { action: "fail" }
   }
   const targetDirectory = parsed.parent
@@ -98,7 +104,8 @@ export const stageShareAction = (input: {
   }
 }
 
-const hostOk = (value: string): boolean => value.length > 0 && value.length <= 80 && /^[0-9A-Za-z.:-]+$/.test(value)
+const hostOk = (value: string): boolean =>
+  value.length > 0 && value.length <= 80 && /^[0-9A-Za-z.:-]+$/.test(value)
 
 // Behavior-center transfer uses the same catalog path as the pull skills, plus the target box host.
 export const transferShareReady = (input: Record<string, string> | null | undefined): boolean => {
@@ -109,7 +116,11 @@ export const transferShareReady = (input: Record<string, string> | null | undefi
   const relative = raw.slice(slash + 1)
   const parsed = splitRelative(relative)
   if (!isBucket(bucket) || parsed === null) return false
-  if (bucket !== "backup" && fileCategory(parsed.name) !== "video" && fileCategory(parsed.name) !== "image")
+  if (
+    bucket !== "backup" &&
+    fileCategory(parsed.name) !== "video" &&
+    fileCategory(parsed.name) !== "image"
+  )
     return false
   if (!hostOk((input?.["目标主机"] ?? "").trim())) return false
   return directoryOk((input?.["目标目录"] ?? "").trim())
@@ -139,12 +150,17 @@ export const sharedPullCommand = (
   if (skill === backupPull && bucket !== "backup") return null
   if (skill !== backupPull && bucket === "backup") return null
   const source =
-    skill === backupPull ? `/dev/hmg/share/.pull/${quotedPath(parsed.name)}` : `/dev/hmg/${bucket}/${quotedPath(relative)}`
+    skill === backupPull
+      ? `/dev/hmg/share/.pull/${quotedPath(parsed.name)}`
+      : `/dev/hmg/${bucket}/${quotedPath(relative)}`
   return `cp "${source}" "${pullDestination(skill)}/${quotedPath(parsed.name)}" 2>&1; echo EXIT:$?`
 }
 
 // The folder and file names are passed as printf hex so DoCmd's URL does not corrupt Chinese.
-export const sharedVideoCommand = (skill: string, input: Record<string, string> | null | undefined): string | null => {
+export const sharedVideoCommand = (
+  skill: string,
+  input: Record<string, string> | null | undefined,
+): string | null => {
   const mode = skill === moveSkill ? "mv" : skill === copySkill ? "cp" : ""
   if (mode === "") return null
   const folder = input?.["视频目录"] ?? ""
@@ -172,10 +188,17 @@ export const agentSkillStep = (
   }
   if (isCatalogPullSkill(kind)) {
     return {
-      input: { cmdline: sharedPullCommand(kind, parameters) ?? "echo invalid share path; echo EXIT:1" },
+      input: {
+        cmdline: sharedPullCommand(kind, parameters) ?? "echo invalid share path; echo EXIT:1",
+      },
       skill: "DoCmd",
     }
   }
   if (!isSharedVideoSkill(kind)) return { input: parameters ?? {}, skill: kind }
-  return { input: { cmdline: sharedVideoCommand(kind, parameters) ?? "echo invalid video path; echo EXIT:1" }, skill: "DoCmd" }
+  return {
+    input: {
+      cmdline: sharedVideoCommand(kind, parameters) ?? "echo invalid video path; echo EXIT:1",
+    },
+    skill: "DoCmd",
+  }
 }

@@ -1,4 +1,17 @@
-import { App, Button, Collapse, Empty, Input, Modal, Select, Space, Table, Tabs, Tag, type TableColumnsType } from "antd"
+import {
+  App,
+  Button,
+  Collapse,
+  Empty,
+  Input,
+  Modal,
+  Select,
+  Space,
+  Table,
+  type TableColumnsType,
+  Tabs,
+  Tag,
+} from "antd"
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { filteredRowSelection } from "../../components/tables/filtered-selection"
@@ -60,7 +73,9 @@ const reportScan = (
     return
   }
   notify.success(
-    busy === 0 ? `已向 ${sent} 台盒子下发扫描` : `已向 ${sent} 台盒子下发扫描，另有 ${busy} 台正在扫描其他目录`,
+    busy === 0
+      ? `已向 ${sent} 台盒子下发扫描`
+      : `已向 ${sent} 台盒子下发扫描，另有 ${busy} 台正在扫描其他目录`,
   )
 }
 
@@ -185,7 +200,11 @@ export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): 
   const transfer = async (): Promise<void> => {
     setSending(true)
     const response = await fetch("/api/share-transfers", {
-      body: JSON.stringify({ fileIds: selected, targetDeviceId, targetDirectory: targetDirectory.trim() }),
+      body: JSON.stringify({
+        fileIds: selected,
+        targetDeviceId,
+        targetDirectory: targetDirectory.trim(),
+      }),
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       method: "POST",
@@ -196,7 +215,9 @@ export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): 
       return
     }
     message.success(
-      backup ? "转移任务已下发，对应盒子领到后会复制文件" : "转移任务已下发，对应盒子领到后会搬运文件",
+      backup
+        ? "转移任务已下发，对应盒子领到后会复制文件"
+        : "转移任务已下发，对应盒子领到后会搬运文件",
     )
     setOpen(false)
     setSelected([])
@@ -256,21 +277,24 @@ export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): 
                       dataSource={dir.files}
                       pagination={false}
                       rowKey="id"
-                      rowSelection={
-                        canTransfer
-                          ? filteredRowSelection({
+                      {...(canTransfer
+                        ? {
+                            rowSelection: filteredRowSelection({
                               onChange: (keys) => setSelected(keys.map(String)),
                               rowKey: "id",
                               rows: dir.files,
                               selectedKeys: selected,
-                            })
-                          : undefined
-                      }
+                            }),
+                          }
+                        : {})}
                       size="small"
                     />
                   ),
                   key: dir.path || "/",
-                  label: dir.path === "" ? `根目录（${dir.files.length}）` : `${dir.path}（${dir.files.length}）`,
+                  label:
+                    dir.path === ""
+                      ? `根目录（${dir.files.length}）`
+                      : `${dir.path}（${dir.files.length}）`,
                 }))}
               />
             ),
@@ -299,10 +323,13 @@ export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): 
         <Space direction="vertical" style={{ width: "100%" }}>
           <Select
             onChange={setTargetDeviceId}
-            options={boxes.map((box) => ({ label: `${box.name || box.host} ${box.host}`, value: box.deviceId }))}
+            options={boxes.map((box) => ({
+              label: `${box.name || box.host} ${box.host}`,
+              value: box.deviceId,
+            }))}
             placeholder="目标盒子"
             style={{ width: "100%" }}
-            value={targetDeviceId || undefined}
+            value={targetDeviceId || null}
           />
           <Input
             onChange={(event) => setTargetDirectory(event.target.value)}

@@ -1,16 +1,10 @@
 import { describe, expect, it } from "vitest"
-
-import {
-  applyConfigKey,
-  createSeedConfigs,
-  emptyConfig,
-  emptyConfigQuery,
-  filterConfigs,
-} from "./myt-config"
+import { applyConfigKey, emptyConfig, emptyConfigQuery, filterConfigs } from "./myt-config"
+import { createTestConfigs } from "./myt-config.test-fixtures"
 
 describe("myt-config", () => {
   it("filters seed configs by 云大师 query fields without exposing secrets in names", () => {
-    const configs = createSeedConfigs()
+    const configs = createTestConfigs()
     const byName = filterConfigs(configs, { ...emptyConfigQuery(), name: "冰拓" })
     const byKey = filterConfigs(configs, { ...emptyConfigQuery(), key: "minio_media" })
     const byUser = filterConfigs(configs, { ...emptyConfigQuery(), username: "proxy-admin" })

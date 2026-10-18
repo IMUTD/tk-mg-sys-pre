@@ -59,7 +59,11 @@ export const RemarkTags = ({
     )
   }
   const replace = (previous: string, next: string): void => {
-    onChange(joinRemarks(parts.flatMap((item) => (item === previous ? (next.length === 0 ? [] : [next]) : [item]))))
+    onChange(
+      joinRemarks(
+        parts.flatMap((item) => (item === previous ? (next.length === 0 ? [] : [next]) : [item])),
+      ),
+    )
   }
   const shown = parts.length === 0 ? [null] : parts
   return (
@@ -70,7 +74,9 @@ export const RemarkTags = ({
           emptyLabel={emptyLabel}
           key={name ?? "empty"}
           name={name}
-          onCommit={(next) => (name === null ? onChange(addRemarks(value, [next])) : replace(name, next))}
+          onCommit={(next) =>
+            name === null ? onChange(addRemarks(value, [next])) : replace(name, next)
+          }
           {...(name === null
             ? {}
             : { onRemove: () => replace(name, ""), removeLabel: removeLabel(name) })}
