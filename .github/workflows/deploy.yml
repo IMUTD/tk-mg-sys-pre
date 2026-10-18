@@ -117,7 +117,7 @@ jobs:
           github.event.pull_request.base.ref == 'main' && github.ref == 'refs/heads/main' &&
           needs.build.result == 'success' && vars.DEPLOY_ENABLED == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
     permissions:
       contents: read
       packages: read
@@ -169,6 +169,10 @@ jobs:
             if [ ! -f $DEPLOY_PATH/shared/.env ]; then
               WEB_PORT=$DEPLOY_WEB_PORT bash $release/infra/setup-deploy-env.sh $DEPLOY_PATH '$ADMIN_EMAIL'
             fi
-            timeout --signal=TERM --kill-after=30s 12m bash $release/infra/deploy.sh $DEPLOY_PATH sha-$COMMIT_SHA
+            export IMAGE_TAG=sha-$COMMIT_SHA
+            echo 'Downloading release images (up to 20 minutes; running services stay online)...'
+            timeout --signal=TERM --kill-after=30s 20m docker compose --env-file $DEPLOY_PATH/shared/.env -f $release/infra/compose.prod.yml --profile bootstrap pull
+            echo 'Images downloaded; starting the 12-minute activation window...'
+            timeout --signal=TERM --kill-after=30s 12m bash $release/infra/deploy.sh $DEPLOY_PATH sha-$COMMIT_SHA --preloaded
           "
           echo "Deployed sha-$COMMIT_SHA. Open http://$DEPLOY_HOST:$DEPLOY_WEB_PORT/login" >> "$GITHUB_STEP_SUMMARY"
