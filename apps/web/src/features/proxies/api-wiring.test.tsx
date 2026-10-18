@@ -7,6 +7,21 @@ import { ProxiesListPage } from "./list-page"
 import { emptyProxy } from "./myt-proxy"
 
 const groupId = "11111111-1111-4111-8111-111111111111"
+
+const section = (root: ParentNode, selector: string) => {
+  const element = root.querySelector(selector)
+  if (!(element instanceof HTMLElement)) throw new Error(`Missing section: ${selector}`)
+  expect(element).toBeVisible()
+  return within(element)
+}
+
+const proxyRow = (remark: string) => {
+  const row = screen.getByText(remark, { exact: true }).closest("tr")
+  if (row === null) throw new Error(`Missing proxy row: ${remark}`)
+  expect(row).toBeVisible()
+  return within(row)
+}
+
 beforeEach(() => {
   vi.stubGlobal(
     "fetch",
@@ -93,7 +108,7 @@ it("persists HTTP acceleration and displays server-supplied IP lookup details", 
     </AntdApp>,
   )
   await screen.findByText("HTTP fixture")
-  await user.click(screen.getByRole("button", { name: "编辑" }))
+  await user.click(proxyRow("HTTP fixture").getByRole("button", { name: "编辑" }))
   const form = await screen.findByRole("dialog")
   await waitFor(() => expect(within(form).getByText("修改代理")).toBeVisible())
   expect(within(form).queryByText("节流")).not.toBeInTheDocument()
@@ -103,14 +118,14 @@ it("persists HTTP acceleration and displays server-supplied IP lookup details", 
   expect(within(form).queryByLabelText("分组")).not.toBeInTheDocument()
   expect(within(form).queryByLabelText("有效期")).not.toBeInTheDocument()
   expect(within(form).queryByLabelText("刷新URL")).not.toBeInTheDocument()
-  await user.click(within(form).getByRole("button", { name: "确认" }))
+  await user.click(section(form, ".dialog-footer").getByRole("button", { name: "确认" }))
   expect(save).toHaveBeenCalledWith(
     expect.objectContaining({ type: "1", turbo: false }),
     expect.any(Array),
     true,
   )
   await waitFor(() => expect(form).not.toBeVisible())
-  await user.click(screen.getByRole("button", { name: "检测" }))
+  await user.click(proxyRow("HTTP fixture").getByRole("button", { name: "检测" }))
   const resultDialog = await screen.findByRole("dialog")
   await waitFor(() => expect(within(resultDialog).getByText("IP")).toBeVisible())
   expect(within(resultDialog).getByText("归属")).toBeVisible()
@@ -164,24 +179,35 @@ it("looks up a newly created proxy immediately without repeating lookup on edits
       <ProxiesListPage canWrite groupIds={[groupId]} api={api} />
     </AntdApp>,
   )
-  await user.click(await screen.findByRole("button", { name: "新增" }))
+  await user.click(
+    await section(document, ".resource-crud-toolbar").findByRole("button", { name: "新增" }),
+  )
   const form = await screen.findByRole("dialog")
   await waitFor(() => expect(within(form).getByText("新增代理")).toBeVisible())
   await user.click(within(form).getByText("HTTP", { exact: true }))
-  await waitFor(() => expect(within(form).getByRole("radio", { name: /^HTTP$/ })).toBeChecked())
-  await user.type(within(form).getByLabelText("IP", { exact: true }), "8.8.8.8")
-  await user.type(within(form).getByLabelText("端口", { exact: true }), "8080")
-  await user.type(within(form).getByLabelText("备注", { exact: true }), "Auto lookup")
-  await user.click(within(form).getByRole("button", { name: "确认" }))
+  await waitFor(() => expect(within(form).getByLabelText("HTTP", { exact: true })).toBeChecked())
+  await user.click(within(form).getByLabelText("IP", { exact: true }))
+  await user.paste("8.8.8.8")
+  await user.click(within(form).getByLabelText("端口", { exact: true }))
+  await user.paste("8080")
+  await user.click(within(form).getByLabelText("备注", { exact: true }))
+  await user.paste("Auto lookup")
+  await user.click(section(form, ".dialog-footer").getByRole("button", { name: "确认" }))
   await waitFor(() => expect(detect).toHaveBeenCalledTimes(1))
+  expect(save).toHaveBeenNthCalledWith(
+    1,
+    expect.objectContaining({ type: "1", ip: "8.8.8.8", port: "8080", remark: "Auto lookup" }),
+    expect.any(Array),
+    true,
+  )
   expect(detect).toHaveBeenCalledWith(
     expect.objectContaining({ uuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ip: "8.8.8.8" }),
     { channel: "cn", mode: "detailed", useTurbo: false },
   )
-  await screen.findByText("Auto lookup")
-  await user.click(screen.getByRole("button", { name: "编辑" }))
+  expect(await screen.findByText("Auto lookup")).toBeVisible()
+  await user.click(proxyRow("Auto lookup").getByRole("button", { name: "编辑" }))
   const editor = await screen.findByRole("dialog")
-  await user.click(within(editor).getByRole("button", { name: "确认" }))
+  await user.click(section(editor, ".dialog-footer").getByRole("button", { name: "确认" }))
   await waitFor(() => expect(save).toHaveBeenCalledTimes(2))
   expect(detect).toHaveBeenCalledTimes(1)
 })
