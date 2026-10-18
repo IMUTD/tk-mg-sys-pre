@@ -168,13 +168,15 @@ test("scoped categories persist, reuse the right objects and isolate administrat
     for (const hidden of Object.values(names).filter((name) => name !== names.device))
       await expect(page.getByRole("option", { name: hidden, exact: true })).toHaveCount(0)
     await boxGroup.click()
-    await expect(task.getByText(names.device, { exact: true })).toBeVisible()
     const boxSelector = task.locator(".ant-select").filter({
       has: page.getByRole("combobox", { name: "盒子范围", exact: true }),
     })
+    const selectedBoxGroup = boxSelector.getByTitle(names.device, { exact: true })
+    await expect(selectedBoxGroup).toBeVisible()
     await boxSelector.hover()
     await boxSelector.locator(".ant-select-clear").click()
-    await expect(task.getByText(names.device, { exact: true })).toHaveCount(0)
+    await expect(selectedBoxGroup).toHaveCount(0)
+    await expect(boxSelector.getByText("不选则用账号上一次的盒子", { exact: true })).toBeVisible()
     await task.getByRole("button", { name: "取消", exact: true }).click()
     const other = await browser.newContext({
       baseURL: test.info().project.use.baseURL,
