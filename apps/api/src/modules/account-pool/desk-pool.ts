@@ -161,7 +161,7 @@ const labelsFor = async (
 
 export const prepareDeskPool = async (
   sql: QuerySql,
-  cipher: SecretCipher | undefined,
+  _cipher: SecretCipher | undefined,
   groupId: string,
   input: unknown,
 ): Promise<{ key: string; query: DeskPoolQuery }> => {
