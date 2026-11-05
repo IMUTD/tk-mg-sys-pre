@@ -26,6 +26,7 @@ import { DeviceControlPage } from "../features/devices/control-page"
 import { DeviceCreatePage } from "../features/devices/create-page"
 import { DeviceListPage } from "../features/devices/list-page"
 import { DevicePreviewPage } from "../features/devices/preview-page"
+import { IdentityPlatformRoute, IdentitySelfRoute } from "../features/identity-verification/route"
 import { MallInvoicesPage } from "../features/mall/invoices-page"
 import { MallOrdersPage } from "../features/mall/orders-page"
 import { MallRecordsPage } from "../features/mall/records-page"
@@ -263,6 +264,8 @@ const guarded = (page: string, element: ReactNode): ReactNode => (
 const AuthenticatedRoutes = (): ReactNode => (
   <Routes>
     <Route element={<ProtectedLayout />}>
+      <Route path="/identity-verification" element={<IdentitySelfRoute />} />
+      <Route path="/identity-verifications" element={<IdentityPlatformRoute />} />
       <Route index element={<Navigate replace to="/overview" />} />
       <Route path="/overview" element={guarded(PageKey.Overview, <OverviewPage />)} />
       <Route path="/mall" element={<Navigate replace to="/mall/records" />} />

@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AntdApp } from "../../app/antd-app"
-import { cloudDevice, mockBehaviorApi } from "./behavior-api.test-fixtures"
+import { behaviorRequests, cloudDevice, mockBehaviorApi } from "./behavior-api.test-fixtures"
 import { getChains, resetChains } from "./chain-store"
 import { BehaviorsPage } from "./page"
 import { testOnDevice } from "./rpa-api"
@@ -61,26 +61,25 @@ describe("BehaviorsPage", () => {
     expect(await screen.findByText("云机测试 · 成功")).toBeVisible()
     expect(screen.getByRole("heading", { name: "OpenApp · 成功" })).toBeVisible()
     expect(screen.getByText("执行完成")).toBeVisible()
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/tasks",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          deviceId: cloudDevice.deviceId,
-          indexNum: 1,
-          steps: [
-            {
-              afterMs: 0,
-              guards: [],
-              input: { pkg: "com.zhiliaoapp.musically" },
-              scopes: { pkg: "internal" },
-              skill: "OpenApp",
-              sources: { pkg: "literal" },
-            },
-          ],
-        }),
-      }),
+    const request = behaviorRequests.find(
+      (item) => item.path === "/api/tasks" && item.method === "POST",
     )
+    if (request === undefined) throw new Error("Missing task HTTP request")
+    expect(JSON.parse(request.body)).toEqual({
+      chainName: "早班养号",
+      deviceId: cloudDevice.deviceId,
+      indexNum: 1,
+      steps: [
+        {
+          afterMs: 0,
+          guards: [],
+          input: { pkg: "com.zhiliaoapp.musically" },
+          scopes: { pkg: "internal" },
+          skill: "OpenApp",
+          sources: { pkg: "literal" },
+        },
+      ],
+    })
   })
 
   it("lets AI draft a chain and save it after a successful test", async () => {

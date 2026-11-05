@@ -1,5 +1,6 @@
 import { Segmented } from "antd"
 import { type ReactNode, useEffect, useRef, useState } from "react"
+import { apiFetch } from "../../lib/api/api-fetch"
 
 import { AiStudio } from "./ai-studio"
 import { ApiLab } from "./api-lab"
@@ -110,31 +111,34 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
 
   useEffect(() => {
     let stop = false
-    void fetch("/api/skills", { credentials: "same-origin" }).then(async (response) => {
+    void apiFetch("/api/skills", { credentials: "same-origin" }).then(async (response) => {
       if (!response.ok || stop) return
       const rows = (await response.json()) as SkillSpec[]
       if (!Array.isArray(rows) || rows.length === 0 || stop) return
       setSkillCatalog(rows)
       setSkills(rows)
     })
-    void fetch("/api/behavior-anchors", { credentials: "same-origin" }).then(async (response) => {
-      if (!response.ok || stop) return
-      const body = (await response.json()) as {
-        anchors?: ReadonlyArray<{ fields?: AnchorField[]; keys?: AnchorKey[] }>
-      }
-      const fields = body.anchors?.[0]?.fields
-      const keys = body.anchors?.[0]?.keys?.filter(
-        (item) => (item.key === "id" || item.key === "identifier") && item.label.trim().length > 0,
-      )
-      if (stop) return
-      if (Array.isArray(fields) && fields.length > 0) {
-        setAnchorFields(fields)
-        setFields(fields)
-      }
-      if (keys !== undefined && keys.length > 0) setKeys(keys)
-    })
+    void apiFetch("/api/behavior-anchors", { credentials: "same-origin" }).then(
+      async (response) => {
+        if (!response.ok || stop) return
+        const body = (await response.json()) as {
+          anchors?: ReadonlyArray<{ fields?: AnchorField[]; keys?: AnchorKey[] }>
+        }
+        const fields = body.anchors?.[0]?.fields
+        const keys = body.anchors?.[0]?.keys?.filter(
+          (item) =>
+            (item.key === "id" || item.key === "identifier") && item.label.trim().length > 0,
+        )
+        if (stop) return
+        if (Array.isArray(fields) && fields.length > 0) {
+          setAnchorFields(fields)
+          setFields(fields)
+        }
+        if (keys !== undefined && keys.length > 0) setKeys(keys)
+      },
+    )
     const load = async () => {
-      const response = await fetch("/api/devices", { credentials: "same-origin" })
+      const response = await apiFetch("/api/devices", { credentials: "same-origin" })
       if (!response.ok || stop) return
       const rows = (await response.json()) as ReadonlyArray<{
         externalId: string
@@ -145,7 +149,7 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
       }>
       const next: CloudBox[] = []
       for (const [offset, row] of rows.entries()) {
-        const slots = await fetch(`/api/devices/${row.id}/slots`, { credentials: "same-origin" })
+        const slots = await apiFetch(`/api/devices/${row.id}/slots`, { credentials: "same-origin" })
         const list = slots.ok
           ? ((await slots.json()) as ReadonlyArray<{
               height?: number | string | null
@@ -187,7 +191,7 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
     let stop = false
     let timer = 0
     const tick = async (): Promise<void> => {
-      const response = await fetch(`/api/tasks/${taskId}`, { credentials: "same-origin" })
+      const response = await apiFetch(`/api/tasks/${taskId}`, { credentials: "same-origin" })
       if (stop) return
       if (!response.ok) {
         setWaiting(false)
@@ -340,7 +344,7 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
     }
     try {
       const chain = chainName?.trim() ?? ""
-      const response = await fetch("/api/tasks", {
+      const response = await apiFetch("/api/tasks", {
         body: JSON.stringify({
           deviceId: selected.deviceId,
           indexNum: selected.indexNum,

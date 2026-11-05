@@ -24,7 +24,10 @@ export const AccountMenu = ({ children, user }: AccountMenuProps): ReactNode => 
   const [profileOpen, setProfileOpen] = useState(false)
 
   const logout = async (): Promise<void> => {
+    await queryClient.cancelQueries()
     await api.logout()
+    await queryClient.cancelQueries()
+    queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== "auth" })
     queryClient.setQueryData(["auth", "session"], { kind: "unauthenticated" })
     await navigate("/login", { replace: true })
   }

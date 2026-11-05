@@ -610,6 +610,13 @@
       "when": 1798540800000,
       "tag": "0086_app_user_customer",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1798627200000,
+      "tag": "0087_admin_identity_verification",
+      "breakpoints": true
     }
   ]
 }

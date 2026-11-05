@@ -14,6 +14,7 @@ import {
 } from "antd"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
+import { apiFetch } from "../../lib/api/api-fetch"
 
 import {
   daysLeft,
@@ -112,7 +113,7 @@ export const BoxServicePage = () => {
   const confirming = useRef("")
 
   const load = useCallback(async () => {
-    const response = await fetch("/api/box-service", { credentials: "include" })
+    const response = await apiFetch("/api/box-service", { credentials: "include" })
     if (!response.ok) {
       setError(await readError(response))
       return
@@ -132,7 +133,7 @@ export const BoxServicePage = () => {
       setNotice({ text: "正在确认支付结果…", type: "info" })
       for (let attempt = 0; attempt < confirmAttempts; attempt += 1) {
         if (attempt > 0) await wait(confirmIntervalMs)
-        const response = await fetch("/api/box-service/orders/reconcile", {
+        const response = await apiFetch("/api/box-service/orders/reconcile", {
           body: JSON.stringify({ outTradeNo }),
           credentials: "include",
           headers: { "content-type": "application/json" },
@@ -209,7 +210,7 @@ export const BoxServicePage = () => {
     if (renewing === null || plan === undefined) return
     setPaying(true)
     setError("")
-    const response = await fetch("/api/box-service/orders", {
+    const response = await apiFetch("/api/box-service/orders", {
       body: JSON.stringify({ externalId: renewing.externalId, months: plan.months }),
       credentials: "include",
       headers: { "content-type": "application/json" },

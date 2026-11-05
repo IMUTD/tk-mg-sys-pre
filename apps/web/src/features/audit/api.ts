@@ -1,5 +1,6 @@
 import ky from "ky"
 import { z } from "zod"
+import { apiFetch } from "../../lib/api/api-fetch"
 
 import { resolveApiBaseUrl } from "../../lib/api/auth-api"
 
@@ -37,6 +38,7 @@ export interface AuditApi {
 
 export const createAuditApi = (apiBaseUrl = "/api"): AuditApi => {
   const client = ky.create({
+    fetch: apiFetch,
     credentials: "include",
     prefixUrl: resolveApiBaseUrl(apiBaseUrl, window.location.href),
     retry: 0,

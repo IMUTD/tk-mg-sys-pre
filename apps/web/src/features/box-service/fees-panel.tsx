@@ -1,5 +1,6 @@
 import { Button, Input, Space, Statistic, Table, Typography } from "antd"
 import { useCallback, useEffect, useState } from "react"
+import { apiFetch } from "../../lib/api/api-fetch"
 
 type FeeRow = {
   readonly amount: string
@@ -52,7 +53,7 @@ export const BoxFeesPanel = () => {
     if (applied.from !== "") params.set("from", applied.from)
     if (applied.to !== "") params.set("to", applied.to)
     if (applied.keyword !== "") params.set("q", applied.keyword)
-    const response = await fetch(`/api/box-service/fees?${params.toString()}`, {
+    const response = await apiFetch(`/api/box-service/fees?${params.toString()}`, {
       credentials: "include",
     })
     setLoading(false)

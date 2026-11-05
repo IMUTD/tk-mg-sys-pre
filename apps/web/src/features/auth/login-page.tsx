@@ -43,9 +43,12 @@ export const LoginPage = (): ReactNode => {
         password: values.password,
       })
       setValidationMessage(null)
+      await queryClient.cancelQueries({ queryKey: ["auth", "session"] })
       const result = await api.login(input)
       switch (result.kind) {
         case "authenticated":
+          await queryClient.cancelQueries()
+          queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== "auth" })
           if (values.autoLogin === false) {
             clearRememberedLogin()
           } else {

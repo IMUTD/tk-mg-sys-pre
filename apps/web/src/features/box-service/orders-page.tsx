@@ -13,6 +13,7 @@ import {
   Typography,
 } from "antd"
 import { useCallback, useEffect, useState } from "react"
+import { apiFetch } from "../../lib/api/api-fetch"
 
 import { BoxFeesPanel } from "./fees-panel"
 
@@ -117,7 +118,7 @@ const BoxOrdersPanel = () => {
     if (applied.from !== "") params.set("from", applied.from)
     if (applied.to !== "") params.set("to", applied.to)
     if (applied.keyword !== "") params.set("q", applied.keyword)
-    const response = await fetch(`/api/box-service/orders?${params.toString()}`, {
+    const response = await apiFetch(`/api/box-service/orders?${params.toString()}`, {
       credentials: "include",
     })
     setLoading(false)
@@ -141,7 +142,7 @@ const BoxOrdersPanel = () => {
   const reconcile = async (outTradeNo: string) => {
     setReconciling(outTradeNo)
     setError("")
-    const response = await fetch("/api/box-service/orders/reconcile", {
+    const response = await apiFetch("/api/box-service/orders/reconcile", {
       body: JSON.stringify({ outTradeNo }),
       credentials: "include",
       headers: { "content-type": "application/json" },
@@ -164,7 +165,7 @@ const BoxOrdersPanel = () => {
   const refund = async () => {
     if (refunding === null) return
     setRefundSending(true)
-    const response = await fetch(
+    const response = await apiFetch(
       `/api/box-service/orders/${encodeURIComponent(refunding.outTradeNo)}/refund`,
       {
         body: JSON.stringify({ reason: refundReason.trim() }),

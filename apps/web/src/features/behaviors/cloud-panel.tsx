@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { apiFetch } from "../../lib/api/api-fetch"
 
 import type { CloudBox, CloudDevice } from "./rpa-api"
 import { type DevicePoint, devicePointFromEvent, type ScreenRect } from "./screen-map"
@@ -207,13 +208,13 @@ export const CloudPanel = ({
     let stop = false
     let current = ""
     const tick = async (): Promise<void> => {
-      await fetch(`/api/devices/${deviceId}/watch`, {
+      await apiFetch(`/api/devices/${deviceId}/watch`, {
         body: JSON.stringify({ indexNums: [index] }),
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
         method: "POST",
       })
-      const frame = await fetch(`/api/frames?deviceId=${deviceId}&index=${index}`, {
+      const frame = await apiFetch(`/api/frames?deviceId=${deviceId}&index=${index}`, {
         credentials: "same-origin",
       })
       if (stop || !frame.ok || frame.status === 204) return

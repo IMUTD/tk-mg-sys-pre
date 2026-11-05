@@ -1,5 +1,6 @@
 import ky from "ky"
 import { z } from "zod"
+import { apiFetch } from "../../lib/api/api-fetch"
 
 import { resolveApiBaseUrl } from "../../lib/api/auth-api"
 import type { TkRegResource } from "./tk-reg-resource"
@@ -21,6 +22,7 @@ const ItemsSchema = z.object({ items: z.array(ItemSchema) })
 
 const client = () =>
   ky.create({
+    fetch: apiFetch,
     credentials: "include",
     prefixUrl: resolveApiBaseUrl("/api", window.location.href),
     retry: 0,

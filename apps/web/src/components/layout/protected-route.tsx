@@ -4,6 +4,7 @@ import { Navigate, useLocation } from "react-router-dom"
 
 import brandLogo from "../../assets/brand-logo.png"
 import { useAuth } from "../../features/auth/auth-provider"
+import { IdentityRequiredLayout } from "../../features/identity-verification/required-layout"
 import { assertNever } from "../../lib/assert-never"
 import { canViewScopedPage, firstAccessiblePath } from "../../lib/pages"
 import { AdminShell } from "./admin-shell"
@@ -41,6 +42,12 @@ export const ProtectedRoute = (): ReactNode => {
         </main>
       )
     case "authenticated":
+      if (
+        session.user.identity?.canAccessBusiness === false &&
+        location.pathname !== "/identity-verification"
+      )
+        return <Navigate replace to="/identity-verification" />
+      if (session.user.identity?.canAccessBusiness === false) return <IdentityRequiredLayout />
       return <AdminShell user={session.user} />
     case "unauthenticated":
       return <Navigate replace state={{ from: location.pathname }} to="/login" />

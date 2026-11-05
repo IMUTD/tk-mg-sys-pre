@@ -1,5 +1,6 @@
 import { Button, Card, Typography } from "antd"
 import { type ReactNode, useEffect, useState } from "react"
+import { apiFetch } from "../../lib/api/api-fetch"
 
 type LogItem = {
   readonly at: string
@@ -17,7 +18,7 @@ export const OperationLogCard = (): ReactNode => {
     let after = 0
     let stop = false
     const pull = async () => {
-      const response = await fetch(`/api/operation-logs?after=${after}`, {
+      const response = await apiFetch(`/api/operation-logs?after=${after}`, {
         credentials: "same-origin",
       })
       if (!response.ok) return

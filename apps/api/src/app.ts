@@ -1,4 +1,5 @@
 import { Hono } from "hono"
+import { registerIdentityGate } from "./modules/access/identity-gate"
 import { registerFoundationAccessRoutes } from "./modules/access/routes"
 import { registerPoolRoutes } from "./modules/account-pool/pool-routes"
 import type { PoolService } from "./modules/account-pool/pool-service"
@@ -8,12 +9,15 @@ import { registerAccountRoutes } from "./modules/accounts/routes"
 import type { AccountService } from "./modules/accounts/service"
 import { registerAuditRoutes } from "./modules/audit/routes"
 import type { AuditExplorerRepository, AuditRepository } from "./modules/audit/service"
+import { withIdentityAccess } from "./modules/auth/identity-session"
 import { registerAuthRoutes } from "./modules/auth/routes"
 import type { AuthService } from "./modules/auth/service"
 import { registerDeviceCommandRoutes } from "./modules/device-commands/routes"
 import type { DeviceCommandService } from "./modules/device-commands/service"
 import { registerDeviceRoutes } from "./modules/devices/routes"
 import type { DeviceService } from "./modules/devices/service"
+import { registerIdentityRoutes } from "./modules/identity-verification/routes"
+import type { IdentityService } from "./modules/identity-verification/types"
 import { registerMallRoutes } from "./modules/mall/routes"
 import type { MallService } from "./modules/mall/service"
 import type { MemberRepository } from "./modules/members/repository"
@@ -31,6 +35,7 @@ import { registerTaskExecutionRoutes } from "./modules/task-execution/routes"
 import type { TaskExecutionService } from "./modules/task-execution/service"
 
 type AppOptions = {
+  readonly identityService?: IdentityService
   readonly authCookieSecure?: boolean
   readonly auditExplorerRepository?: AuditExplorerRepository
   readonly auditRepository?: AuditRepository
@@ -56,88 +61,77 @@ export const createApp = (options: AppOptions = {}): Hono => {
   app.get("/health", (context) => context.json({ status: "ok" }))
 
   if (options.authService !== undefined && options.auditRepository !== undefined) {
-    registerAuthRoutes(app, options.authService, options.authCookieSecure ?? true)
+    const identityService = options.identityService
+    const authService =
+      identityService === undefined
+        ? options.authService
+        : withIdentityAccess(options.authService, (userId) => identityService.getAccess(userId))
+    if (options.identityService !== undefined) {
+      registerIdentityGate(app, authService)
+      registerIdentityRoutes(app, { authService, service: options.identityService })
+    }
+    registerAuthRoutes(app, authService, options.authCookieSecure ?? true)
     registerFoundationAccessRoutes(
       app,
-      options.authService,
+      authService,
       options.auditRepository,
       options.accessGroupRepository,
     )
     if (options.settingsService !== undefined) {
-      registerSettingsRoutes(
-        app,
-        options.authService,
-        options.auditRepository,
-        options.settingsService,
-      )
+      registerSettingsRoutes(app, authService, options.auditRepository, options.settingsService)
     }
     if (options.storageService !== undefined) {
-      registerStorageRoutes(
-        app,
-        options.authService,
-        options.auditRepository,
-        options.storageService,
-      )
+      registerStorageRoutes(app, authService, options.auditRepository, options.storageService)
     }
     if (options.memberService !== undefined) {
-      registerMemberRoutes(app, options.authService, options.auditRepository, options.memberService)
+      registerMemberRoutes(app, authService, options.auditRepository, options.memberService)
     }
     if (options.auditExplorerRepository !== undefined) {
       registerAuditRoutes(
         app,
-        options.authService,
+        authService,
         options.auditRepository,
         options.auditExplorerRepository,
       )
     }
     if (options.deviceService !== undefined) {
-      registerDeviceRoutes(app, options.authService, options.auditRepository, options.deviceService)
+      registerDeviceRoutes(app, authService, options.auditRepository, options.deviceService)
     }
     if (options.deviceCommandService !== undefined) {
       registerDeviceCommandRoutes(
         app,
-        options.authService,
+        authService,
         options.auditRepository,
         options.deviceCommandService,
       )
     }
     if (options.resourceService !== undefined) {
-      registerResourceRoutes(
-        app,
-        options.authService,
-        options.auditRepository,
-        options.resourceService,
-      )
+      registerResourceRoutes(app, authService, options.auditRepository, options.resourceService)
     }
     if (options.accountService !== undefined) {
-      registerAccountRoutes(
-        app,
-        options.authService,
-        options.auditRepository,
-        options.accountService,
-      )
+      registerAccountRoutes(app, authService, options.auditRepository, options.accountService)
     }
     if (options.accountPoolService !== undefined) {
       registerAccountPoolRoutes(
         app,
-        options.authService,
+        authService,
         options.auditRepository,
         options.accountPoolService,
       )
     }
     if (options.poolService !== undefined) {
-      registerPoolRoutes(app, options.authService, options.auditRepository, options.poolService)
+      registerPoolRoutes(app, authService, options.auditRepository, options.poolService)
     }
     if (options.mallService !== undefined) {
       registerMallRoutes(app, options.authService, options.auditRepository, options.mallService)
     }
     if (options.proxyService !== undefined) {
-      registerProxyRoutes(app, options.authService, options.auditRepository, options.proxyService)
+      registerProxyRoutes(app, authService, options.auditRepository, options.proxyService)
     }
     if (options.taskExecutionService !== undefined) {
       registerTaskExecutionRoutes(
         app,
-        options.authService,
+        authService,
         options.auditRepository,
         options.taskExecutionService,
       )

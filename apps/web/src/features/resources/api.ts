@@ -1,3 +1,4 @@
+import { apiFetch } from "../../lib/api/api-fetch"
 import { type MytMaterial, nowText } from "./myt-material"
 
 type StoredResource = {
@@ -69,7 +70,7 @@ const readError = async (response: Response): Promise<string> => {
 }
 
 const request = async (path: string, init?: RequestInit): Promise<Response> => {
-  const response = await fetch(path, {
+  const response = await apiFetch(path, {
     ...init,
     credentials: "same-origin",
     headers: { "content-type": "application/json", ...init?.headers },

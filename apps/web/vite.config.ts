@@ -10,7 +10,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": {
-        changeOrigin: true,
+        changeOrigin: false,
         target: process.env[apiProxyEnvironmentVariable] ?? "http://127.0.0.1:3000",
       },
     },

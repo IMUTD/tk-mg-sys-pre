@@ -13,6 +13,7 @@ import {
 } from "antd"
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { filteredRowSelection } from "../../components/tables/filtered-selection"
+import { apiFetch } from "../../lib/api/api-fetch"
 import { ServiceExpiredNotice } from "../box-service/expired-notice"
 
 type ShareFile = {
@@ -77,7 +78,9 @@ export const BackupResourcesPage = (): ReactNode => {
   const [scanning, setScanning] = useState(false)
 
   const load = useCallback(async () => {
-    const response = await fetch("/api/share-files?bucket=backup", { credentials: "same-origin" })
+    const response = await apiFetch("/api/share-files?bucket=backup", {
+      credentials: "same-origin",
+    })
     if (!response.ok) return
     const body = (await response.json()) as { boxes: ShareBox[] }
     setBoxes(body.boxes)
@@ -105,7 +108,7 @@ export const BackupResourcesPage = (): ReactNode => {
 
   const scan = async (): Promise<void> => {
     setScanning(true)
-    const response = await fetch("/api/share-scans", {
+    const response = await apiFetch("/api/share-scans", {
       body: JSON.stringify({ scope: "backup" }),
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
@@ -159,7 +162,7 @@ export const BackupResourcesPage = (): ReactNode => {
 
   const transfer = async (): Promise<void> => {
     setSending(true)
-    const response = await fetch("/api/share-transfers", {
+    const response = await apiFetch("/api/share-transfers", {
       body: JSON.stringify({
         fileIds: selected,
         targetDeviceId,

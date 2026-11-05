@@ -2,6 +2,11 @@
   "name": "tk-mg-sys",
   "private": true,
   "packageManager": "pnpm@10.28.2",
+  "pnpm": {
+    "overrides": {
+      "@types/node": "22.20.2"
+    }
+  },
   "scripts": {
     "build:web": "pnpm --filter @tk-mg/web build",
     "lint": "biome check .",

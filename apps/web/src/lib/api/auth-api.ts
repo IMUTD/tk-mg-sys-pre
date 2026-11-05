@@ -1,5 +1,6 @@
 import ky, { HTTPError, TimeoutError } from "ky"
 import { ZodError, z } from "zod"
+import { advanceApiSession } from "./access-events"
 
 export const RoleSchema = z.enum([
   "administrator",
@@ -27,7 +28,27 @@ const ScopeSchema = z.object({
   role: RoleSchema,
 })
 
+export const IdentityAccessSchema = z.object({
+  mode: z.enum(["off", "optional", "enforced"]),
+  required: z.boolean(),
+  canVerify: z.boolean(),
+  status: z.enum([
+    "unverified",
+    "verifying",
+    "verified",
+    "rejected",
+    "error",
+    "unbound",
+    "not_required",
+  ]),
+  canAccessBusiness: z.boolean(),
+  version: z.number().int().nonnegative(),
+  isPlatformAdmin: z.boolean(),
+})
+
 export const SessionUserSchema = z.object({
+  identity: IdentityAccessSchema.optional(),
+  isPlatformAdmin: z.boolean().optional(),
   displayName: z.string().min(1).optional(),
   email: z.string().email(),
   scope: ScopeSchema,
@@ -96,9 +117,11 @@ export const createAuthApi = (apiBaseUrl = "/api"): AuthApi => {
     login: async (input) => {
       try {
         const payload: unknown = await client.post("auth/login", { json: input }).json()
+        const user = LoginResponseSchema.parse(payload).user
+        advanceApiSession()
         return {
           kind: "authenticated",
-          user: LoginResponseSchema.parse(payload).user,
+          user,
         }
       } catch (error) {
         const recovered = recoverSessionFailure(error)
@@ -109,6 +132,7 @@ export const createAuthApi = (apiBaseUrl = "/api"): AuthApi => {
       }
     },
     logout: async () => {
+      advanceApiSession()
       try {
         await client.post("auth/logout")
       } catch (error) {

@@ -25,7 +25,7 @@ const renderPage = (rows: readonly ReturnType<typeof slot>[]) => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input)
+      const url = input instanceof Request ? input.url : String(input)
       calls.push(url)
       if (url.includes("/slots")) {
         return new Response(JSON.stringify(rows), {

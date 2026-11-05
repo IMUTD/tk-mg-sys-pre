@@ -10,6 +10,7 @@ import {
   UserIdSchema,
 } from "../../lib/authorization"
 import type { PageAccess } from "../../lib/pages"
+import type { IdentityAccess } from "./identity-session"
 
 const SessionLifetimeMilliseconds = 1000 * 60 * 60 * 8
 
@@ -53,6 +54,8 @@ type LoginInput = {
 }
 
 export type SessionPrincipal = {
+  readonly identity?: IdentityAccess
+  readonly isPlatformAdmin?: boolean
   readonly displayName: string
   readonly email: string
   readonly scope: AccessScope

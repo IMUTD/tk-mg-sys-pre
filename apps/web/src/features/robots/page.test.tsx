@@ -18,7 +18,9 @@ beforeEach(async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn<typeof fetch>(async (input) => {
-      if (input !== "/api/behavior-chains") throw new Error(`Unexpected request: ${String(input)}`)
+      const url = new URL(input instanceof Request ? input.url : String(input), "http://localhost")
+      if (url.pathname !== "/api/behavior-chains")
+        throw new Error(`Unexpected request: ${url.pathname}`)
       return Response.json([
         {
           id: "1",

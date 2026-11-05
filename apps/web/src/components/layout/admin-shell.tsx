@@ -53,6 +53,16 @@ type NavigationItem = {
 }
 
 const navigation: readonly NavigationItem[] = [
+  {
+    icon: <SafetyCertificateOutlined aria-hidden />,
+    label: "实名认证",
+    path: "/identity-verification",
+  },
+  {
+    icon: <SafetyCertificateOutlined aria-hidden />,
+    label: "实名认证管理",
+    path: "/identity-verifications",
+  },
   { icon: <HomeOutlined aria-hidden />, label: "运营概览", path: "/overview" },
   {
     icon: <GiftOutlined aria-hidden />,
@@ -160,6 +170,10 @@ const navigation: readonly NavigationItem[] = [
 ]
 
 const canSeeItem = (item: NavigationItem, user: SessionUser): boolean => {
+  if (item.path === "/identity-verification") return user.identity?.canVerify === true
+  if (user.identity?.canAccessBusiness === false) return false
+  if (item.path === "/identity-verifications")
+    return user.isPlatformAdmin === true && user.identity?.mode !== "off"
   if (item.children !== undefined) return true
   return canViewScopedPage(user.scope, item.path)
 }

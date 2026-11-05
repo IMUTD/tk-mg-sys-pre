@@ -1,7 +1,7 @@
 import { z } from "zod"
-
 import { createProductionApp } from "./composition"
 import { retentionMs } from "./db/retention"
+import { type IdentityConfig, parseIdentityConfig } from "./modules/identity-verification/config"
 
 const orderSweepMs = 5 * 60 * 1000
 
@@ -20,6 +20,7 @@ const ApiRuntimeConfigurationSchema = z.object({
 })
 
 export type ApiRuntimeConfig = {
+  readonly identity: IdentityConfig
   readonly authCookieSecure: boolean
   readonly databaseUrl: string
   readonly port: number
@@ -53,6 +54,7 @@ export const parseApiRuntimeConfig = (
 ): ApiRuntimeConfig => {
   const config = ApiRuntimeConfigurationSchema.parse(environment)
   return {
+    identity: parseIdentityConfig(environment),
     authCookieSecure: config.AUTH_COOKIE_SECURE === "true",
     databaseUrl: config.DATABASE_URL,
     port: config.PORT,
@@ -78,6 +80,11 @@ export const startApiServer = (environment: Record<string, string | undefined>) 
       console.error("alipay sweep failed", error)
     })
   }, rechargeSweepMs)
+  const identityTimer = setInterval(() => {
+    void productionApp.cleanupIdentity().catch((error: unknown) => {
+      console.error("identity cleanup failed", error instanceof Error ? error.name : "Error")
+    })
+  }, 60_000)
   // A slow gateway can stretch one sweep past the interval; never run two at once.
   let sweeping = false
   const sweep = () => {
@@ -110,6 +117,7 @@ export const startApiServer = (environment: Record<string, string | undefined>) 
       stopped = true
       clearInterval(retentionTimer)
       clearInterval(rechargeSweepTimer)
+      clearInterval(identityTimer)
       clearInterval(sweepTimer)
       server.stop(true)
       await productionApp.close()

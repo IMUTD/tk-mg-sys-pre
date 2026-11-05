@@ -11,6 +11,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@alicloud/cloudauth20190307": "3.14.1",
+    "@alicloud/openapi-core": "^1.0.9",
+    "@darabonba/typescript": "^1.0.6",
     "@tk-mg/device-adapter": "workspace:*",
     "@tk-mg/storage-adapter": "workspace:*",
     "@tk-mg/task-execution": "workspace:*",
@@ -23,6 +26,7 @@
     "mailparser": "^3.14.1",
     "ipaddr.js": "2.2.0",
     "postgres": "^3.4.9",
+    "sharp": "^0.35.5",
     "zod": "^4.3.5"
   },
   "devDependencies": {

@@ -25,6 +25,10 @@ import { createPostgresDeviceRepository } from "./modules/devices/postgres-repos
 import { createDeviceService } from "./modules/devices/service"
 import { createDispatchRepository } from "./modules/dispatch/repository"
 import { registerDispatchRoutes } from "./modules/dispatch/routes"
+import { type IdentityConfig, parseIdentityConfig } from "./modules/identity-verification/config"
+import { createAliyunIdentityProvider } from "./modules/identity-verification/provider"
+import { createIdentityService } from "./modules/identity-verification/service"
+import type { IdentityProvider } from "./modules/identity-verification/types"
 import { alipayConfigFromEnvironment, createAlipayGateway } from "./modules/mall/alipay"
 import { createPostgresMallRepository } from "./modules/mall/repository"
 import { createMallService } from "./modules/mall/service"
@@ -44,6 +48,8 @@ import { createPostgresExecutionTaskRepository } from "./modules/task-execution/
 import { createTaskExecutionService } from "./modules/task-execution/service"
 
 export type ProductionAppConfig = {
+  readonly identity?: IdentityConfig
+  readonly identityProvider?: IdentityProvider
   readonly authCookieSecure?: boolean
   readonly databaseUrl: string
   readonly redisUrl: string
@@ -53,6 +59,7 @@ export type ProductionAppConfig = {
 }
 
 export type ProductionApp = {
+  readonly cleanupIdentity: () => Promise<number>
   readonly app: Hono
   readonly checkReadiness: () => Promise<void>
   readonly close: () => Promise<void>
@@ -131,7 +138,15 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
     }),
   })
 
+  const identityConfig = config.identity ?? parseIdentityConfig({})
+  const identityService = createIdentityService({
+    sql: client,
+    cipher,
+    config: identityConfig,
+    provider: config.identityProvider ?? createAliyunIdentityProvider(identityConfig),
+  })
   const app = createApp({
+    identityService,
     authCookieSecure: config.authCookieSecure ?? true,
     auditRepository,
     auditExplorerRepository: auditRepository,
@@ -170,8 +185,12 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
   registerDispatchRoutes(app, client, cipher, authService, auditRepository)
   return {
     app,
+    cleanupIdentity: () => identityService.cleanupExpired(),
     checkReadiness: async () => {
       await client`select 1`
+      await client`select user_id from admin_identity_verification limit 0`
+      await client`select id from identity_verification_attempt limit 0`
+      await client`select actor_id from identity_password_failure limit 0`
       await redis.ping()
       await checkSystemActorReadiness(client, config.systemActorId)
       await boxLink.checkReadiness()
@@ -182,7 +201,10 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
       await redis.quit()
       await client.end()
     },
-    purgeExpiredRows: () => purgeExpiredOperationalRows(client),
+    purgeExpiredRows: async () => {
+      await purgeExpiredOperationalRows(client)
+      await identityService.cleanupExpired()
+    },
     sweepRecharges: () => mallService.sweepRecharges(),
     sweepPendingOrders: boxService.sweepPendingOrders,
   }

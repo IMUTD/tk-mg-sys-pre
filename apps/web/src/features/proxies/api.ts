@@ -1,5 +1,6 @@
 import ky, { HTTPError } from "ky"
 import { z } from "zod"
+import { apiFetch } from "../../lib/api/api-fetch"
 import { resolveApiBaseUrl } from "../../lib/api/auth-api"
 import { type DetectOptions, emptyProxy, type MytProxy, type ProxyCheckResult } from "./myt-proxy"
 
@@ -179,6 +180,7 @@ export interface ProxiesApi {
 }
 export const createProxiesApi = (apiBaseUrl = "/api"): ProxiesApi => {
   const client = ky.create({
+    fetch: apiFetch,
     credentials: "include",
     prefixUrl: resolveApiBaseUrl(apiBaseUrl, window.location.href),
     retry: 0,

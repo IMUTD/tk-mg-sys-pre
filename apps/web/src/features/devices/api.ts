@@ -1,5 +1,6 @@
 import ky from "ky"
 import { z } from "zod"
+import { apiFetch } from "../../lib/api/api-fetch"
 
 import { resolveApiBaseUrl } from "../../lib/api/auth-api"
 
@@ -242,6 +243,7 @@ const groupPath = (groupId: string): string => `groups/${encodeURIComponent(grou
 
 export const createDevicesApi = (apiBaseUrl = "/api"): DevicesApi => {
   const client = ky.create({
+    fetch: apiFetch,
     credentials: "include",
     prefixUrl: resolveApiBaseUrl(apiBaseUrl, window.location.href),
     retry: 0,

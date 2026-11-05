@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react"
+import { apiFetch } from "../../lib/api/api-fetch"
 
 import {
   type BehaviorChain,
@@ -93,7 +94,7 @@ export const subscribeChains = (listener: () => void): (() => void) => {
 export const useChains = (): BehaviorChain[] => useSyncExternalStore(subscribeChains, getChains)
 
 export const loadChains = async (): Promise<void> => {
-  const response = await fetch("/api/behavior-chains", { credentials: "same-origin" })
+  const response = await apiFetch("/api/behavior-chains", { credentials: "same-origin" })
   if (!response.ok) return
   const rows = (await response.json()) as ChainPayload[]
   if (!Array.isArray(rows)) return
@@ -130,7 +131,7 @@ export const saveChain = async (
   steps: readonly ChainStep[],
   anchor: ChainAnchor | null = null,
 ): Promise<BehaviorChain> => {
-  const response = await fetch("/api/behavior-chains", {
+  const response = await apiFetch("/api/behavior-chains", {
     body: JSON.stringify({
       anchor,
       name: name.trim(),
@@ -190,7 +191,7 @@ export const updateChain = async (
 }
 
 export const deleteChain = async (id: string): Promise<boolean> => {
-  const response = await fetch(`/api/behavior-chains/${id}`, {
+  const response = await apiFetch(`/api/behavior-chains/${id}`, {
     credentials: "same-origin",
     method: "DELETE",
   })
@@ -205,7 +206,7 @@ export const touchChainTest = (id: string, at: string): void => {
     item.id === id ? { ...item, lastTestAt: at, updateTime: at } : item,
   )
   emit()
-  void fetch(`/api/behavior-chains/${id}/tested`, {
+  void apiFetch(`/api/behavior-chains/${id}/tested`, {
     credentials: "same-origin",
     method: "POST",
   }).catch(() => undefined)

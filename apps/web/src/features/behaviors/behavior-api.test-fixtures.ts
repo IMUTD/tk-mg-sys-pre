@@ -40,6 +40,7 @@ const UpdateChainSchema = z.object({
 })
 
 export const mockBehaviorApi = () => {
+  behaviorRequests.length = 0
   const timestamp = "2026-09-17T10:00:00.000Z"
   const chains = ["早班养号", "晚间巡检"].map((name, index) => ({
     anchor: null,
@@ -53,8 +54,14 @@ export const mockBehaviorApi = () => {
   const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
     const path = new URL(input instanceof Request ? input.url : String(input), "http://localhost")
       .pathname
-    if (path === "/api/behavior-chains" && init?.method === "POST") {
-      const payload = SaveChainSchema.parse(JSON.parse(String(init.body)))
+    const method = init?.method ?? (input instanceof Request ? input.method : "GET")
+    const body =
+      init?.body === undefined && input instanceof Request
+        ? await input.clone().text()
+        : String(init?.body ?? "")
+    behaviorRequests.push({ path, method, body })
+    if (path === "/api/behavior-chains" && method === "POST") {
+      const payload = SaveChainSchema.parse(JSON.parse(body))
       return Response.json({
         ...payload,
         id: "saved-chain",
@@ -106,8 +113,8 @@ export const mockBehaviorApi = () => {
     if (path.endsWith("/watch") || path === "/api/frames") {
       return new Response(null, { status: 204 })
     }
-    if (path === "/api/tasks" && init?.method === "POST") {
-      const arrange = String(init.body).includes('"skill":"ArrangeNodes"')
+    if (path === "/api/tasks" && method === "POST") {
+      const arrange = body.includes('"skill":"ArrangeNodes"')
       return Response.json({ taskId: arrange ? "arrange-task" : "test-task" }, { status: 202 })
     }
     if (path === "/api/tasks/arrange-task") {
@@ -147,3 +154,9 @@ export const mockBehaviorApi = () => {
   vi.stubGlobal("fetch", fetchMock)
   return fetchMock
 }
+
+export const behaviorRequests: {
+  readonly path: string
+  readonly method: string
+  readonly body: string
+}[] = []

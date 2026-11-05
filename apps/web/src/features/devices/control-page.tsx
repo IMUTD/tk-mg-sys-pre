@@ -1,6 +1,7 @@
 import { App, Button } from "antd"
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { apiFetch } from "../../lib/api/api-fetch"
 
 import {
   type LinkPhase,
@@ -101,13 +102,13 @@ export const DeviceControlPage = (): ReactNode => {
       if (running || stop) return
       running = true
       try {
-        await fetch(`/api/devices/${deviceId}/watch`, {
+        await apiFetch(`/api/devices/${deviceId}/watch`, {
           body: JSON.stringify({ indexNums: [...pitIndexes] }),
           credentials: "same-origin",
           headers: { "content-type": "application/json" },
           method: "POST",
         })
-        const response = await fetch(`/api/devices/${deviceId}/slots`, {
+        const response = await apiFetch(`/api/devices/${deviceId}/slots`, {
           credentials: "same-origin",
         })
         if (!response.ok || stop) return
@@ -139,7 +140,7 @@ export const DeviceControlPage = (): ReactNode => {
         await Promise.all(
           pitIndexes.map(async (index) => {
             if (live.has(index)) return
-            const frame = await fetch(`/api/frames?deviceId=${deviceId}&index=${index}`, {
+            const frame = await apiFetch(`/api/frames?deviceId=${deviceId}&index=${index}`, {
               credentials: "same-origin",
             })
             if (stop || !frame.ok || frame.status === 204) return
@@ -194,7 +195,7 @@ export const DeviceControlPage = (): ReactNode => {
   }, [])
 
   const run = async (skill: string, slot: Slot) => {
-    const response = await fetch("/api/tasks", {
+    const response = await apiFetch("/api/tasks", {
       body: JSON.stringify({
         deviceId,
         indexNum: slot.index,

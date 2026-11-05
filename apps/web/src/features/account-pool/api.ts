@@ -1,5 +1,6 @@
 import ky, { HTTPError } from "ky"
 import { z } from "zod"
+import { apiFetch } from "../../lib/api/api-fetch"
 import { resolveApiBaseUrl } from "../../lib/api/auth-api"
 
 const SourceSchema = z.object({
@@ -126,6 +127,7 @@ export type PoolWrite = {
 }
 export const createAccountPoolsApi = () => {
   const client = ky.create({
+    fetch: apiFetch,
     prefixUrl: resolveApiBaseUrl("/api", window.location.href),
     credentials: "include",
     retry: 0,

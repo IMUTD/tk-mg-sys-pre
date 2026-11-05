@@ -41,6 +41,7 @@ export const applyInitializerSnapshot = async (
         await tx`insert into init_admin_mapping(source_key, source_id, user_id, group_id)
           values (${sourceKey}, ${admin.id}, ${mapping.userId}, ${mapping.groupId})`
       } else {
+        await tx`select id from app_user where id = ${mapping.userId} for update`
         const changed = await tx`
           update app_session set revoked_at = now() where user_id = ${mapping.userId}
             and revoked_at is null and exists (

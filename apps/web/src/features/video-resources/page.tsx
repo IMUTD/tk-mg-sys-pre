@@ -15,6 +15,7 @@ import {
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { filteredRowSelection } from "../../components/tables/filtered-selection"
+import { apiFetch } from "../../lib/api/api-fetch"
 import { ServiceExpiredNotice } from "../box-service/expired-notice"
 
 type ShareFile = {
@@ -211,7 +212,7 @@ export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): 
 
   const load = useCallback(async () => {
     const query = backup ? "bucket=backup" : `category=${category}`
-    const response = await fetch(`/api/share-files?${query}`, { credentials: "same-origin" })
+    const response = await apiFetch(`/api/share-files?${query}`, { credentials: "same-origin" })
     if (!response.ok) return
     const body = (await response.json()) as { boxes: ShareBox[]; nas?: NasGroup[] }
     setBoxes(body.boxes)
@@ -448,7 +449,7 @@ export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): 
 
   const scan = async (): Promise<void> => {
     setScanning(true)
-    const response = await fetch(
+    const response = await apiFetch(
       "/api/share-scans",
       backup
         ? {
@@ -471,7 +472,7 @@ export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): 
 
   const transfer = async (): Promise<void> => {
     setSending(true)
-    const response = await fetch("/api/share-transfers", {
+    const response = await apiFetch("/api/share-transfers", {
       body: JSON.stringify({
         fileIds: selected,
         targetDeviceId,
