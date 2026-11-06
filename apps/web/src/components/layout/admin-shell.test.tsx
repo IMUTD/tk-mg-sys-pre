@@ -170,6 +170,7 @@ describe("WebApp route protection", () => {
     expect(screen.queryByText("工程中心")).not.toBeInTheDocument()
     expect(screen.queryByText("营销中心")).not.toBeInTheDocument()
     expect(screen.queryByText("积分商场")).not.toBeInTheDocument()
+    expect(screen.queryByText("商家中心")).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "配置中心" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "工作日志" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "成员与权限" })).not.toBeInTheDocument()
@@ -198,26 +199,6 @@ describe("WebApp route protection", () => {
     expect(await pageCrumb("运营机器人")).toBeVisible()
     expect(screen.getByText("工程中心")).toBeVisible()
     expect(screen.getByRole("link", { name: "运营机器人" })).toBeVisible()
-  })
-
-  it("opens marketing dashboard under Marketing Center", async () => {
-    // Given
-    const api = createAuthenticatedApi(salesperson)
-
-    // When
-    renderApplication(api, "/marketing/dashboard")
-
-    // Then
-    expect(await pageCrumb("营销面板")).toBeVisible()
-    expect(screen.getByText("营销中心")).toBeVisible()
-    expect(await screen.findByText("账号销售额")).toBeVisible()
-    expect(screen.getByRole("link", { name: "账号市场" })).toBeVisible()
-    expect(screen.getByRole("link", { name: "节点市场" })).toBeVisible()
-    expect(screen.getByRole("link", { name: "销售业绩" })).toBeVisible()
-    expect(screen.getByRole("link", { name: "运营业绩" })).toBeVisible()
-    expect(screen.getByText("资源中心")).toBeVisible()
-    expect(screen.queryByRole("link", { name: "工作日志" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("link", { name: "成员与权限" })).not.toBeInTheDocument()
   })
 
   it("opens studio whiteboards under Production Center", async () => {
@@ -267,6 +248,7 @@ describe("WebApp route protection", () => {
     expect(screen.getByRole("link", { name: "我的订单" })).toBeVisible()
     expect(screen.getByRole("link", { name: "发票申请" })).toBeVisible()
     expect(screen.getByRole("link", { name: "兑换中心" })).toBeVisible()
+    expect(screen.queryByText("商家中心")).not.toBeInTheDocument()
     expect(await screen.findByText("注册GG")).toBeVisible()
   })
 
@@ -307,7 +289,7 @@ describe("WebApp route protection", () => {
     expect(screen.queryByRole("heading", { name: "工作日志" })).not.toBeInTheDocument()
   })
 
-  it("shows Configuration to an administrator", async () => {
+  it("keeps engineering and operations visible for an administrator", async () => {
     // Given
     const api = createAuthenticatedApi(administrator)
 
@@ -320,10 +302,8 @@ describe("WebApp route protection", () => {
     const operations = screen.getByRole("menuitem", { name: "运营中心" }).closest("li")
     expect(engineering).not.toBeNull()
     expect(operations).not.toBeNull()
-    expect(within(engineering as HTMLElement).getByRole("link", { name: "配置中心" })).toBeVisible()
-    expect(
-      within(operations as HTMLElement).queryByRole("link", { name: "配置中心" }),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "配置中心" })).not.toBeInTheDocument()
+    expect(screen.queryByText("营销中心")).not.toBeInTheDocument()
     expect(screen.getByText("管理员")).toBeVisible()
     expect(screen.getByText("工作日志")).toBeVisible()
     expect(screen.getByText("成员与权限")).toBeVisible()
@@ -336,7 +316,7 @@ describe("WebApp route protection", () => {
     renderApplication(api, "/work-logs")
     expect(await pageCrumb("运营概览")).toBeVisible()
     expect(screen.queryByRole("heading", { name: "工作日志" })).not.toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "配置中心" })).toBeVisible()
+    expect(screen.queryByRole("link", { name: "配置中心" })).not.toBeInTheDocument()
     expect(screen.getByText("资源中心")).toBeVisible()
     expect(screen.queryByRole("link", { name: "工作日志" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "成员与权限" })).not.toBeInTheDocument()
@@ -349,7 +329,8 @@ describe("WebApp route protection", () => {
     for (const name of ["运营中心", "工程中心", "资源中心"]) {
       expect(screen.getByRole("menuitem", { name })).toHaveAttribute("aria-expanded", "true")
     }
-    for (const name of ["营销中心", "积分商场", "制作中心"]) {
+    expect(screen.queryByRole("menuitem", { name: "营销中心" })).not.toBeInTheDocument()
+    for (const name of ["积分商场", "商家中心", "制作中心"]) {
       expect(screen.getByRole("menuitem", { name })).toHaveAttribute("aria-expanded", "false")
     }
   })

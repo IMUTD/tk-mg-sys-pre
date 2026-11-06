@@ -148,6 +148,7 @@ export const operationAccounts = pgTable(
     app: operationAccountApp("app"),
     avatar: text("avatar").notNull().default(""),
     backupKey: text("backup_key").notNull().default(""),
+    backupName: text("backup_name").notNull().default(""),
     backupSlot: text("backup_slot").notNull().default(""),
     backupType: operationAccountBackupType("backup_type"),
     createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).defaultNow().notNull(),

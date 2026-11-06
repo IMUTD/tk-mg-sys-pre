@@ -12,14 +12,16 @@ export const detectProxyBatch = async (
   proxies: readonly MytProxy[],
   options: DetectOptions,
   onResult: (proxy: MytProxy, result: ProxyCheckResult) => void,
+  stride = 2,
   pause: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 ): Promise<{ succeeded: number; failed: number; requestFailures: number }> => {
   let succeeded = 0
   let failed = 0
   let requestFailures = 0
-  for (let offset = 0; offset < proxies.length; offset += 2) {
+  const width = Math.max(1, stride)
+  for (let offset = 0; offset < proxies.length; offset += width) {
     await Promise.all(
-      proxies.slice(offset, offset + 2).map(async (proxy) => {
+      proxies.slice(offset, offset + width).map(async (proxy) => {
         try {
           const result = await api.detect(proxy, { ...options, useTurbo: false })
           onResult(proxy, result)
@@ -31,7 +33,7 @@ export const detectProxyBatch = async (
         }
       }),
     )
-    if (offset + 2 < proxies.length) await pause(1500)
+    if (offset + width < proxies.length) await pause(1500)
   }
   return { succeeded, failed, requestFailures }
 }

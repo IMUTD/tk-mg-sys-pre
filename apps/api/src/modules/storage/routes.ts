@@ -6,7 +6,12 @@ import { authorizePageViewRequest, hasPageAuthorizationFailure } from "../access
 import type { AuditRepository } from "../audit/service"
 import { writeAuditEvent } from "../audit/service"
 import type { AuthService, SessionPrincipal } from "../auth/service"
-import { StorageConfigurationUpdateSchema, type StorageService } from "./service"
+import {
+  StorageConfigurationInvalidError,
+  StorageConfigurationUpdateSchema,
+  StorageSecretRequiredError,
+  type StorageService,
+} from "./service"
 
 const tokenFrom = (request: Request): string | null => {
   const token = request.headers
@@ -57,7 +62,9 @@ export const registerStorageRoutes = (
 ): void => {
   app.get("/api/storage/status", async (context) => {
     const authorization = await authorizeStorageStatus(context, authService, auditRepository)
-    return isResponse(authorization) ? authorization : context.json(await service.getStatus())
+    return isResponse(authorization)
+      ? authorization
+      : context.json(await service.getStatus(authorization.userId))
   })
   app.get("/api/storage/configuration", async (context) => {
     const authorization = await authorizePageViewRequest(
@@ -70,7 +77,7 @@ export const registerStorageRoutes = (
     )
     return hasPageAuthorizationFailure(authorization)
       ? authorization.response
-      : context.json(await service.getStatus())
+      : context.json(await service.getStatus(authorization.principal.userId))
   })
   app.patch("/api/storage/configuration", async (context) => {
     const authorization = await authorizePageViewRequest(
@@ -83,8 +90,16 @@ export const registerStorageRoutes = (
     )
     if (hasPageAuthorizationFailure(authorization)) return authorization.response
     const input = await parseUpdate(context.req.raw)
-    return input === null
-      ? context.json({ error: "invalid_storage_configuration" }, 400)
-      : context.json(await service.update(authorization.principal.userId, input))
+    if (input === null) {
+      return context.json({ error: "invalid_storage_configuration" }, 400)
+    }
+    try {
+      return context.json(await service.update(authorization.principal.userId, input))
+    } catch (error) {
+      if (error instanceof StorageSecretRequiredError || error instanceof StorageConfigurationInvalidError) {
+        return context.json({ error: "invalid_storage_configuration" }, 400)
+      }
+      throw error
+    }
   })
 }

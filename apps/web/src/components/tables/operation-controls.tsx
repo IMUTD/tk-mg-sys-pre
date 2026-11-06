@@ -1,14 +1,19 @@
-import { Switch } from "antd"
+import { combineChecks, type FilterMode } from "@tk-mg/task-execution/combine-checks"
+import { Segmented, Switch } from "antd"
 import { type ReactNode, useEffect, useState } from "react"
 
-export type FilterMode = "and" | "or"
+export type { FilterMode }
+export { combineChecks }
 export type SelectionScope = "page" | "all"
 
-export const combineChecks = (mode: FilterMode, checks: readonly (boolean | null)[]): boolean => {
-  const active = checks.filter((check): check is boolean => check !== null)
-  if (active.length === 0) return true
-  return mode === "or" ? active.some(Boolean) : active.every(Boolean)
-}
+const filterModeOptions = [
+  { label: "交集", value: "and" },
+  { label: "并集", value: "or" },
+  { label: "非交集", value: "nand" },
+] as const
+
+const isFilterMode = (value: string | number): value is FilterMode =>
+  filterModeOptions.some((item) => item.value === value)
 
 export const pageSlice = <RecordType,>(
   rows: readonly RecordType[],
@@ -52,13 +57,14 @@ export const FilterModeSwitch = ({
   readonly onChange: (mode: FilterMode) => void
 }): ReactNode => (
   <span className="list-mode-switch">
-    <span>筛选模式(交集/并集)</span>
-    <Switch
-      aria-label="筛选模式(交集/并集)"
-      checked={mode === "and"}
-      checkedChildren="交集"
-      onChange={(checked) => onChange(checked ? "and" : "or")}
-      unCheckedChildren="并集"
+    <span>筛选模式</span>
+    <Segmented
+      aria-label="筛选模式(交集/并集/非交集)"
+      onChange={(value) => {
+        if (isFilterMode(value)) onChange(value)
+      }}
+      options={[...filterModeOptions]}
+      value={mode}
     />
   </span>
 )

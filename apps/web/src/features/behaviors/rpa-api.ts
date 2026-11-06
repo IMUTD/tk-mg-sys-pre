@@ -1,10 +1,10 @@
 export const RPA_API_OPTIONS = [
   {
     code: "CheckLive",
-    defaults: {},
+    defaults: { jumpWhen: "off", steps: "1" },
     group: "系统",
     name: "存活检测",
-    params: [],
+    params: ["steps", "jumpWhen"],
   },
   {
     code: "TakeCaptureCompress",
@@ -114,6 +114,104 @@ export type SkillSpec = {
 export const paramLabel = (spec: SkillSpec | undefined, key: string): string =>
   spec?.paramLabels?.[key] ?? key
 
+const KEY_GROUP: Record<string, string> = {
+  "3": "系统",
+  "4": "系统",
+  "5": "系统",
+  "6": "系统",
+  "26": "系统",
+  "27": "系统",
+  "82": "系统",
+  "83": "系统",
+  "84": "系统",
+  "187": "系统",
+  "219": "系统",
+  "19": "导航",
+  "20": "导航",
+  "21": "导航",
+  "22": "导航",
+  "23": "导航",
+  "61": "导航",
+  "92": "导航",
+  "93": "导航",
+  "111": "导航",
+  "122": "导航",
+  "123": "导航",
+  "24": "音量/媒体",
+  "25": "音量/媒体",
+  "91": "音量/媒体",
+  "164": "音量/媒体",
+  "85": "音量/媒体",
+  "86": "音量/媒体",
+  "87": "音量/媒体",
+  "88": "音量/媒体",
+  "89": "音量/媒体",
+  "90": "音量/媒体",
+  "126": "音量/媒体",
+  "127": "音量/媒体",
+  "28": "编辑",
+  "62": "编辑",
+  "66": "编辑",
+  "67": "编辑",
+  "112": "编辑",
+  "124": "编辑",
+  "17": "符号",
+  "18": "符号",
+  "55": "符号",
+  "56": "符号",
+  "68": "符号",
+  "69": "符号",
+  "70": "符号",
+  "71": "符号",
+  "72": "符号",
+  "73": "符号",
+  "74": "符号",
+  "75": "符号",
+  "76": "符号",
+  "77": "符号",
+  "81": "符号",
+  "57": "修饰",
+  "58": "修饰",
+  "59": "修饰",
+  "60": "修饰",
+}
+
+const keyGroup = (value: string): string =>
+  KEY_GROUP[value] ??
+  (Number(value) >= 7 && Number(value) <= 16
+    ? "数字"
+    : Number(value) >= 29 && Number(value) <= 54
+      ? "字母"
+      : "其他")
+
+export const optionLabel = (spec: SkillSpec | undefined, value: string): string =>
+  spec?.options?.find((item) => item.value === value)?.label ?? value
+
+export const groupedSkillOptions = (
+  options: ReadonlyArray<{ group?: string; label: string; value: string }>,
+  current = "",
+): Array<
+  | { label: string; value: string }
+  | { label: string; options: Array<{ label: string; value: string }> }
+> => {
+  const listed =
+    current.length > 0 && !options.some((item) => item.value === current)
+      ? [{ label: current, value: current }, ...options]
+      : options
+  const groups: Array<{ label: string; options: Array<{ label: string; value: string }> }> = []
+  for (const item of listed) {
+    const name = item.group || keyGroup(item.value)
+    const bucket = groups.find((group) => group.label === name)
+    const choice = { label: item.label, value: item.value }
+    if (bucket === undefined) groups.push({ label: name, options: [choice] })
+    else bucket.options.push(choice)
+  }
+  const only = groups[0]
+  return groups.length === 1 && only !== undefined && only.label === "其他"
+    ? listed.map((item) => ({ label: item.label, value: item.value }))
+    : groups
+}
+
 let catalog: SkillSpec[] = RPA_API_OPTIONS.map((item) => ({ ...item, params: item.params }))
 
 export const setSkillCatalog = (next: readonly SkillSpec[]): void => {
@@ -185,17 +283,12 @@ export const fallbackAnchorFields: readonly AnchorField[] = [
   { label: "V2链接", source: "proxy.link" },
   { label: "TUN模式", source: "proxy.tun" },
   { label: "强力安全模式", source: "proxy.safe" },
-  { label: "盒子", source: "device.host" },
-  { label: "坑位", source: "instance.index" },
-  { label: "备份路径", source: "account.backup_key" },
-  { label: "备份盒子", source: "account.backup_device" },
-  { label: "文本池", source: "pool.text" },
-  { label: "视频池", source: "pool.video" },
-  { label: "视频盒子", source: "pool.video_host" },
-  { label: "图片池", source: "pool.image" },
-  { label: "图片盒子", source: "pool.image_host" },
-  { label: "备份池", source: "pool.backup" },
-  { label: "备份文件盒子", source: "pool.backup_host" },
+  { label: "备份名字", source: "account.backup_name" },
+  { label: "邮箱", source: "account.email" },
+  { label: "客户端ID", source: "account.ms_client_id" },
+  { label: "令牌TOKEN", source: "account.ms_token" },
+  { label: "视频ID", source: "media.video_id" },
+  { label: "图片ID", source: "media.image_id" },
 ]
 
 let anchorFields: readonly AnchorField[] = fallbackAnchorFields
@@ -230,6 +323,7 @@ export type ChainStep = {
   guards: GuardCode[]
   id: number
   params: Record<string, string>
+  remark: string
   scopes: Record<string, ParamScope>
   sources: Record<string, string>
 }
@@ -278,7 +372,38 @@ export const stepText = (step: ChainStep): string => {
         return field.length === 0 ? [] : [`${label}=${field}`]
       }
       const value = step.params[key] ?? ""
-      return value.trim().length === 0 ? [] : [`${label}=${value}`]
+      if (key === "steps" && step.api === "CheckLive" && (step.params["jumpWhen"] ?? "off") === "off") {
+        return []
+      }
+      if (key === "writeOnSuccessValue" || key === "writeOnFailureValue") return []
+      if (key === "writeOnSuccessField" || key === "writeOnFailureField") {
+        if (value.length === 0) return []
+        const side = key === "writeOnSuccessField" ? "成功写回" : "失败写回"
+        const written = (
+          step.params[key === "writeOnSuccessField" ? "writeOnSuccessValue" : "writeOnFailureValue"] ??
+          ""
+        ).trim()
+        const names: Record<string, string> = {
+          avatar: "头像地址",
+          favorite: "获赞",
+          follower: "粉丝量",
+          following: "关注数",
+          name: "展示名",
+          note: "备注",
+          platformUid: "平台数字 ID",
+          region: "归属地",
+          tags: "标签",
+        }
+        const fieldName = names[value] ?? value
+        return [`${side}=${fieldName}${written.length > 0 ? ` ${written}` : ""}`]
+      }
+      if (key === "jumpWhen") {
+        if (value === "off" || value.trim().length === 0) return []
+        return [`${label}=${value === "failure" ? "失败时" : "成功时"}`]
+      }
+      const shown =
+        spec?.options === undefined ? value : optionLabel(spec, value)
+      return value.trim().length === 0 ? [] : [`${label}=${shown}`]
     })
     .join(" ")
   return detail.length === 0
@@ -303,6 +428,22 @@ export const normalizeDelay = (value: number | undefined): number => {
   return Math.min(next, 60000)
 }
 
+const mailSources: Readonly<Record<string, string>> = {
+  clientId: "account.ms_client_id",
+  email: "account.email",
+  refreshToken: "account.ms_token",
+}
+
+const mediaSources: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  UploadPitImage: { 图片ID: "media.image_id" },
+  UploadPitVideo: { 视频ID: "media.video_id" },
+}
+
+const externalSource = (api: RpaApiCode, key: string): string => {
+  if (api === "FetchMailCode" && mailSources[key] !== undefined) return mailSources[key] ?? ""
+  return mediaSources[api]?.[key] ?? ""
+}
+
 export const createStep = (api: RpaApiCode, id: number): ChainStep => {
   const spec = apiByCode(api)
   const params = spec === undefined ? {} : { ...spec.defaults }
@@ -312,8 +453,19 @@ export const createStep = (api: RpaApiCode, id: number): ChainStep => {
     guards: [],
     id,
     params,
-    scopes: Object.fromEntries(Object.keys(params).map((key) => [key, "internal"])),
-    sources: Object.fromEntries(Object.keys(params).map((key) => [key, "literal"])),
+    remark: "",
+    scopes: Object.fromEntries(
+      Object.keys(params).map((key) => [
+        key,
+        externalSource(api, key).length > 0 ? "external" : "internal",
+      ]),
+    ),
+    sources: Object.fromEntries(
+      Object.keys(params).map((key) => {
+        const source = externalSource(api, key)
+        return [key, source.length > 0 ? source : "literal"]
+      }),
+    ),
   }
 }
 
@@ -323,6 +475,7 @@ export const publishChainSteps = (steps: readonly ChainStep[]): ChainStep[] =>
   steps.map((step) => ({
     ...step,
     delayMs: normalizeDelay(step.delayMs),
+    remark: (step.remark ?? "").trim(),
     guards: guardOrder.filter((code) => (step.guards ?? []).includes(code)),
     params: Object.fromEntries(
       Object.entries(step.params).map(([key, value]) => [
@@ -334,7 +487,11 @@ export const publishChainSteps = (steps: readonly ChainStep[]): ChainStep[] =>
     sources: Object.fromEntries(
       Object.keys(step.params).map((key) => [
         key,
-        step.scopes?.[key] === "external" ? (step.sources?.[key] ?? "") : "literal",
+        step.scopes?.[key] !== "external"
+          ? "literal"
+          : step.api === "ClickJumpNodes" && key === "clickChance"
+            ? "chance.external"
+            : (step.sources?.[key] ?? ""),
       ]),
     ),
   }))
@@ -385,5 +542,9 @@ export const proposeChain = (
   }
 }
 
-export const validateChainName = (name: string): string | null =>
-  name.trim().length === 0 ? "请填写行为链名称" : null
+export const validateChainName = (name: string): string | null => {
+  const trimmed = name.trim()
+  if (trimmed.length === 0) return "请填写行为链名称"
+  if (trimmed.length > 80) return "名称不能超过 80 个字"
+  return null
+}

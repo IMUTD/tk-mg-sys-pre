@@ -22,7 +22,6 @@ const tables = [
   "operation_account",
   "operation_proxy",
   "operation_resource",
-  "registration_resource",
   "execution_task",
   "execution_task_step",
   "execution_task_run",

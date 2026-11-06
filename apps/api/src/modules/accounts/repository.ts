@@ -68,6 +68,7 @@ export type OperationAccount = {
   readonly app: OperationAccountApp | null
   readonly avatar: string
   readonly backupKey: string
+  readonly backupName: string
   readonly backupSlot: string
   readonly backupType: OperationAccountBackupType | null
   readonly createdAt: Date
@@ -246,6 +247,7 @@ type AccountRow = {
   readonly app: string | null
   readonly avatar: string
   readonly backupKey: string
+  readonly backupName: string
   readonly backupSlot: string
   readonly backupType: string | null
   readonly createdAt: Date
@@ -285,7 +287,8 @@ const listColumns = (client: Sql) => client`
   a.encrypted_transfer_key as "encryptedTransferKey", a.note, a.tags, a.status, a.app,
   a.online, a.transferred, a.follower, a.following, a.favorite, a.avatar, a.region, a.extra,
   a.device_id as "deviceId", a.device_instance_id as "deviceInstanceId", a.proxy_id as "proxyId",
-  a.backup_type as "backupType", a.backup_key as "backupKey", a.backup_slot as "backupSlot",
+  a.backup_type as "backupType", a.backup_key as "backupKey", a.backup_name as "backupName",
+  a.backup_slot as "backupSlot",
   a.deleted, a.deleted_at as "deletedAt", a.created_at as "createdAt", a.updated_at as "updatedAt",
   d.name as "deviceName", i.instance_index as "instanceIndex", i.label as "instanceLabel", p.name as "proxyName"
 `
@@ -305,6 +308,7 @@ const toStored = (row: AccountRow): StoredOperationAccount => {
     app: row.app === null ? null : OperationAccountAppSchema.parse(row.app),
     avatar: row.avatar,
     backupKey: row.backupKey,
+    backupName: row.backupName,
     backupSlot: row.backupSlot,
     backupType:
       row.backupType === null ? null : OperationAccountBackupTypeSchema.parse(row.backupType),

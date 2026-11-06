@@ -1,10 +1,15 @@
+import { languageParameter } from "./languages"
+import { regionParameter } from "./regions"
+
 export type FillAccount = {
-  readonly backupDevice: string
-  readonly backupKey: string
+  readonly backupName: string
+  readonly clientId: string
+  readonly email: string
   readonly identifier: string
   readonly language: string
   readonly region: string
   readonly secret: string
+  readonly token: string
 }
 
 export type FillProxy = {
@@ -20,13 +25,18 @@ export type FillProxy = {
 export type FillContext = {
   readonly account: FillAccount
   readonly device: { readonly host: string } | null
-  readonly instance: { readonly index: string } | null
+  readonly instance: { readonly index: string; readonly name: string } | null
   readonly manualText: boolean
   readonly proxy: FillProxy | null
+  readonly language: string
+  readonly region: string
+  readonly chance: string
   readonly backup: string
   readonly backupFileHost: string
   readonly image: string
   readonly imageHost: string
+  readonly imageId: string
+  readonly videoId: string
   readonly text: { readonly content: string; readonly resourceId: string } | null
   readonly video: string
   readonly videoHost: string
@@ -52,16 +62,20 @@ const sourceValue = (source: string, context: FillContext): string => {
   switch (source) {
     case "account.identifier":
       return context.account.identifier
+    case "account.email":
+      return context.account.email.length > 0 ? context.account.email : context.account.identifier
+    case "account.ms_client_id":
+      return context.account.clientId
+    case "account.ms_token":
+      return context.account.token
     case "account.secret":
       return context.account.secret
     case "account.region":
       return context.account.region
     case "account.language":
       return context.account.language
-    case "account.backup_key":
-      return context.account.backupKey
-    case "account.backup_device":
-      return context.account.backupDevice
+    case "account.backup_name":
+      return context.account.backupName
     case "proxy.host":
       return context.proxy?.host ?? ""
     case "proxy.port":
@@ -76,27 +90,82 @@ const sourceValue = (source: string, context: FillContext): string => {
       return context.proxy?.tun ?? ""
     case "proxy.safe":
       return context.proxy?.safe ?? ""
-    case "device.host":
-      return context.device?.host ?? ""
-    case "instance.index":
-      return context.instance?.index ?? ""
-    case "pool.text":
-      return context.text?.content ?? ""
-    case "pool.video":
-      return context.video
-    case "pool.video_host":
-      return context.videoHost
-    case "pool.image":
-      return context.image
-    case "pool.image_host":
-      return context.imageHost
-    case "pool.backup":
-      return context.backup
-    case "pool.backup_host":
-      return context.backupFileHost
+    case "media.image_id":
+      return context.imageId
+    case "media.video_id":
+      return context.videoId
+    case "chance.external":
+      return context.chance
     default:
       return ""
   }
+}
+
+export const externalChanceSource = "chance.external"
+
+export const usesExternalChance = (step: {
+  readonly scopes: Readonly<Record<string, string>>
+  readonly skill: string
+  readonly sources: Readonly<Record<string, string>>
+}): boolean =>
+  step.skill === "ClickJumpNodes" &&
+  step.scopes["clickChance"] === "external" &&
+  step.sources["clickChance"] === externalChanceSource
+
+export const externalTextSource = "pool.text"
+
+export const usesExternalText = (step: {
+  readonly scopes: Readonly<Record<string, string>>
+  readonly skill: string
+  readonly sources: Readonly<Record<string, string>>
+}): boolean =>
+  step.skill === "SendText" &&
+  step.scopes["text"] === "external" &&
+  step.sources["text"] === externalTextSource
+
+export const textAssignments = (
+  steps: readonly {
+    readonly localSequence?: number
+    readonly scopes: Readonly<Record<string, string>>
+    readonly skill: string
+    readonly sources: Readonly<Record<string, string>>
+    readonly stagePosition?: number
+  }[],
+  texts: readonly {
+    readonly ids?: readonly string[]
+    readonly sequence: number
+    readonly stage?: number
+  }[],
+): "ok" | "text_required" | "text_not_allowed" => {
+  const wanted = steps.flatMap((step, index) =>
+    usesExternalText(step) ? [`${step.stagePosition ?? 0}:${step.localSequence ?? index}`] : [],
+  )
+  const given = texts.map((item) => `${item.stage ?? 0}:${item.sequence}`)
+  if (new Set(given).size !== given.length) return "text_not_allowed"
+  if (given.some((key) => !wanted.includes(key))) return "text_not_allowed"
+  if (wanted.some((key) => !given.includes(key))) return "text_required"
+  if (texts.some((item) => (item.ids ?? []).length === 0)) return "text_required"
+  return "ok"
+}
+
+export const chanceAssignments = (
+  steps: readonly {
+    readonly localSequence?: number
+    readonly scopes: Readonly<Record<string, string>>
+    readonly skill: string
+    readonly sources: Readonly<Record<string, string>>
+    readonly stagePosition?: number
+  }[],
+  chances: readonly { readonly sequence: number; readonly stage: number; readonly value: number }[],
+): "ok" | "chance_required" | "chance_not_allowed" => {
+  const wanted = steps.flatMap((step, index) =>
+    usesExternalChance(step) ? [`${step.stagePosition ?? 0}:${step.localSequence ?? index}`] : [],
+  )
+  const given = chances.map((item) => `${item.stage}:${item.sequence}`)
+  if (new Set(given).size !== given.length) return "chance_not_allowed"
+  if (given.some((key) => !wanted.includes(key))) return "chance_not_allowed"
+  if (wanted.some((key) => !given.includes(key))) return "chance_required"
+  return "ok"
 }
 
 export const refreshDeviceHosts = (
@@ -114,12 +183,7 @@ export const refreshDeviceHosts = (
   let changed = false
   for (const [key, source] of sourceMap) {
     if (!(key in next)) continue
-    const host =
-      source === "device.host"
-        ? hosts.deviceHost
-        : source === "account.backup_device"
-          ? hosts.backupHost
-          : ""
+    const host = source === "device.host" ? hosts.deviceHost : ""
     if (host.length === 0 || next[key] === host) continue
     next[key] = host
     changed = true
@@ -127,17 +191,46 @@ export const refreshDeviceHosts = (
   return { changed, parameters: next }
 }
 
+export const agentStepParameters = (
+  skill: string,
+  parameters: Readonly<Record<string, string>>,
+): Record<string, string> => {
+  if (skill !== "FetchMailCode") return { ...parameters }
+  const next = { ...parameters }
+  delete next["email"]
+  delete next["clientId"]
+  delete next["refreshToken"]
+  return next
+}
+
+export const relaxMailPair = <
+  T extends { readonly missingKeys: readonly string[]; readonly skill: string },
+>(
+  steps: readonly T[],
+): T[] =>
+  steps.map((step, index) => {
+    if (step.skill !== "SendText" || steps[index - 1]?.skill !== "FetchMailCode") return step
+    return { ...step, missingKeys: step.missingKeys.filter((key) => key !== "text") }
+  })
+
 export const fillStep = (step: FillStep, context: FillContext): FilledStep => {
   const parameters: Record<string, string> = {}
   const missingKeys: string[] = []
   let textResourceId: string | null = null
   for (const key of Object.keys(step.input)) {
-    const manual = step.skill === "SendText" && key === "text" && context.manualText
+    if (regionParameter(step.skill) === key && context.region.length > 0) {
+      parameters[key] = context.region
+      continue
+    }
+    if (languageParameter(step.skill) === key && context.language.length > 0) {
+      parameters[key] = context.language
+      continue
+    }
     if (step.scopes[key] !== "external") {
       parameters[key] = step.input[key] ?? ""
       continue
     }
-    if (manual) {
+    if (step.skill === "SendText" && key === "text" && step.sources[key] === externalTextSource) {
       parameters[key] = context.text?.content ?? ""
       textResourceId = context.text?.resourceId ?? null
       if (parameters[key].length === 0) missingKeys.push(key)
@@ -145,8 +238,6 @@ export const fillStep = (step: FillStep, context: FillContext): FilledStep => {
     }
     parameters[key] = sourceValue(step.sources[key] ?? "", context)
     if (parameters[key].length === 0) missingKeys.push(key)
-    if (step.sources[key] === "pool.text" && context.text !== null)
-      textResourceId = context.text.resourceId
   }
   return { missingKeys, parameters, textResourceId }
 }
@@ -201,6 +292,22 @@ export type ShareDrawFile = {
   readonly parent: string
   readonly path: string
   readonly pool: "backup" | "image" | "video"
+}
+
+export const drawMediaIds = (
+  files: readonly { readonly host: string; readonly id: string; readonly path: string }[],
+  mode: "random" | "sequence",
+  count: number,
+  random: () => number = Math.random,
+): string[] => {
+  const ordered =
+    mode === "random"
+      ? shuffle(files, random)
+      : [...files].sort(
+          (left, right) =>
+            left.host.localeCompare(right.host) || left.path.localeCompare(right.path),
+        )
+  return cycleDraw(ordered, count).map((item) => item?.id ?? "")
 }
 
 export const drawShareFiles = (

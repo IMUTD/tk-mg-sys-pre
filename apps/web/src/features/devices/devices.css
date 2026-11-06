@@ -241,6 +241,11 @@
   width: max-content;
 }
 
+.control-card.is-live {
+  border-color: #13c2c2;
+  box-shadow: 0 0 0 1px #13c2c2;
+}
+
 .control-screen {
   aspect-ratio: var(--phone-aspect, 9 / 16);
   background: #111;
@@ -315,6 +320,58 @@
 .control-files p {
   color: #718096;
   margin: 0;
+}
+
+.preview-result-bar {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.preview-result-count,
+.preview-box-meta,
+.preview-result-empty {
+  color: #718096;
+}
+
+.preview-result-empty {
+  margin: 12px 0 0;
+}
+
+.preview-pits {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.preview-box {
+  background: #fafbfc;
+  border: 1px solid #e3e8f0;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.preview-box-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.preview-box-pits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 6px;
+  padding-left: 24px;
+}
+
+.preview-box-pits .ant-checkbox-wrapper {
+  margin-inline-start: 0;
 }
 
 .devices-page .sequence-stepper {

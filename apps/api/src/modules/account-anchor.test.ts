@@ -43,7 +43,13 @@ describe("account anchor", () => {
         null,
         "SendText",
       ),
-    ).toBeNull()
+    ).toEqual({ text: "account.identifier" })
+    expect(
+      readStepSources({ text: "" }, { text: "external" }, { text: "" }, null, "SendText"),
+    ).toEqual({ text: "" })
+    expect(readStepSources({ text: "" }, { text: "external" }, {}, null, "SendText")).toEqual({
+      text: "",
+    })
     expect(
       readStepSources(
         { text: "" },
@@ -63,9 +69,28 @@ describe("account anchor", () => {
         account,
         "SendText",
       ),
-    ).toEqual({
-      text: "pool.text",
-    })
+    ).toEqual({ text: "pool.text" })
+    expect(
+      readStepSources(
+        { text: "你好" },
+        { text: "internal" },
+        { text: "pool.text" },
+        null,
+        "SendText",
+      ),
+    ).toBeNull()
+    expect(
+      readStepSources({ pkg: "" }, { pkg: "external" }, { pkg: "pool.text" }, null, "OpenApp"),
+    ).toBeNull()
+    expect(
+      readStepSources(
+        { 图片ID: "" },
+        { 图片ID: "external" },
+        { 图片ID: "media.image_id" },
+        account,
+        "UploadPitImage",
+      ),
+    ).toEqual({ 图片ID: "media.image_id" })
     expect(
       readStepSources(
         { vless: "" },
@@ -86,6 +111,15 @@ describe("account anchor", () => {
         "CreateAndroid",
       ),
     ).toEqual({ s5Type: "proxy.tun", enforce: "proxy.safe" })
+    expect(
+      readStepSources(
+        { name: "" },
+        { name: "external" },
+        { name: "instance.name" },
+        account,
+        "BoxStop",
+      ),
+    ).toBeNull()
     expect(
       readStepSources(
         { text: "" },
@@ -129,5 +163,99 @@ describe("account anchor", () => {
         "JumpNodes",
       ),
     ).toEqual({ className: "account.identifier", steps: "literal" })
+    expect(
+      readStepSources(
+        { ...input, jumpWhen: "failure" },
+        { className: "external", steps: "internal", jumpWhen: "external" },
+        { className: "account.identifier", steps: "literal", jumpWhen: "literal" },
+        account,
+        "JumpNodes",
+      ),
+    ).toBeNull()
+    expect(
+      readStepSources(
+        { jumpWhen: "failure", steps: "1" },
+        { jumpWhen: "external", steps: "internal" },
+        { jumpWhen: "literal", steps: "literal" },
+        account,
+        "CheckLive",
+      ),
+    ).toBeNull()
+    expect(
+      readStepSources(
+        { tagOnSuccess: "已登录", text: "Home" },
+        { tagOnSuccess: "external", text: "external" },
+        { tagOnSuccess: "literal", text: "account.identifier" },
+        account,
+        "JumpNodes",
+      ),
+    ).toBeNull()
+    expect(
+      readStepSources(
+        { tagOnFailure: "未登录", text: "Home" },
+        { tagOnFailure: "internal", text: "internal" },
+        { tagOnFailure: "literal", text: "literal" },
+        account,
+        "JumpNodes",
+      ),
+    ).toEqual({ tagOnFailure: "literal", text: "literal" })
+    expect(
+      readStepSources(
+        { text: "Home", writeOnSuccessField: "follower" },
+        { text: "internal", writeOnSuccessField: "external" },
+        { text: "literal", writeOnSuccessField: "literal" },
+        account,
+        "JumpNodes",
+      ),
+    ).toBeNull()
+    expect(
+      readStepSources(
+        { text: "Home", writeOnSuccessValue: "1200" },
+        { text: "internal", writeOnSuccessValue: "internal" },
+        { text: "literal", writeOnSuccessValue: "literal" },
+        account,
+        "JumpNodes",
+      ),
+    ).toEqual({ text: "literal", writeOnSuccessValue: "literal" })
+  })
+
+  it("accepts only the external chance source for a click jump", () => {
+    const input = { clickChance: "", text: "Home" }
+    expect(
+      readStepSources(
+        input,
+        { clickChance: "external", text: "internal" },
+        { clickChance: "chance.external", text: "literal" },
+        null,
+        "ClickJumpNodes",
+      ),
+    ).toEqual({ clickChance: "chance.external", text: "literal" })
+    expect(
+      readStepSources(
+        { clickChance: "100", text: "Home" },
+        { clickChance: "internal", text: "internal" },
+        { clickChance: "literal", text: "literal" },
+        null,
+        "ClickJumpNodes",
+      ),
+    ).toEqual({ clickChance: "literal", text: "literal" })
+    expect(
+      readStepSources(
+        input,
+        { clickChance: "external", text: "internal" },
+        { clickChance: "account.identifier", text: "literal" },
+        account,
+        "ClickJumpNodes",
+      ),
+    ).toBeNull()
+    expect(
+      readStepSources(
+        input,
+        { clickChance: "external", text: "internal" },
+        { clickChance: "", text: "literal" },
+        null,
+        "ClickJumpNodes",
+      ),
+    ).toBeNull()
   })
 })

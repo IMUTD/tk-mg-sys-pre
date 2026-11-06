@@ -19,8 +19,6 @@ import { registerMemberRoutes } from "./modules/members/routes"
 import type { MemberService } from "./modules/members/service"
 import { registerProxyRoutes } from "./modules/proxies/routes"
 import type { ProxyService } from "./modules/proxies/service"
-import { registerRegistrationResourceRoutes } from "./modules/registration-resources/routes"
-import type { RegistrationResourceService } from "./modules/registration-resources/service"
 import { registerResourceRoutes } from "./modules/resources/routes"
 import type { ResourceService } from "./modules/resources/service"
 import { registerSettingsRoutes } from "./modules/settings/routes"
@@ -42,7 +40,6 @@ type AppOptions = {
   readonly deviceService?: DeviceService
   readonly deviceCommandService?: DeviceCommandService
   readonly memberService?: MemberService
-  readonly registrationResourceService?: RegistrationResourceService
   readonly proxyService?: ProxyService
   readonly resourceService?: ResourceService
   readonly settingsService?: SettingsService
@@ -88,14 +85,6 @@ export const createApp = (options: AppOptions = {}): Hono => {
         options.authService,
         options.auditRepository,
         options.auditExplorerRepository,
-      )
-    }
-    if (options.registrationResourceService !== undefined) {
-      registerRegistrationResourceRoutes(
-        app,
-        options.authService,
-        options.auditRepository,
-        options.registrationResourceService,
       )
     }
     if (options.deviceService !== undefined) {

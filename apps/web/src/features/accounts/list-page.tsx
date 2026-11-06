@@ -206,6 +206,13 @@ const accountDeviceName = (device: AccountDevice | null, proxy: AccountProxy | n
   return parts.length === 0 ? "-" : parts.join("-")
 }
 
+const deviceNameWithBackup = (deviceName: string, backupName: string): string => {
+  const backup = backupName.trim()
+  if (backup.length === 0) return deviceName
+  if (deviceName === "-") return backup
+  return `${deviceName}-${backup}`
+}
+
 const accountDeviceDetail = (device: AccountDevice | null, proxy: AccountProxy | null): string => {
   const text = (value: string | number | null | undefined): string =>
     value === null || value === undefined || String(value).trim().length === 0
@@ -1565,9 +1572,11 @@ export const AccountsListPage = ({
                 >
                   <div>
                     {device === null ? (
-                      accountDeviceName(device, proxy)
+                      deviceNameWithBackup(accountDeviceName(device, proxy), account.backupName ?? "")
                     ) : (
-                      <Link to="/operations/devices">{accountDeviceName(device, proxy)}</Link>
+                      <Link to="/operations/devices">
+                        {deviceNameWithBackup(accountDeviceName(device, proxy), account.backupName ?? "")}
+                      </Link>
                     )}
                     {account.backType === "2" ? (
                       <span title="本地备份"> 本地</span>

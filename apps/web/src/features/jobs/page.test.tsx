@@ -44,4 +44,77 @@ describe("jobs pages", () => {
     expect(screen.getByText("检查任务已创建并自动启动")).toBeVisible()
     expect(screen.queryByText("发布作品完成")).not.toBeInTheDocument()
   })
+
+  it("shows an automatic replay count and no manual replay button", async () => {
+    const user = userEvent.setup()
+    const step = {
+      attempt: 1,
+      linked: true,
+      parameters: {},
+      repeatCount: 1,
+      repeatIndex: 0,
+      status: "succeeded",
+      taskStatus: "succeeded",
+    }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input)
+        if (path.endsWith("/dispatch-records") && (init?.method ?? "GET") === "GET") {
+          return Response.json({
+            boxes: [
+              {
+                id: "box-1",
+                name: "140",
+                tasks: [
+                  {
+                    account: "user-a",
+                    id: "item-1",
+                    name: "早班",
+                    started: true,
+                    status: "started",
+                    steps: [
+                      {
+                        ...step,
+                        sequence: 0,
+                        skill: "OpenApp",
+                        stageName: "登录",
+                        stagePosition: 0,
+                        taskId: "task-ok",
+                      },
+                      {
+                        ...step,
+                        sequence: 1,
+                        skill: "SetProxy",
+                        autoRetryLimit: 3,
+                        autoUsed: 1,
+                        stageName: "代理",
+                        stagePosition: 1,
+                        status: "failed",
+                        taskId: "task-bad",
+                        taskStatus: "failed",
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          })
+        }
+        throw new Error(`${init?.method ?? "GET"} ${path}`)
+      }),
+    )
+    wrap(<TaskRecordsPage canWrite groupId="group-1" />)
+    const expand = async () => {
+      const buttons = await screen.findAllByRole("button", { name: "展开行" })
+      const closed = buttons.find((button) => button.getAttribute("aria-expanded") !== "true")
+      if (closed !== undefined) await user.click(closed)
+    }
+    await expand()
+    await expand()
+    expect(screen.getByText("已自动重跑 1/3 次")).toBeVisible()
+    expect(screen.queryByRole("button", { name: "插队重跑" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "重跑中" })).not.toBeInTheDocument()
+    vi.unstubAllGlobals()
+  })
 })

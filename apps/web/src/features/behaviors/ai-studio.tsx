@@ -110,7 +110,13 @@ export const AiStudio = ({ canWrite, onTest }: AiStudioProps): ReactNode => {
                 setSaving(false)
                 message.success("已永久保存")
               })
-              .catch(() => message.error("保存失败"))
+              .catch((caught: unknown) =>
+                message.error(
+                  caught instanceof Error && caught.message === "chain_name_taken"
+                    ? "名称已存在"
+                    : "保存失败",
+                ),
+              )
           }}
         />
       ) : null}

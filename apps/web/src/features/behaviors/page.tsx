@@ -10,6 +10,7 @@ import { CloudPanel } from "./cloud-panel"
 import {
   type AnchorField,
   type AnchorKey,
+  type BehaviorChain,
   type ChainStep,
   type CloudBox,
   type CloudDevice,
@@ -23,7 +24,8 @@ import {
   type TestResult,
 } from "./rpa-api"
 import { RpaStudio } from "./rpa-studio"
-import type { DevicePoint } from "./screen-map"
+import { arrangedMarks, type DevicePoint, type ScreenRect } from "./screen-map"
+import { TaskChainList } from "./task-chain-list"
 import { type LabReport, TestResultCard, taskFinished } from "./test-result"
 
 type BehaviorsPageProps = {
@@ -31,12 +33,17 @@ type BehaviorsPageProps = {
   readonly canWrite: boolean
 }
 
-type StudioTab = "chains" | "ai" | "rpa" | "lab"
+type StudioTab = "chains" | "taskChains" | "ai" | "lab"
+
+const wait = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    window.setTimeout(resolve, ms)
+  })
 
 const TAB_OPTIONS = [
   { label: "行为链", value: "chains" },
+  { label: "任务链", value: "taskChains" },
   { label: "AI制定", value: "ai" },
-  { label: "RPA编排", value: "rpa" },
   { label: "接口测试", value: "lab" },
 ] as const
 
@@ -58,6 +65,7 @@ const toSlot = (row: {
 
 export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): ReactNode => {
   const [tab, setTab] = useState<StudioTab>("chains")
+  const [editingChain, setEditingChain] = useState<BehaviorChain | null>(null)
   const [skills, setSkills] = useState<readonly SkillSpec[]>([])
   const [anchorFields, setFields] = useState<readonly AnchorField[]>(fallbackAnchorFields)
   const [anchorKeys, setKeys] = useState<readonly AnchorKey[]>(fallbackAnchorKeys)
@@ -68,7 +76,16 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
   const [report, setReport] = useState<LabReport | null>(null)
   const [taskId, setTaskId] = useState<string | null>(null)
   const [waiting, setWaiting] = useState(false)
+  const [nodeMarks, setNodeMarks] = useState<readonly ScreenRect[]>([])
+  const [liveMap, setLiveMap] = useState(false)
+  const [mapNote, setMapNote] = useState("")
   const requestTicket = useRef(0)
+  const liveMapRef = useRef(false)
+  const arrangingRef = useRef(false)
+  const pendingMapRef = useRef(false)
+  const mapTicket = useRef(0)
+  const waitingRef = useRef(false)
+  const selectedRef = useRef<CloudDevice | null>(null)
   const applyScreen = useRef<(start: DevicePoint, end: DevicePoint) => string | null>(() => null)
   const box = boxes.find((item) => item.id === boxId) ?? null
   const pit = box?.slots.find((item) => item.index === slotIndex) ?? null
@@ -87,6 +104,9 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
           slot: slotIndex,
           width: pit?.width ?? 0,
         }
+  selectedRef.current = selected
+  liveMapRef.current = liveMap
+  waitingRef.current = waiting
 
   useEffect(() => {
     let stop = false
@@ -191,6 +211,99 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
     }
   }, [taskId])
 
+  const stopLiveMap = (): void => {
+    liveMapRef.current = false
+    mapTicket.current += 1
+    pendingMapRef.current = false
+    setLiveMap(false)
+    setNodeMarks([])
+    setMapNote("")
+  }
+
+  const pumpMapRef = useRef<() => void>(() => {})
+  pumpMapRef.current = (): void => {
+    if (!liveMapRef.current) return
+    if (arrangingRef.current || waitingRef.current) {
+      pendingMapRef.current = true
+      return
+    }
+    const device = selectedRef.current
+    if (device === null) {
+      setMapNote("请先选择云机")
+      return
+    }
+    arrangingRef.current = true
+    pendingMapRef.current = false
+    const ticket = mapTicket.current
+    setMapNote("正在整理节点")
+    void (async () => {
+      try {
+        const response = await fetch("/api/tasks", {
+          body: JSON.stringify({
+            deviceId: device.deviceId,
+            indexNum: device.indexNum,
+            steps: [{ afterMs: 0, guards: [], input: {}, skill: "ArrangeNodes" }],
+          }),
+          credentials: "same-origin",
+          headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() },
+          method: "POST",
+        })
+        const created = (await response.json().catch(() => null)) as { taskId?: string } | null
+        if (!response.ok || created?.taskId === undefined || ticket !== mapTicket.current) {
+          if (ticket === mapTicket.current && liveMapRef.current) setMapNote("节点整理失败")
+          return
+        }
+        for (let attempt = 0; attempt < 60; attempt += 1) {
+          if (!liveMapRef.current || ticket !== mapTicket.current) return
+          const poll = await fetch(`/api/tasks/${created.taskId}`, { credentials: "same-origin" })
+          if (!poll.ok || ticket !== mapTicket.current) {
+            if (ticket === mapTicket.current && liveMapRef.current) setMapNote("节点整理失败")
+            return
+          }
+          const body = (await poll.json()) as LabReport
+          if (!taskFinished(body.status)) {
+            await wait(1000)
+            continue
+          }
+          if (!liveMapRef.current || ticket !== mapTicket.current) return
+          if (body.status !== "succeeded") {
+            setMapNote("节点整理失败")
+            return
+          }
+          const step = [...body.steps].reverse().find((item) => item.kind === "ArrangeNodes")
+          const marks = arrangedMarks(step?.result)
+          setNodeMarks(marks)
+          setMapNote(marks.length === 0 ? "没有可用坐标" : `已标出 ${marks.length} 个范围`)
+          return
+        }
+        if (ticket === mapTicket.current && liveMapRef.current) setMapNote("节点整理失败")
+      } catch {
+        if (ticket === mapTicket.current && liveMapRef.current) setMapNote("节点整理失败")
+      } finally {
+        arrangingRef.current = false
+        if (liveMapRef.current && (pendingMapRef.current || ticket !== mapTicket.current)) {
+          pendingMapRef.current = false
+          pumpMapRef.current()
+        }
+      }
+    })()
+  }
+
+  useEffect(() => {
+    if (liveMap) pumpMapRef.current()
+  }, [liveMap])
+
+  useEffect(() => {
+    if (!liveMapRef.current) return
+    mapTicket.current += 1
+    pendingMapRef.current = true
+    if (!arrangingRef.current) pumpMapRef.current()
+  }, [selected?.deviceId, selected?.indexNum])
+
+  useEffect(() => {
+    if (!waiting && liveMapRef.current) pumpMapRef.current()
+  }, [waiting])
+
   const note = (message: string, ok: boolean): void => {
     setLogs((current) => [...current, { at: nowText(), message, ok }].slice(-20))
   }
@@ -199,6 +312,7 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
     label: string,
     steps: readonly ChainStep[],
     chainId?: string,
+    chainName?: string,
   ): Promise<string | null> => {
     const ticket = requestTicket.current + 1
     requestTicket.current = ticket
@@ -225,25 +339,41 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
       return null
     }
     try {
+      const chain = chainName?.trim() ?? ""
       const response = await fetch("/api/tasks", {
         body: JSON.stringify({
           deviceId: selected.deviceId,
           indexNum: selected.indexNum,
-          steps: steps.map((step) => ({
-            afterMs: step.delayMs ?? 0,
-            guards: step.guards ?? [],
-            input: step.params,
-            skill: step.api,
-          })),
+          ...(chain.length > 0 ? { chainName: chain } : {}),
+          steps: steps.map((step) => {
+            const remark = (step.remark ?? "").trim()
+            return {
+              afterMs: step.delayMs ?? 0,
+              guards: step.guards ?? [],
+              input: step.params,
+              scopes: step.scopes ?? {},
+              skill: step.api,
+              sources: step.sources ?? {},
+              ...(remark.length > 0 ? { remark } : {}),
+            }
+          }),
         }),
         credentials: "same-origin",
         headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() },
         method: "POST",
       })
       if (ticket !== requestTicket.current) return null
-      const body = (await response.json().catch(() => null)) as { taskId?: string } | null
+      const body = (await response.json().catch(() => null)) as { error?: string; taskId?: string } | null
       const at = nowText()
-      note(response.ok ? `${label} 已下发` : "下发失败", response.ok)
+      const failure =
+        body?.error === "备注过长" ||
+          body?.error === "备注无效" ||
+          body?.error === "行为链名无效" ||
+          body?.error === "没有外部概率" ||
+          body?.error === "没有文本池"
+          ? body.error
+          : "下发失败"
+      note(response.ok ? `${label} 已下发` : failure, response.ok)
       if (response.ok && chainId !== undefined) touchChainTest(chainId, at)
       if (!response.ok || body?.taskId === undefined) {
         setWaiting(false)
@@ -283,8 +413,13 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
     setWaiting(false)
   }
 
-  const runTest = (name: string, steps: readonly ChainStep[], chainId?: string): boolean => {
-    void dispatch(name, steps, chainId)
+  const runTest = (
+    name: string,
+    steps: readonly ChainStep[],
+    chainId?: string,
+    chainName?: string,
+  ): boolean => {
+    void dispatch(name, steps, chainId, chainName)
     return selected !== null
   }
 
@@ -293,24 +428,48 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
       <div className="behaviors-layout">
         <div className="behaviors-workspace">
           <Segmented
-            onChange={(value) => setTab(value as StudioTab)}
+            onChange={(value) => {
+              setEditingChain(null)
+              setTab(value as StudioTab)
+            }}
             options={[...TAB_OPTIONS]}
             value={tab}
           />
-          {tab === "chains" ? (
-            <ChainList {...(canDelete === undefined ? {} : { canDelete })} onTest={runTest} />
+          {tab === "chains" && editingChain === null ? (
+            <ChainList
+              canWrite={canWrite}
+              {...(canDelete === undefined ? {} : { canDelete })}
+              onEdit={setEditingChain}
+              onTest={runTest}
+            />
           ) : null}
-          {tab === "ai" ? <AiStudio canWrite={canWrite} onTest={runTest} /> : null}
-          {tab === "rpa" ? (
+          {tab === "chains" && editingChain !== null ? (
             <RpaStudio
+              key={editingChain.id}
               anchorFields={anchorFields}
               anchorKeys={anchorKeys}
               applyScreen={applyScreen}
               canWrite={canWrite}
+              loadedChain={editingChain}
+              mapped={nodeMarks.length > 0}
+              onBack={() => setEditingChain(null)}
+              onClearMap={stopLiveMap}
+              onMapNodes={() => {
+                const step = [...(report?.steps ?? [])].reverse().find((item) => item.kind === "ArrangeNodes")
+                const marks = arrangedMarks(step?.result)
+                if (marks.length === 0) return "先测试节点整理，拿到坐标后再映射"
+                setNodeMarks(marks)
+                return `已在画面标出 ${marks.length} 个范围`
+              }}
+              onSaved={setEditingChain}
               onTest={runTest}
               skills={skills}
             />
           ) : null}
+          {tab === "taskChains" ? (
+            <TaskChainList canWrite={canWrite} {...(canDelete === undefined ? {} : { canDelete })} />
+          ) : null}
+          {tab === "ai" ? <AiStudio canWrite={canWrite} onTest={runTest} /> : null}
           {tab === "lab" ? (
             <ApiLab
               applyScreen={applyScreen}
@@ -323,6 +482,17 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
         <CloudPanel
           boxId={boxId}
           boxes={boxes}
+          mapNote={mapNote}
+          mapping={liveMap}
+          marks={nodeMarks}
+          onFrame={() => pumpMapRef.current()}
+          onToggleMap={() => {
+            if (liveMapRef.current) {
+              stopLiveMap()
+              return
+            }
+            setLiveMap(true)
+          }}
           onGesture={(start, end) => {
             const message = applyScreen.current(start, end)
             if (message === null) return

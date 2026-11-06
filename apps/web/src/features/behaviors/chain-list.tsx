@@ -1,19 +1,38 @@
 import { App, Button, Card, Input, Modal, Space, Tag } from "antd"
 import { type ReactNode, useState } from "react"
 
-import { deleteChain, useChains } from "./chain-store"
-import { type ChainStep, originColor, originLabel, stepText, validateChainName } from "./rpa-api"
+import { createNamedChain, deleteChain, useChains } from "./chain-store"
+import {
+  type BehaviorChain,
+  type ChainStep,
+  originColor,
+  originLabel,
+  stepText,
+  validateChainName,
+} from "./rpa-api"
 
 type ChainListProps = {
   readonly canDelete?: boolean
-  readonly onTest: (name: string, steps: readonly ChainStep[], chainId: string) => boolean
+  readonly canWrite?: boolean
+  readonly onEdit: (chain: BehaviorChain) => void
+  readonly onTest: (
+    name: string,
+    steps: readonly ChainStep[],
+    chainId: string,
+    chainName?: string,
+  ) => boolean
 }
 
-export const ChainList = ({ canDelete, onTest }: ChainListProps): ReactNode => {
+const saveErrorText = (error: unknown): string =>
+  error instanceof Error && error.message === "chain_name_taken" ? "名称已存在" : "保存失败"
+
+export const ChainList = ({ canDelete, canWrite, onEdit, onTest }: ChainListProps): ReactNode => {
   const allowDelete = canDelete === true
   const { message, modal } = App.useApp()
   const chains = useChains()
   const [keyword, setKeyword] = useState("")
+  const [naming, setNaming] = useState(false)
+  const [name, setName] = useState("")
   const filtered = chains.filter((item) =>
     keyword.trim().length === 0 ? true : item.name.includes(keyword.trim()),
   )
@@ -29,6 +48,17 @@ export const ChainList = ({ canDelete, onTest }: ChainListProps): ReactNode => {
           style={{ width: 240 }}
           value={keyword}
         />
+        {canWrite === true ? (
+          <Button
+            onClick={() => {
+              setName("")
+              setNaming(true)
+            }}
+            type="primary"
+          >
+            创建
+          </Button>
+        ) : null}
       </div>
       {filtered.length === 0 ? (
         <Card className="behaviors-empty">暂无行为链</Card>
@@ -37,28 +67,35 @@ export const ChainList = ({ canDelete, onTest }: ChainListProps): ReactNode => {
           {filtered.map((item) => (
             <Card
               extra={
-                allowDelete ? (
-                  <Button
-                    danger
-                    onClick={() => {
-                      void modal.confirm({
-                        cancelText: "取消",
-                        content: `确定删除「${item.name}」吗？删除后无法恢复。`,
-                        okText: "确定",
-                        onOk: async () => {
-                          const ok = await deleteChain(item.id)
-                          if (ok) message.success("删除成功")
-                          else message.error("删除失败")
-                        },
-                        title: "提示",
-                      })
-                    }}
-                    size="small"
-                    type="link"
-                  >
-                    删除
-                  </Button>
-                ) : null
+                <Space size={0}>
+                  {canWrite === true ? (
+                    <Button onClick={() => onEdit(item)} size="small" type="link">
+                      编辑
+                    </Button>
+                  ) : null}
+                  {allowDelete ? (
+                    <Button
+                      danger
+                      onClick={() => {
+                        void modal.confirm({
+                          cancelText: "取消",
+                          content: `确定删除「${item.name}」吗？删除后无法恢复。`,
+                          okText: "确定",
+                          onOk: async () => {
+                            const ok = await deleteChain(item.id)
+                            if (ok) message.success("删除成功")
+                            else message.error("删除失败")
+                          },
+                          title: "提示",
+                        })
+                      }}
+                      size="small"
+                      type="link"
+                    >
+                      删除
+                    </Button>
+                  ) : null}
+                </Space>
               }
               key={item.id}
               title={item.name}
@@ -71,9 +108,14 @@ export const ChainList = ({ canDelete, onTest }: ChainListProps): ReactNode => {
                 )}
               </Space>
               <ol className="chain-steps">
-                {item.steps.slice(0, 4).map((step) => (
-                  <li key={step.id}>{stepText(step)}</li>
-                ))}
+                {item.steps.slice(0, 4).map((step) => {
+                  const text = stepText(step)
+                  return (
+                    <li key={step.id} title={text}>
+                      {text}
+                    </li>
+                  )
+                })}
               </ol>
               <p className="behaviors-meta">
                 上次测试：{item.lastTestAt.length === 0 ? "暂无" : item.lastTestAt}
@@ -82,7 +124,7 @@ export const ChainList = ({ canDelete, onTest }: ChainListProps): ReactNode => {
               <Space className="behaviors-card-actions">
                 <Button
                   onClick={() => {
-                    const ok = onTest(item.name, item.steps, item.id)
+                    const ok = onTest(item.name, item.steps, item.id, item.name)
                     if (ok) message.success("测试成功")
                   }}
                   type="primary"
@@ -94,18 +136,72 @@ export const ChainList = ({ canDelete, onTest }: ChainListProps): ReactNode => {
           ))}
         </div>
       )}
+      {naming ? (
+        <Modal
+          footer={
+            <div className="dialog-footer">
+              <Button onClick={() => setNaming(false)} type="text">
+                取消
+              </Button>
+              <Button
+                onClick={() => {
+                  const error = validateChainName(name)
+                  if (error !== null) {
+                    message.error(error)
+                    return
+                  }
+                  const trimmed = name.trim()
+                  if (chains.some((item) => item.name === trimmed)) {
+                    message.error("名称已存在")
+                    return
+                  }
+                  void createNamedChain(trimmed)
+                    .then(() => {
+                      setNaming(false)
+                      message.success("已创建")
+                    })
+                    .catch((caught: unknown) => message.error(saveErrorText(caught)))
+                }}
+                type="primary"
+              >
+                确认
+              </Button>
+            </div>
+          }
+          onCancel={() => setNaming(false)}
+          open
+          title="创建行为链"
+          width={420}
+        >
+          <Input
+            aria-label="行为链名称"
+            onChange={(event) => setName(event.target.value)}
+            placeholder="请输入名称"
+            value={name}
+          />
+        </Modal>
+      ) : null}
     </div>
   )
 }
 
 type SaveDialogProps = {
+  readonly initialName?: string
+  readonly note?: string
   readonly onCancel: () => void
   readonly onSubmit: (name: string) => void
+  readonly title?: string
 }
 
-export const SaveChainDialog = ({ onCancel, onSubmit }: SaveDialogProps): ReactNode => {
+export const SaveChainDialog = ({
+  initialName = "",
+  note = "测试成功后才会永久保存，不删除则一直可被机器人使用。",
+  onCancel,
+  onSubmit,
+  title = "保存为行为链",
+}: SaveDialogProps): ReactNode => {
   const { message } = App.useApp()
-  const [name, setName] = useState("")
+  const [name, setName] = useState(initialName)
 
   return (
     <Modal
@@ -131,7 +227,7 @@ export const SaveChainDialog = ({ onCancel, onSubmit }: SaveDialogProps): ReactN
       }
       onCancel={onCancel}
       open
-      title="保存为行为链"
+      title={title}
       width={420}
     >
       <Input
@@ -140,7 +236,7 @@ export const SaveChainDialog = ({ onCancel, onSubmit }: SaveDialogProps): ReactN
         placeholder="请输入名称"
         value={name}
       />
-      <p className="behaviors-meta">测试成功后才会永久保存，不删除则一直可被机器人使用。</p>
+      <p className="behaviors-meta">{note}</p>
     </Modal>
   )
 }

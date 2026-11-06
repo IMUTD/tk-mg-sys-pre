@@ -120,6 +120,7 @@ export const applyInitializerSnapshot = async (
       if (changing || !present) {
         await tx`update device set assignment_pending = true, assignee_user_id = null
           where id = ${deviceId}`
+        await tx`update box_share_entry set assignee_user_id = null where device_id = ${deviceId}`
         await tx`delete from device_watch where device_id = ${deviceId}`
         // Only cancel work that has never been dispatched; uncertain work must be reconciled.
         await tx`update execution_task_step set status = 'cancelled', finished_at = now()
@@ -159,15 +160,22 @@ export const applyInitializerSnapshot = async (
         disk = ${box.disk}, disk_pct = ${box.diskPct},
         last_seen_at = case when exists (
           select 1 from device_agent a where a.device_id = device.id
-            and a.last_heartbeat_at > now() - interval '45 seconds'
+            and a.last_heartbeat_at > now() - interval '150 seconds'
         ) then greatest(last_seen_at, ${box.lastSeenAt}::timestamptz) else last_seen_at end,
         status = case when exists (
           select 1 from device_agent a where a.device_id = device.id
-            and a.last_heartbeat_at > now() - interval '45 seconds'
+            and a.last_heartbeat_at > now() - interval '150 seconds'
         ) then 'online' else 'offline' end::device_status, updated_at = now(),
         box_group_id = case when ${changing} then null else box_group_id end,
         sequence_no = case when ${changing} then null else sequence_no end
         where id = ${deviceId}`
+      await tx`
+        update box_share_entry set
+          assignee_user_id = (select assignee_user_id from device where id = ${deviceId}),
+          box_online = (
+            select status = 'online' and enabled from device where id = ${deviceId}
+          )
+        where device_id = ${deviceId}`
       if (changing) await tx`delete from device_remark where device_id = ${deviceId}`
     }
     await tx`insert into init_sync_state(source_key) values (${sourceKey})

@@ -2,35 +2,30 @@ import {
   AccountBookOutlined,
   AppstoreOutlined,
   CloudServerOutlined,
-  ClusterOutlined,
-  DashboardOutlined,
   DatabaseOutlined,
+  DesktopOutlined,
   FileImageOutlined,
   FileProtectOutlined,
   FileTextOutlined,
   FolderOpenOutlined,
   FontSizeOutlined,
-  FundOutlined,
   GiftOutlined,
   GlobalOutlined,
   HighlightOutlined,
-  HistoryOutlined,
   HomeOutlined,
   InboxOutlined,
   NodeIndexOutlined,
   PictureOutlined,
   PlaySquareOutlined,
   ProfileOutlined,
-  RiseOutlined,
   RobotOutlined,
   SafetyCertificateOutlined,
-  SettingOutlined,
   ShopOutlined,
   ShoppingOutlined,
+  SwapOutlined,
   TabletOutlined,
   TeamOutlined,
   ToolOutlined,
-  TrophyOutlined,
   UnorderedListOutlined,
   UserOutlined,
   VideoCameraOutlined,
@@ -58,18 +53,6 @@ type NavigationItem = {
 const navigation: readonly NavigationItem[] = [
   { icon: <HomeOutlined aria-hidden />, label: "运营概览", path: "/overview" },
   {
-    icon: <FundOutlined aria-hidden />,
-    label: "营销中心",
-    path: "/marketing",
-    children: [
-      { icon: <DashboardOutlined aria-hidden />, label: "营销面板", path: "/marketing/dashboard" },
-      { icon: <ShopOutlined aria-hidden />, label: "账号市场", path: "/marketing/accounts" },
-      { icon: <ClusterOutlined aria-hidden />, label: "节点市场", path: "/marketing/nodes" },
-      { icon: <RiseOutlined aria-hidden />, label: "销售业绩", path: "/marketing/sales" },
-      { icon: <TrophyOutlined aria-hidden />, label: "运营业绩", path: "/marketing/ops" },
-    ],
-  },
-  {
     icon: <GiftOutlined aria-hidden />,
     label: "积分商场",
     path: "/mall",
@@ -81,19 +64,25 @@ const navigation: readonly NavigationItem[] = [
     ],
   },
   {
+    icon: <ShopOutlined aria-hidden />,
+    label: "商家中心",
+    path: "/merchant",
+    children: [
+      { icon: <SwapOutlined aria-hidden />, label: "账号转移", path: "/merchant/accounts" },
+      { icon: <SwapOutlined aria-hidden />, label: "代理转移", path: "/merchant/proxies" },
+      { icon: <ProfileOutlined aria-hidden />, label: "订单管理", path: "/merchant/orders" },
+    ],
+  },
+  {
     icon: <AppstoreOutlined aria-hidden />,
     label: "运营中心",
     path: "/operations",
     children: [
       { icon: <TabletOutlined aria-hidden />, label: "盒子管理", path: "/operations/devices" },
+      { icon: <DesktopOutlined aria-hidden />, label: "云机预览", path: "/operations/previews" },
       { icon: <UserOutlined aria-hidden />, label: "账号管理", path: "/operations/accounts" },
       { icon: <TeamOutlined aria-hidden />, label: "账号池", path: "/operations/account-pool" },
       { icon: <UnorderedListOutlined aria-hidden />, label: "任务列表", path: "/operations/tasks" },
-      {
-        icon: <HistoryOutlined aria-hidden />,
-        label: "任务记录",
-        path: "/operations/task-records",
-      },
       { icon: <GlobalOutlined aria-hidden />, label: "代理管理", path: "/operations/proxies" },
       { icon: <PlaySquareOutlined aria-hidden />, label: "视频数据", path: "/studio/video-pool" },
     ],
@@ -117,11 +106,6 @@ const navigation: readonly NavigationItem[] = [
         icon: <NodeIndexOutlined aria-hidden />,
         label: "行为中心",
         path: "/engineering/behaviors",
-      },
-      {
-        icon: <SettingOutlined aria-hidden />,
-        label: "配置中心",
-        path: "/operations/configuration",
       },
     ],
   },
@@ -195,8 +179,8 @@ const titleForPath = (path: string, user: SessionUser): string => {
   )
   if (item?.label === "运营中心") return "运营概览"
   if (item?.label === "工程中心") return "私有云储存"
-  if (item?.label === "营销中心") return "营销面板"
   if (item?.label === "积分商场") return "积分记录"
+  if (item?.label === "商家中心") return "账号转移"
   if (item?.label === "制作中心") return "视频制作"
   if (item?.label === "资源中心") return "文本池"
   return item?.label ?? "运营概览"

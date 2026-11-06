@@ -57,14 +57,17 @@ describe("mall pages", () => {
     expect(within(dialog).queryByLabelText("税号")).not.toBeInTheDocument()
   })
 
-  it("shows redeem products grouped by tag", async () => {
+  it("offers account and proxy purchases", async () => {
     const user = userEvent.setup()
     wrap(<MallRedeemPage />)
     expect(screen.getByText("积分余额")).toBeVisible()
-    expect(screen.getByText("日本满季度白号100个")).toBeVisible()
-    const redeem = screen.getAllByRole("button", { name: "立即兑换" })[0]
-    if (redeem === undefined) throw new Error("missing redeem")
-    await user.click(redeem)
-    expect(await screen.findByText("兑换成功")).toBeVisible()
+    expect(screen.getByText("购买账号")).toBeVisible()
+    expect(screen.getByText("购买代理")).toBeVisible()
+    expect(screen.getByText("日本满季度白号")).toBeVisible()
+    expect(screen.getByText("全球动态住宅")).toBeVisible()
+    await user.click(screen.getByRole("button", { name: "购买日本满季度白号" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("button", { name: "确认购买" }))
+    expect(await screen.findByText("购买已提交，等待商家发货")).toBeVisible()
   })
 })

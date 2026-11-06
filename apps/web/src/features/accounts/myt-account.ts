@@ -123,6 +123,7 @@ export type AccountProxy = {
 export type MytAccount = {
   app: string
   backKey: string
+  backupName?: string
   backType: AccountBackType | ""
   createTime: string
   deleted: boolean

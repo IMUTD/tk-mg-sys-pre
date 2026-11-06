@@ -75,6 +75,7 @@ describe("account API mapping", () => {
       app: "tiktok",
       avatar: "",
       backupKey: "",
+      backupName: "hmga0d5d4",
       backupSlot: "",
       backupType: null,
       createdAt: new Date("2026-10-14T00:00:00Z"),
@@ -109,6 +110,7 @@ describe("account API mapping", () => {
       updatedAt: new Date("2026-10-14T00:00:00Z"),
     }
     const desk = toDeskAccount(source, 0)
+    expect(desk.backupName).toBe("hmga0d5d4")
     expect(desk.status).toBe("4")
     expect(accountWrite(desk).status).toBe("unregistered")
   })

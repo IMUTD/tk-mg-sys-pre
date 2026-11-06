@@ -70,7 +70,6 @@ test("navigates an administrator to the overview after successful login", async 
             groupIds: [],
             pages: [
               { canDelete: false, canView: true, key: "/overview" },
-              { canDelete: false, canView: true, key: "/operations/configuration" },
               { canDelete: false, canView: true, key: "/members" },
             ],
             permissions: ["configuration:write", "resources:read"],
@@ -95,6 +94,6 @@ test("navigates an administrator to the overview after successful login", async 
     .poll(() => page.evaluate(() => window.localStorage.getItem("tk-mg.remembered-login")))
     .toBe(JSON.stringify({ email: "admin@example.com" }))
   await expect(page.getByText("哈蜜瓜云控 / 运营概览")).toBeVisible()
-  await expect(page.getByRole("link", { name: "配置中心" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "配置中心" })).toHaveCount(0)
   await expect(page.getByRole("link", { name: "成员与权限" })).toBeVisible()
 })

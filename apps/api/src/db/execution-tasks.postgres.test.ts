@@ -104,6 +104,13 @@ describe("execution task schema", () => {
             "error_message",
             "result",
             "account_id",
+            "predecessor_task_id",
+            "dispatch_item_id",
+            "task_chain_id",
+            "stage_position",
+            "stage_count",
+            "repeat_index",
+            "repeat_count",
           ],
         )
         expect(

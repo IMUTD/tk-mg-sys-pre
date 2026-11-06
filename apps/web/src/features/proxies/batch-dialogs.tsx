@@ -176,9 +176,7 @@ export const ProxyBatchUpdateDialog = ({
   }) => void
 }): ReactNode => {
   const [expiredTime, setExpiredTime] = useState("")
-  const [safe, setSafe] = useState<"keep" | "off" | "on">("keep")
   const [save, setSave] = useState<"keep" | "off" | "on">("keep")
-  const [tun, setTun] = useState<"keep" | "off" | "on">("keep")
   return (
     <Modal
       footer={
@@ -188,9 +186,9 @@ export const ProxyBatchUpdateDialog = ({
             onClick={() =>
               onSubmit({
                 expiredTime: expiredTime.trim().length === 0 ? null : expiredTime.trim(),
-                safe,
+                safe: "keep",
                 save,
-                tun,
+                tun: "keep",
               })
             }
             type="primary"
@@ -205,20 +203,6 @@ export const ProxyBatchUpdateDialog = ({
       width={520}
     >
       <Form labelCol={{ style: { width: 90 } }} layout="horizontal" size="small">
-        <Form.Item label="TUN">
-          <Radio.Group
-            onChange={(event) => setTun(event.target.value)}
-            options={[...BATCH_SWITCH_OPTIONS]}
-            value={tun}
-          />
-        </Form.Item>
-        <Form.Item label="安全">
-          <Radio.Group
-            onChange={(event) => setSafe(event.target.value)}
-            options={[...BATCH_SWITCH_OPTIONS]}
-            value={safe}
-          />
-        </Form.Item>
         <Form.Item label="节流">
           <Radio.Group
             onChange={(event) => setSave(event.target.value)}

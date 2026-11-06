@@ -83,6 +83,8 @@ export const deviceInstances = pgTable(
     enabled: boolean("enabled").notNull().default(true),
     apiPort: integer("api_port").notNull().default(0),
     rpaPort: integer("rpa_port").notNull().default(0),
+    webrtcTcp: integer("webrtc_tcp").notNull().default(0),
+    webrtcUdp: integer("webrtc_udp").notNull().default(0),
     width: text("width").notNull().default(""),
     height: text("height").notNull().default(""),
     containerId: text("container_id").notNull().default(""),

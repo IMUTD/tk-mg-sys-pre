@@ -3,70 +3,68 @@ import { z } from "zod"
 
 import type { UserId } from "../../lib/authorization"
 
-export const StorageProtocol = {
-  Nfs: "nfs",
-  Smb: "smb",
-  WebDav: "webdav",
-} as const
+export const NasItemSchema = z.object({
+  bucket: z.string().trim().max(63).default(""),
+  endpoint: z.string().trim().max(512).default(""),
+  id: z.string().uuid(),
+  loginUrl: z.string().trim().url().max(512),
+  name: z.string().trim().min(1).max(64),
+  username: z.string().trim().min(1).max(256),
+})
 
-export const StorageProtocolSchema = z.enum([
-  StorageProtocol.Nfs,
-  StorageProtocol.Smb,
-  StorageProtocol.WebDav,
-])
+export type NasItem = z.infer<typeof NasItemSchema>
 
-export type StorageProtocol = z.infer<typeof StorageProtocolSchema>
+export const NasDocumentSchema = z.object({
+  items: z.array(NasItemSchema).max(50),
+})
 
-export type StoredStorageConfiguration = {
+export type NasDocument = z.infer<typeof NasDocumentSchema>
+
+export type StoredNasConfiguration = NasDocument & {
   readonly encryptedCredentials: string | null
-  readonly host: string
-  readonly protocol: StorageProtocol
-  readonly rootPath: string
 }
 
-export type StorageConfigurationWrite = StoredStorageConfiguration & { readonly updatedBy: UserId }
+export type NasConfigurationWrite = StoredNasConfiguration & { readonly updatedBy: UserId }
 
 export interface StorageRepository {
-  get(): Promise<StoredStorageConfiguration | null>
-  save(input: StorageConfigurationWrite): Promise<StoredStorageConfiguration>
+  get(administratorId: UserId): Promise<StoredNasConfiguration | null>
+  save(input: NasConfigurationWrite): Promise<StoredNasConfiguration>
 }
 
-const StorageSettingKey = "private-cloud"
+export const storageSettingKey = (administratorId: string): string => `private-cloud:${administratorId}`
 
-const StoredValueSchema = z.preprocess(
-  (value) => (typeof value === "string" ? JSON.parse(value) : value),
-  z.object({
-    host: z.string(),
-    protocol: StorageProtocolSchema,
-    rootPath: z.string(),
-  }),
-)
+const StoredValueSchema = z.preprocess((value) => {
+  const parsed = typeof value === "string" ? JSON.parse(value) : value
+  if (typeof parsed === "object" && parsed !== null && !("items" in parsed)) return { items: [] }
+  return parsed
+}, NasDocumentSchema)
 
 type StorageSettingRow = {
   readonly encryptedCredentials: string | null
   readonly value: unknown
 }
 
-const toStoredConfiguration = (row: StorageSettingRow): StoredStorageConfiguration => {
-  const value = StoredValueSchema.parse(row.value)
-  return { encryptedCredentials: row.encryptedCredentials, ...value }
+const toStoredConfiguration = (row: StorageSettingRow): StoredNasConfiguration | null => {
+  const parsed = StoredValueSchema.safeParse(row.value)
+  if (!parsed.success) return { encryptedCredentials: row.encryptedCredentials, items: [] }
+  return { encryptedCredentials: row.encryptedCredentials, ...parsed.data }
 }
 
 export const createPostgresStorageRepository = (client: Sql): StorageRepository => ({
-  get: async () => {
+  get: async (administratorId) => {
     const rows = await client<StorageSettingRow[]>`
       select encrypted_credentials as "encryptedCredentials", value
       from storage_setting
-      where key = ${StorageSettingKey}
+      where key = ${storageSettingKey(administratorId)}
     `
     const row = rows[0]
     return row === undefined ? null : toStoredConfiguration(row)
   },
   save: async (input) => {
-    const value = { host: input.host, protocol: input.protocol, rootPath: input.rootPath }
+    const value: NasDocument = { items: input.items }
     const rows = await client<StorageSettingRow[]>`
       insert into storage_setting (key, value, encrypted_credentials, updated_by)
-      values (${StorageSettingKey}, ${JSON.stringify(value)}::jsonb, ${input.encryptedCredentials}, ${input.updatedBy})
+      values (${storageSettingKey(input.updatedBy)}, ${client.json(value)}, ${input.encryptedCredentials}, ${input.updatedBy})
       on conflict (key) do update set
         value = excluded.value,
         encrypted_credentials = excluded.encrypted_credentials,
@@ -76,16 +74,18 @@ export const createPostgresStorageRepository = (client: Sql): StorageRepository 
     `
     const row = rows[0]
     if (row === undefined) throw new StoragePersistenceError()
-    return toStoredConfiguration(row)
+    const stored = toStoredConfiguration(row)
+    if (stored === null) throw new StoragePersistenceError()
+    return stored
   },
 })
 
 export const createInMemoryStorageRepository = (): StorageRepository => {
-  let current: StoredStorageConfiguration | null = null
+  const rows = new Map<string, StoredNasConfiguration>()
   return {
-    get: async () => current,
-    save: async ({ updatedBy: _updatedBy, ...configuration }) => {
-      current = configuration
+    get: async (administratorId) => rows.get(administratorId) ?? null,
+    save: async ({ updatedBy, ...configuration }) => {
+      rows.set(updatedBy, configuration)
       return configuration
     },
   }

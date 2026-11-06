@@ -3,6 +3,7 @@ import { App, Button, Card, Progress, Segmented, Space, Tag } from "antd"
 import { type ReactNode, useEffect, useMemo, useState } from "react"
 
 import { TargetFormDialog } from "./form-dialog"
+import { NasCards } from "./nas-form"
 import { ScheduleDialog } from "./schedule-dialog"
 import "./storage.css"
 import {
@@ -110,7 +111,7 @@ export const StoragePage = ({ canDelete, canWrite }: StoragePageProps): ReactNod
           ]}
           value={kind}
         />
-        {canWrite ? (
+        {canWrite && kind === "sql" ? (
           <Button
             icon={<PlusOutlined aria-hidden />}
             onClick={() => setEditRecord(emptyTarget(kind, 0, nowText()))}
@@ -120,7 +121,9 @@ export const StoragePage = ({ canDelete, canWrite }: StoragePageProps): ReactNod
           </Button>
         ) : null}
       </div>
-      {filtered.length === 0 ? (
+      {kind === "nas" ? (
+        <NasCards canDelete={allowDelete} canWrite={canWrite} />
+      ) : filtered.length === 0 ? (
         <Card className="storage-empty">{kind === "nas" ? "暂无 NAS 配置" : "暂无数据库配置"}</Card>
       ) : (
         <div className="storage-card-grid">

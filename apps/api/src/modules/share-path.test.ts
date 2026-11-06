@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import { directoryOk, fileCategory, isBucket, splitRelative } from "./share-path"
+import { backupPhone, directoryOk, fileCategory, isBucket, phoneQuery, splitRelative } from "./share-path"
 
 describe("share paths", () => {
   it("keeps the directory of a nested video", () => {
@@ -19,6 +19,15 @@ describe("share paths", () => {
     expect(splitRelative("a\\b.mp4")).toBeNull()
     expect(directoryOk("美女/一月")).toBe(true)
     expect(directoryOk("")).toBe(true)
+  })
+
+  it("reads the phone name and China-local hour from a backup file", () => {
+    const parsed = backupPhone("hmgae4626-2026103112-SeiCqg.tar.gz")
+    expect(parsed.phoneName).toBe("hmgae4626")
+    expect(parsed.namedAt?.toISOString()).toBe("2026-10-31T04:00:00.000Z")
+    expect(phoneQuery("hmgae4626")).toBe("hmgae4626")
+    expect(phoneQuery("hmgae4626-2026103112-SeiCqg.tar.gz")).toBe("hmgae4626")
+    expect(phoneQuery("../a")).toBeNull()
   })
 
   it.each(["\0", "\t", "\n", "\r", '"', "'", "`", "$"])(

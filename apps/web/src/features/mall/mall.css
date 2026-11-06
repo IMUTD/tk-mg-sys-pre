@@ -13,17 +13,33 @@
   gap: 16px;
 }
 
-.redeem-grid {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+.purchase-balance {
+  color: rgba(0, 0, 0, 0.88);
+  font-size: 24px;
+  line-height: 32px;
 }
 
-.redeem-card-meta {
-  color: #909399;
+.purchase-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.purchase-form {
+  display: grid;
+  gap: 12px;
+}
+
+.purchase-form > div {
+  align-items: center;
   display: flex;
   justify-content: space-between;
-  margin-bottom: 8px;
+}
+
+@media (max-width: 900px) {
+  .purchase-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .video-cover {

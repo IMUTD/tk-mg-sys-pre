@@ -1,5 +1,7 @@
 export const APP_NAME = "哈蜜瓜云控"
 
+export const APP_VERSION = "v0.1.0"
+
 export const APP_OVERVIEW_LABEL = `${APP_NAME} 运营概览`
 
 export const LOGIN_BACKGROUND_URL =

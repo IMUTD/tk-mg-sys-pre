@@ -16,8 +16,11 @@
     "@tk-mg/task-execution": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.10.6",
+    "html-to-text": "^10.0.1",
     "i18n-iso-countries": "7.14.0",
+    "imapflow": "^2.10.0",
     "ioredis": "^6.0.0",
+    "mailparser": "^3.14.1",
     "ipaddr.js": "2.2.0",
     "postgres": "^3.4.9",
     "zod": "^4.3.5"

@@ -22,10 +22,8 @@ export const ProxyImportDialog = ({
   const [importing, setImporting] = useState(false)
   const [proxyType, setProxyType] = useState<"dynamic" | "static">("static")
   const [remark, setRemark] = useState("")
-  const [safe, setSafe] = useState(false)
   const [save, setSave] = useState(false)
   const [tag, setTag] = useState("")
-  const [tun, setTun] = useState(false)
   const [turbo, setTurbo] = useState(false)
   const [type, setType] = useState<"0" | "1" | "2">("2")
   const canSubmit = content.trim().length > 0
@@ -46,10 +44,10 @@ export const ProxyImportDialog = ({
             expiredTime: expiredTime.trim().length === 0 ? null : expiredTime.trim(),
             proxyType,
             remark,
-            safe,
+            safe: false,
             save,
             tag: tag.trim(),
-            tun,
+            tun: false,
             turbo,
             type,
           },
@@ -104,12 +102,6 @@ export const ProxyImportDialog = ({
         ) : null}
         <Form.Item label="节流">
           <Switch checked={save} disabled={type === "0"} onChange={setSave} />
-        </Form.Item>
-        <Form.Item label="TUN模式">
-          <Switch checked={tun} onChange={setTun} />
-        </Form.Item>
-        <Form.Item label="强力安全模式">
-          <Switch checked={safe} onChange={setSafe} />
         </Form.Item>
         {type === "2" || type === "1" ? (
           <Form.Item label="加速节点">

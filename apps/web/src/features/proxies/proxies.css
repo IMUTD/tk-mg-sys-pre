@@ -52,8 +52,7 @@
 }
 
 .proxy-result-toolbar,
-.proxy-result-summary,
-.proxy-mode-list {
+.proxy-result-summary {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
@@ -68,23 +67,6 @@
 .proxy-result-summary > span {
   min-width: 0;
   overflow-wrap: anywhere;
-}
-
-.proxy-mode-tag.is-off {
-  color: #c0c4cc;
-}
-
-.proxy-mode-tag.mode-save.is-on {
-  color: #e6a23c;
-}
-
-.proxy-mode-tag.mode-tun.is-on,
-.proxy-mode-tag.mode-turbo.is-on {
-  color: #409eff;
-}
-
-.proxy-mode-tag.mode-safe.is-on {
-  color: #f56c6c;
 }
 
 .proxy-time-cell {

@@ -71,6 +71,7 @@ const toAccount = (row: AccountRow): OperationAccount => {
     app: null,
     avatar: "",
     backupKey: "",
+    backupName: "",
     backupSlot: "",
     backupType: null,
     createdAt: row.createdAt,

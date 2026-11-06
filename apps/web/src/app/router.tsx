@@ -22,23 +22,20 @@ import { createDevicesApi } from "../features/devices/api"
 import { DeviceControlPage } from "../features/devices/control-page"
 import { DeviceCreatePage } from "../features/devices/create-page"
 import { DeviceListPage } from "../features/devices/list-page"
-import { TaskRecordsPage } from "../features/jobs/records-page"
+import { DevicePreviewPage } from "../features/devices/preview-page"
 import { MallInvoicesPage } from "../features/mall/invoices-page"
 import { MallOrdersPage } from "../features/mall/orders-page"
 import { MallRecordsPage } from "../features/mall/records-page"
 import { MallRedeemPage } from "../features/mall/redeem-page"
-import { AccountMarketPage } from "../features/marketing/account-market"
-import { MarketingDashboard } from "../features/marketing/dashboard"
-import { NodeMarketPage } from "../features/marketing/node-market"
-import { OpsPage } from "../features/marketing/ops-page"
-import { SalesPage } from "../features/marketing/sales-page"
 import { MemberPage } from "../features/members/page"
+import { AccountTransferPage } from "../features/merchant/accounts-page"
+import { MerchantOrdersPage } from "../features/merchant/orders-page"
+import { ProxyTransferPage } from "../features/merchant/proxies-page"
 import { OverviewPage } from "../features/overview/page"
 import { ProxiesListPage } from "../features/proxies/list-page"
 import { RegistrationResourceListPage } from "../features/registration-resources/list-page"
 import { ResourcesListPage } from "../features/resources/list-page"
 import { RobotsPage } from "../features/robots/page"
-import { ConfigListPage } from "../features/settings/list-page"
 import { StoragePage } from "../features/storage/page"
 import { StudioPage } from "../features/studio/page"
 import { DispatchListPage } from "../features/tasks/dispatch-page"
@@ -229,17 +226,6 @@ const TasksPage = (): ReactNode => {
   ) : null
 }
 
-const TaskRecordsRoute = (): ReactNode => {
-  const { session } = useAuth()
-  const [searchParams] = useSearchParams()
-  return session.kind === "authenticated" ? (
-    <TaskRecordsPage
-      canWrite={pageFlags(session.user, PageKey.TaskRecords).canWrite}
-      groupId={deviceGroupId(session.user.scope.groupIds, searchParams.get("groupId"))}
-    />
-  ) : null
-}
-
 const ProxiesPage = (): ReactNode => {
   const { session } = useAuth()
   return session.kind === "authenticated" ? (
@@ -247,16 +233,6 @@ const ProxiesPage = (): ReactNode => {
       groupIds={session.user.scope.groupIds}
       canDelete={pageFlags(session.user, PageKey.Proxies).canDelete}
       canWrite={pageFlags(session.user, PageKey.Proxies).canWrite}
-    />
-  ) : null
-}
-
-const ConfigurationPage = (): ReactNode => {
-  const { session } = useAuth()
-  return session.kind === "authenticated" ? (
-    <ConfigListPage
-      canDelete={pageFlags(session.user, PageKey.Configuration).canDelete}
-      canWrite={pageFlags(session.user, PageKey.Configuration).canWrite}
     />
   ) : null
 }
@@ -283,26 +259,24 @@ const AuthenticatedRoutes = (): ReactNode => (
     <Route element={<ProtectedLayout />}>
       <Route index element={<Navigate replace to="/overview" />} />
       <Route path="/overview" element={guarded(PageKey.Overview, <OverviewPage />)} />
-      <Route path="/marketing" element={<Navigate replace to="/marketing/dashboard" />} />
-      <Route
-        path="/marketing/dashboard"
-        element={guarded(PageKey.MarketingDashboard, <MarketingDashboard />)}
-      />
-      <Route
-        path="/marketing/accounts"
-        element={guarded(PageKey.MarketingAccounts, <AccountMarketPage />)}
-      />
-      <Route
-        path="/marketing/nodes"
-        element={guarded(PageKey.MarketingNodes, <NodeMarketPage />)}
-      />
-      <Route path="/marketing/sales" element={guarded(PageKey.MarketingSales, <SalesPage />)} />
-      <Route path="/marketing/ops" element={guarded(PageKey.MarketingOps, <OpsPage />)} />
       <Route path="/mall" element={<Navigate replace to="/mall/records" />} />
       <Route path="/mall/records" element={guarded(PageKey.MallRecords, <MallRecordsPage />)} />
       <Route path="/mall/orders" element={guarded(PageKey.MallOrders, <MallOrdersPage />)} />
       <Route path="/mall/invoices" element={guarded(PageKey.MallInvoices, <MallInvoicesPage />)} />
       <Route path="/mall/redeem" element={guarded(PageKey.MallRedeem, <MallRedeemPage />)} />
+      <Route path="/merchant" element={<Navigate replace to="/merchant/accounts" />} />
+      <Route
+        path="/merchant/accounts"
+        element={guarded("/merchant/accounts", <AccountTransferPage />)}
+      />
+      <Route
+        path="/merchant/proxies"
+        element={guarded("/merchant/proxies", <ProxyTransferPage />)}
+      />
+      <Route
+        path="/merchant/orders"
+        element={guarded("/merchant/orders", <MerchantOrdersPage />)}
+      />
       <Route path="/studio" element={<Navigate replace to="/studio/video" />} />
       <Route
         path="/studio/video"
@@ -348,6 +322,10 @@ const AuthenticatedRoutes = (): ReactNode => (
       <Route path="/operations/resources" element={<Navigate replace to="/studio/text-pool" />} />
       <Route path="/operations/devices" element={guarded(PageKey.Devices, <DevicesPage />)} />
       <Route
+        path="/operations/previews"
+        element={guarded(PageKey.CloudPreview, <DevicePreviewPage />)}
+      />
+      <Route
         path="/operations/devices/:deviceId/control"
         element={guarded(PageKey.Devices, <DeviceControlPage />)}
       />
@@ -372,13 +350,9 @@ const AuthenticatedRoutes = (): ReactNode => (
       <Route path="/operations/tasks" element={guarded(PageKey.Tasks, <TasksPage />)} />
       <Route
         path="/operations/task-records"
-        element={guarded(PageKey.TaskRecords, <TaskRecordsRoute />)}
+        element={<Navigate replace to="/operations/tasks" />}
       />
       <Route path="/operations/proxies" element={guarded(PageKey.Proxies, <ProxiesPage />)} />
-      <Route
-        path="/operations/configuration"
-        element={guarded(PageKey.Configuration, <ConfigurationPage />)}
-      />
       <Route
         path="/operations/configuration/audit"
         element={<Navigate replace to="/work-logs" />}

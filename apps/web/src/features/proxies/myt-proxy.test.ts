@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest"
 import {
   applyCheckResult,
   batchUpdateByTags,
+  detectedRegionCode,
   emptyProxy,
   emptyProxyQuery,
   expirePresetOptions,
   filterProxies,
+  proxyDetectedRegion,
+  UNDETECTED_REGION,
   genCurlCmd,
   importProxies,
   proxiesToCsv,
@@ -20,6 +23,11 @@ describe("myt-proxy", () => {
     const favorite = filterProxies(proxies, { ...emptyProxyQuery(), favorite: true })
     const noTag = filterProxies(proxies, { ...emptyProxyQuery(), noTag: true })
     const socks = filterProxies(proxies, { ...emptyProxyQuery(), type: "2" })
+    const china = filterProxies(proxies, { ...emptyProxyQuery(), region: "CN" })
+    const undetected = filterProxies(proxies, {
+      ...emptyProxyQuery(),
+      region: UNDETECTED_REGION,
+    })
     const search = filterProxies(proxies, { ...emptyProxyQuery(), search: "华东" })
     const cutoff = expirePresetOptions(new Date())[0]
     if (cutoff === undefined) throw new Error("missing expire preset")
@@ -29,6 +37,9 @@ describe("myt-proxy", () => {
     expect(favorite.map((item) => item.id)).toEqual([106])
     expect(noTag.map((item) => item.remark)).toEqual(["临时线路"])
     expect(socks.every((item) => item.type === "2")).toBe(true)
+    expect(china.map((item) => item.id)).toEqual([101])
+    expect(proxyDetectedRegion(proxies[0]!)).toBe("CN")
+    expect(undetected.map((item) => item.id).sort()).toEqual([102, 103, 104, 105, 106])
     expect(search.map((item) => item.remark)).toEqual(["华东代理"])
     expect(expiring.map((item) => item.remark)).toEqual(["临时线路"])
   })
@@ -104,6 +115,21 @@ describe("myt-proxy", () => {
     expect(csv).not.toContain("proxy-east-secret")
     expect(csv).not.toContain("imp-pass")
     expect(proxyTypeLabel("2")).toBe("SOCKS5")
+    expect(
+      detectedRegionCode({
+        channel: "cn",
+        check_time: 1,
+        failures: 0,
+        include_response: true,
+        message: "proxy_online",
+        mode: "detailed",
+        ok: true,
+        results: [{ delay: 1, ok: true, response_body: { country: "jp", ip: "1.1.1.1" }, status: 200, url: "ip" }],
+        status: 200,
+        successes: 1,
+        use_turbo: false,
+      }),
+    ).toBe("JP")
   })
 
   it("simulates local detect results and batch tag updates", () => {

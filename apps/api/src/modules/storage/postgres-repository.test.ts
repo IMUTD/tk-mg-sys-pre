@@ -13,8 +13,7 @@ import { createStorageService } from "./service"
 
 const databaseIntegrationTest = hasConfiguredTestDatabase ? it : it.skip
 const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-const credentialPassword = "nas-password"
-const credentialUsername = "nas-user"
+const credentialSecret = "nas-password"
 const key = "12345678901234567890123456789012"
 let activeDatabase: MigratedTestDatabase | null = null
 
@@ -26,49 +25,55 @@ afterEach(async () => {
 })
 
 describe("PostgreSQL storage repository", () => {
-  databaseIntegrationTest(
-    "encrypts NAS credentials at rest while retaining a redacted status",
-    async () => {
-      // Given
-      activeDatabase = await createMigratedTestDatabase()
-      const client = activeDatabase.client
-      await client`
+  databaseIntegrationTest("encrypts the NAS secret and returns it to the storage viewer", async () => {
+    activeDatabase = await createMigratedTestDatabase()
+    const client = activeDatabase.client
+    await client`
       insert into app_user (id, email, password_hash, role)
       values (${actorId}, ${"admin@example.com"}, ${"unused"}, ${"administrator"})
     `
-      const cipher = createSecretCipher(key)
-      const service = createStorageService({
-        auditRepository: createPostgresAuditRepository(client),
-        cipher,
-        repository: createPostgresStorageRepository(client),
-      })
+    const cipher = createSecretCipher(key)
+    const service = createStorageService({
+      auditRepository: createPostgresAuditRepository(client),
+      cipher,
+      repository: createPostgresStorageRepository(client),
+    })
 
-      // When
-      const status = await service.update(UserIdSchema.parse(actorId), {
-        credentials: { password: credentialPassword, username: credentialUsername },
-        host: "nas.internal",
-        protocol: "smb",
-        rootPath: "/TK-MG",
-      })
-      const rows = await client<{ readonly encryptedCredentials: string | null }[]>`
+    const cardId = "22222222-2222-4222-8222-222222222222"
+    const status = await service.update(UserIdSchema.parse(actorId), {
+      items: [
+        {
+          bucket: "backup",
+          id: cardId,
+          loginUrl: "http://192.168.76.19:8010",
+          name: "机房",
+          password: credentialSecret,
+          username: "admin",
+        },
+      ],
+    })
+    const rows = await client<{ readonly encryptedCredentials: string | null }[]>`
       select encrypted_credentials as "encryptedCredentials"
       from storage_setting
-      where key = ${"private-cloud"}
+      where key = ${`private-cloud:${actorId}`}
     `
-      const encryptedCredentials = rows[0]?.encryptedCredentials
+    const encryptedCredentials = rows[0]?.encryptedCredentials
+    const kept = await service.update(UserIdSchema.parse(actorId), {
+      items: [
+        {
+          bucket: "backup",
+          id: cardId,
+          loginUrl: "http://192.168.76.19:8010",
+          name: "机房",
+          username: "admin",
+        },
+      ],
+    })
 
-      // Then
-      expect(status).toEqual({
-        configuration: { host: "nas.internal", protocol: "smb", rootPath: "/TK-MG" },
-        credentialsConfigured: true,
-        state: "unconfigured",
-      })
-      expect(encryptedCredentials).not.toBeNull()
-      expect(encryptedCredentials ?? "").not.toContain(credentialPassword)
-      expect(encryptedCredentials ?? "").not.toContain(credentialUsername)
-      expect(cipher.decrypt(encryptedCredentials ?? "")).toBe(
-        JSON.stringify({ password: credentialPassword, username: credentialUsername }),
-      )
-    },
-  )
+    expect(status.items[0]?.password).toBe(credentialSecret)
+    expect(kept.items[0]?.password).toBe(credentialSecret)
+    expect(encryptedCredentials).not.toBeNull()
+    expect(encryptedCredentials ?? "").not.toContain(credentialSecret)
+    expect(cipher.decrypt(encryptedCredentials ?? "")).toContain(credentialSecret)
+  })
 })

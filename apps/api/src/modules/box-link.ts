@@ -5,6 +5,7 @@ import postgres, { type Sql, type TransactionSql } from "postgres"
 import { z } from "zod"
 
 import { canDeletePage, canViewPage } from "../lib/authorization"
+import type { SecretCipher } from "../lib/crypto"
 import { PageKey } from "../lib/pages"
 import {
   accountAnchorCatalog,
@@ -26,7 +27,8 @@ import {
   StatusSchema,
   WatchSchema,
 } from "./box-contract"
-import { markBoxesWithoutHeartbeat } from "./box-presence"
+import { markBoxesWithoutHeartbeat, presenceHolder, sqlState, tryAcquirePresenceLease } from "./box-presence"
+import { registerTaskChains } from "./task-chains"
 import {
   administratorFor,
   businessGroupInUse,
@@ -34,13 +36,21 @@ import {
   registerBusinessLabels,
 } from "./business-labels"
 import { refreshDeviceHosts } from "./dispatch/fill"
+import { readFrameBody } from "./frame-body"
 import { type GuardCode, guardCatalog, normalizeGuards, xmlHasText } from "./guards"
+import { clickChanceReady, clickJumpPassed, jumpFoundCount, jumpNodesShouldSkip, jumpWhenMode, jumpWriteBack, jumpWriteKeys, jumpWriteSideReady, statusShouldJump } from "./jump-nodes"
+import { registerMailCode } from "./mail-code"
+import { mixedBatchRejected } from "./pit-chain"
 import { registerShareFiles } from "./share-files"
+import { backupPhone } from "./share-path"
+import { registerNasAgentRoutes } from "./storage/agent-routes"
+import { createPostgresStorageRepository } from "./storage/repository"
 
 const guardLabel = (code: string): string =>
   code === "ad" || code === "transcode" ? guardCatalog[code].label : code
 
 import { type SkillSpec, skillCatalog } from "./skills"
+import { nodeNameOf, readChainName, readRemark, stepLogTitle } from "./step-remark"
 import {
   agentSkillStep,
   isCatalogPullSkill,
@@ -55,43 +65,14 @@ import {
 } from "./video-share"
 
 const unassignedGroup = "00000000-0000-4000-8000-000000000001"
-const noBatch = new Set([
-  "CreateAndroid",
-  "BoxStart",
-  "BoxStop",
-  "BoxRestart",
-  "BoxDelete",
-  "RandomizeDevice",
-  "SetProxy",
-  "IndependentV5S5",
-  "TestIndependentProxy",
-  "Uninstall",
-  "ClearData",
-  "FileDelete",
-  "CreateAndroidContainerV2",
-  "ResetAndroidContainer",
-  "ResetAndroidContainerV2",
-  "RenameAndroidContainer",
-  "SwitchAndroidImage",
-  "SwitchAndroidImageV2",
-  "SwitchAndroidPhoneModel",
-  "SetMacvlan",
-  "PullAndroidImage",
-  "RemoveAndroidImage",
-  "RemoveAndroidImageTar",
-  "ExportAndroidImage",
-  "ImportAndroidImage",
-  "ExportAndroidContainer",
-  "ImportAndroidContainer",
-  "AndroidPruneAllImages",
-  "RemovePhoneModelBackup",
-])
 
 type Skill = SkillSpec
 
 const skills: readonly Skill[] = skillCatalog
 
 const skillByCode = new Map(skills.map((item) => [item.code, item]))
+
+const skillNodeName = (skill: string): string => nodeNameOf(skill, skillByCode.get(skill)?.name)
 
 type FrameHit = { readonly at: number; readonly bytes: Uint8Array; readonly groupId: string }
 type Query = Sql | TransactionSql
@@ -159,31 +140,6 @@ const fileBrowserFromHost = (host: string): string => {
   const parts = trimmed.split(".")
   if (parts.some((part) => Number(part) > 255)) return ""
   return `http://${trimmed}:18791`
-}
-
-const boxPitIndexes = async (host: string): Promise<number[] | null> => {
-  if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(host)) return null
-  try {
-    const response = await fetch(`http://${host}:8000/android`, {
-      signal: AbortSignal.timeout(3000),
-    })
-    if (!response.ok) return null
-    const body = (await response.json()) as {
-      code?: number
-      data?: { list?: ReadonlyArray<{ indexNum?: number }> | null }
-      list?: ReadonlyArray<{ indexNum?: number }> | null
-    }
-    if (body.code !== 0 && body.code !== 200) return null
-    const list = body.data?.list ?? body.list ?? []
-    const indexes: number[] = []
-    for (const item of list) {
-      const index = Number(item.indexNum ?? 0)
-      if (index >= 1 && index <= 5) indexes.push(index)
-    }
-    return indexes
-  } catch {
-    return null
-  }
 }
 
 const agentDevice = async (
@@ -265,12 +221,13 @@ type ChainRow = {
   readonly parameters: ChainParameter[]
   readonly paramScopes: ChainScope[]
   readonly paramSources: ChainSource[]
+  readonly remarks: string[] | null
   readonly updatedAt: Date
 }
 
 const chainColumns = `id::text as id, name, origin, parameters, param_scopes as "paramScopes",
   param_sources as "paramSources", anchor_table as "anchorTable", anchor_key as "anchorKey",
-  guards, delays, last_tested_at as "lastTestedAt", updated_at as "updatedAt"`
+  guards, delays, remarks, last_tested_at as "lastTestedAt", updated_at as "updatedAt"`
 
 const chainView = (row: ChainRow) => {
   const stored =
@@ -301,6 +258,7 @@ const chainView = (row: ChainRow) => {
         delayMs: row.delays?.[index] ?? 0,
         guards: row.guards?.[index] ?? [],
         id: index,
+        remark: row.remarks?.[index] ?? "",
         params: item.input ?? {},
         scopes,
         sources,
@@ -322,48 +280,58 @@ const readDelay = (value: unknown): number | null => {
   return parsed
 }
 
+const invalidChain = { ok: false as const, error: "invalid_chain" as const }
+
 const readChainSteps = (
   raw: unknown,
   anchor: ChainAnchor | null,
-): {
-  delays: number[]
-  guards: GuardCode[][]
-  parameters: ChainParameter[]
-  paramScopes: ChainScope[]
-  paramSources: ChainSource[]
-} | null => {
-  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 100) return null
+):
+  | {
+      ok: true
+      delays: number[]
+      guards: GuardCode[][]
+      parameters: ChainParameter[]
+      paramScopes: ChainScope[]
+      paramSources: ChainSource[]
+      remarks: string[]
+    }
+  | { ok: false; error: "invalid_chain" | "备注过长" | "备注无效" } => {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 100) return invalidChain
   const parameters: ChainParameter[] = []
   const paramScopes: ChainScope[] = []
   const paramSources: ChainSource[] = []
   const guards: GuardCode[][] = []
   const delays: number[] = []
+  const remarks: string[] = []
   for (const item of raw) {
-    if (item === null || typeof item !== "object" || Array.isArray(item)) return null
+    if (item === null || typeof item !== "object" || Array.isArray(item)) return invalidChain
     const step = item as {
       api?: unknown
       delayMs?: unknown
       guards?: unknown
       params?: unknown
+      remark?: unknown
       scopes?: unknown
       sources?: unknown
     }
+    const noted = readRemark(step.remark)
+    if (!noted.ok) return noted
     const stepGuards = normalizeGuards(step.guards)
     const delayMs = readDelay(step.delayMs)
-    if (stepGuards === null || delayMs === null) return null
+    if (stepGuards === null || delayMs === null) return invalidChain
     const skill = typeof step.api === "string" ? step.api : ""
-    if (!skillByCode.has(skill)) return null
+    if (!skillByCode.has(skill)) return invalidChain
     if (step.params === null || typeof step.params !== "object" || Array.isArray(step.params))
-      return null
+      return invalidChain
     if (
       step.scopes !== undefined &&
       (step.scopes === null || typeof step.scopes !== "object" || Array.isArray(step.scopes))
     ) {
-      return null
+      return invalidChain
     }
     const input: Record<string, string> = {}
     for (const [key, value] of Object.entries(step.params as Record<string, unknown>)) {
-      if (typeof value !== "string") return null
+      if (typeof value !== "string") return invalidChain
       input[key] = value
     }
     const scopes: ChainScope = {}
@@ -371,16 +339,19 @@ const readChainSteps = (
     for (const key of Object.keys(input)) {
       scopes[key] = rawScopes[key] === "external" ? "external" : "internal"
     }
-    if (skill === "JumpNodes" && !jumpNodesReady(input)) return null
+    if (nodeJumpKind(skill) && !jumpNodesReady(input)) return invalidChain
+    if (skill === "ClickJumpNodes" && !clickChanceReady(input?.["clickChance"])) return invalidChain
+    if (skill === "CheckLive" && !checkLiveReady(input)) return invalidChain
     const sources = readStepSources(input, scopes, step.sources, anchor, skill)
-    if (sources === null) return null
+    if (sources === null) return invalidChain
     parameters.push({ input, skill })
     paramScopes.push(scopes)
     paramSources.push(sources)
     guards.push(stepGuards)
     delays.push(delayMs)
+    remarks.push(noted.remark)
   }
-  return { delays, guards, parameters, paramScopes, paramSources }
+  return { ok: true, delays, guards, parameters, paramScopes, paramSources, remarks }
 }
 
 const jumpStepCount = (raw: unknown): number | null => {
@@ -388,21 +359,98 @@ const jumpStepCount = (raw: unknown): number | null => {
   return Number(raw)
 }
 
+const nodeJumpKind = (kind: string): boolean => kind === "JumpNodes" || kind === "ClickJumpNodes"
+
 const jumpNodesReady = (input: Record<string, string> | null | undefined): boolean => {
   if (jumpStepCount(input?.["steps"]) === null) return false
+  if (jumpWhenMode(input?.["jumpWhen"]) === null) return false
+  if (
+    !jumpWriteSideReady(input, "writeOnSuccessField", "writeOnSuccessValue", "tagOnSuccess") ||
+    !jumpWriteSideReady(input, "writeOnFailureField", "writeOnFailureValue", "tagOnFailure")
+  ) {
+    return false
+  }
   return ["text", "contentDesc", "resourceId", "className", "pkg"].some(
     (key) => (input?.[key] ?? "").trim() !== "",
   )
+}
+
+const checkLiveReady = (input: Record<string, string> | null | undefined): boolean => {
+  if (
+    input !== undefined &&
+    input !== null &&
+    jumpWriteKeys.some((key) => key in input)
+  ) {
+    return false
+  }
+  const when = jumpWhenMode(input?.["jumpWhen"], "off")
+  if (when === null) return false
+  const rawSteps = input?.["steps"]
+  if (rawSteps === undefined || rawSteps === "") return when === "off"
+  return jumpStepCount(rawSteps) !== null
+}
+
+const skipLaterSteps = async (
+  sql: Query,
+  taskId: string,
+  stepId: string,
+  sequence: number,
+  steps: number,
+): Promise<number> => {
+  const skipped = await sql<{ id: string }[]>`
+    update execution_task_step
+    set status = 'skipped', finished_at = now(), result = ${sql.json({ skippedBy: stepId })}
+    where id in (
+      select id from execution_task_step
+      where task_id = ${taskId}::uuid and status = 'pending' and sequence > ${sequence}
+      order by sequence
+      limit ${steps}
+    )
+    returning id
+  `
+  return skipped.length
 }
 
 const claimedSkillStep = (
   kind: string,
   parameters: Record<string, string> | null | undefined,
 ): { readonly input: Record<string, string>; readonly skill: string } => {
-  if (kind !== "JumpNodes") return agentSkillStep(kind, parameters)
+  if (kind === "FetchMailCode") {
+    const input = { ...(parameters ?? {}) }
+    delete input["email"]
+    delete input["clientId"]
+    delete input["refreshToken"]
+    return { input, skill: kind }
+  }
+  if (!nodeJumpKind(kind) && kind !== "CheckLive") return agentSkillStep(kind, parameters)
   const input = { ...(parameters ?? {}) }
-  delete input["steps"]
-  return { input, skill: "JumpNodes" }
+  if (kind === "CheckLive") {
+    delete input["steps"]
+    delete input["jumpWhen"]
+    for (const key of jumpWriteKeys) delete input[key]
+  }
+  return { input, skill: kind }
+}
+
+const completeFollowingText = async (
+  sql: Query,
+  taskId: string,
+  sequence: number,
+  code: string,
+): Promise<void> => {
+  const rows = await sql<{ id: string; parameters: Record<string, string> | null }[]>`
+    select id::text as id, parameters from execution_task_step
+    where task_id = ${taskId}::uuid and sequence = ${sequence + 1} and status = 'pending' and kind = 'SendText'
+    for update
+  `
+  const next = rows[0]
+  if (next === undefined || (next.parameters?.["text"] ?? "").length > 0) return
+  await sql`
+    update execution_task_step
+    set status = 'succeeded', finished_at = now(), error_code = null,
+      result = ${sql.json({ text: code })}
+    where id = ${next.id}::uuid
+  `
 }
 
 const ownedDevice = async (sql: Query, userId: string, deviceId: string) => {
@@ -457,11 +505,266 @@ const writeLog = async (
   `
 }
 
+const writeJumpAccount = async (
+  sql: Query,
+  row: {
+    readonly accountId: string | null
+    readonly deviceId: string
+    readonly externalId: string
+    readonly groupId: string
+    readonly parameters: Record<string, string> | null
+  },
+  count: unknown,
+  logTitle = "",
+) => {
+  const chosen = jumpWriteBack(count, row.parameters)
+  if (chosen === null) return
+  const outcome = chosen.hit ? "命中" : "未命中"
+  const title = logTitle.trim()
+  const prefix = title.length > 0 ? `${row.externalId} ${title} ${outcome}` : `${row.externalId} 节点跳跃${outcome}`
+  if (row.accountId === null || row.accountId.length === 0) {
+    await writeLog(sql, row.groupId, row.deviceId, "ok", `${prefix}，任务没有账号，未写回`)
+    return
+  }
+  const locked = await sql<{ id: string }[]>`
+    select id::text as id from operation_account
+    where group_id = ${row.groupId}::uuid and id = ${row.accountId}::uuid and deleted = false
+    for update
+  `
+  if (locked.length === 0) {
+    await writeLog(sql, row.groupId, row.deviceId, "ok", `${prefix}，账号已删除，未写回`)
+    return
+  }
+  const value = chosen.value
+  const accountId = row.accountId
+  const groupId = row.groupId
+  const updated =
+    chosen.field === "tags"
+      ? await sql<{ id: string }[]>`
+          update operation_account
+          set tags = (
+            select coalesce(array_agg(item order by pos), '{}'::text[])
+            from (
+              select coalesce(tags[1], '') as item, 1 as pos
+              union all
+              select tag, (ord + 1)::int
+              from unnest(
+                case when coalesce(cardinality(tags), 0) > 1
+                  then tags[2:cardinality(tags)] else '{}'::text[] end
+              ) with ordinality as bucket(tag, ord)
+              union all
+              select tag, (100000 + ord)::int
+              from unnest(${[value]}::text[]) with ordinality as incoming(tag, ord)
+              where not (tag = any(coalesce(tags, '{}'::text[])))
+            ) merged
+          ),
+          updated_at = now()
+          where group_id = ${groupId}::uuid and id = ${accountId}::uuid and deleted = false
+          returning id::text as id
+        `
+      : chosen.field === "follower"
+        ? await sql<{ id: string }[]>`
+            update operation_account set follower = ${value}::bigint, updated_at = now()
+            where group_id = ${groupId}::uuid and id = ${accountId}::uuid and deleted = false
+            returning id::text as id
+          `
+        : chosen.field === "following"
+          ? await sql<{ id: string }[]>`
+              update operation_account set following = ${value}::bigint, updated_at = now()
+              where group_id = ${groupId}::uuid and id = ${accountId}::uuid and deleted = false
+              returning id::text as id
+            `
+          : chosen.field === "favorite"
+            ? await sql<{ id: string }[]>`
+                update operation_account set favorite = ${value}::bigint, updated_at = now()
+                where group_id = ${groupId}::uuid and id = ${accountId}::uuid and deleted = false
+                returning id::text as id
+              `
+            : chosen.field === "region"
+              ? await sql<{ id: string }[]>`
+                  update operation_account set region = ${value}, updated_at = now()
+                  where group_id = ${groupId}::uuid and id = ${accountId}::uuid and deleted = false
+                  returning id::text as id
+                `
+              : chosen.field === "note"
+                ? await sql<{ id: string }[]>`
+                    update operation_account set note = ${value}, updated_at = now()
+                    where group_id = ${groupId}::uuid and id = ${accountId}::uuid and deleted = false
+                    returning id::text as id
+                  `
+                : chosen.field === "platformUid"
+                  ? await sql<{ id: string }[]>`
+                      update operation_account set platform_uid = ${value}, updated_at = now()
+                      where group_id = ${groupId}::uuid and id = ${accountId}::uuid and deleted = false
+                      returning id::text as id
+                    `
+                  : chosen.field === "name"
+                    ? await sql<{ id: string }[]>`
+                        update operation_account set name = ${value}, updated_at = now()
+                        where group_id = ${groupId}::uuid and id = ${accountId}::uuid and deleted = false
+                        returning id::text as id
+                      `
+                    : await sql<{ id: string }[]>`
+                        update operation_account set avatar = ${value}, updated_at = now()
+                        where group_id = ${groupId}::uuid and id = ${accountId}::uuid and deleted = false
+                        returning id::text as id
+                      `
+  await writeLog(
+    sql,
+    row.groupId,
+    row.deviceId,
+    "ok",
+    updated.length === 0
+      ? `${prefix}，账号已删除，未写回`
+      : `${prefix}，账号写回${chosen.label} ${value}`,
+  )
+}
+
+const cloudMachineName = (raw: string): string | null => {
+  const name = raw.trim()
+  if (name.length === 0 || name.length > 200 || name.includes("/") || name.includes("\\") || name.includes("..")) {
+    return null
+  }
+  const phone = backupPhone(name).phoneName
+  return phone.length === 0 ? null : phone
+}
+
+const writeBackupName = async (
+  sql: Query,
+  row: {
+    readonly accountId: string | null
+    readonly deviceId: string
+    readonly externalId: string
+    readonly groupId: string
+  },
+  exportName: string,
+) => {
+  const prefix = `${row.externalId} 导出云机成功`
+  const name = cloudMachineName(exportName)
+  if (name === null) {
+    await writeLog(sql, row.groupId, row.deviceId, "ok", `${prefix}，没有云机名，未写回`)
+    return
+  }
+  if (row.accountId === null || row.accountId.length === 0) {
+    await writeLog(sql, row.groupId, row.deviceId, "ok", `${prefix}，任务没有账号，未写回`)
+    return
+  }
+  const locked = await sql<{ id: string }[]>`
+    select id::text as id from operation_account
+    where group_id = ${row.groupId}::uuid and id = ${row.accountId}::uuid and deleted = false
+    for update
+  `
+  if (locked.length === 0) {
+    await writeLog(sql, row.groupId, row.deviceId, "ok", `${prefix}，账号已删除，未写回`)
+    return
+  }
+  await sql`
+    update operation_account set backup_name = ${name}, updated_at = now()
+    where group_id = ${row.groupId}::uuid and id = ${row.accountId}::uuid and deleted = false
+  `
+  await writeLog(sql, row.groupId, row.deviceId, "ok", `${prefix}，账号写回云机名字 ${name}`)
+}
+
+const repeatMark = (index: number, count: number): string =>
+  count > 1 ? `第 ${index + 1}/${count} 次` : ""
+
+const stageQuote = (name: string, index: number, count: number): string => {
+  const repeat = repeatMark(index, count)
+  return repeat.length > 0 ? `「${name}」${repeat}` : `「${name}」`
+}
+
+const claimLogText = (row: {
+  readonly externalId: string
+  readonly indexNum: number | null
+  readonly repeatCount: number
+  readonly repeatIndex: number
+  readonly stageCount: number
+  readonly stagePosition: number
+  readonly taskName: string
+}): string => {
+  const repeat = repeatMark(row.repeatIndex, row.repeatCount)
+  const extra = repeat.length > 0 ? `，${repeat}` : ""
+  return `${row.externalId} 领取「${row.taskName}」第 ${row.stagePosition + 1}/${row.stageCount} 段${extra}，坑位 ${row.indexNum ?? 0}`
+}
+
+const progressLogText = (
+  row: {
+    readonly externalId: string
+    readonly kind: string
+    readonly repeatCount: number
+    readonly repeatIndex: number
+    readonly taskName: string
+  },
+  value: "failed" | "cancelled" | "continue" | "done",
+  logTitle = "",
+): string => {
+  const quoted = stageQuote(row.taskName, row.repeatIndex, row.repeatCount)
+  const title = logTitle.trim()
+  if (value === "continue") {
+    return title.length > 0
+      ? `${row.externalId} ${title} 完成，继续下一步`
+      : `${row.externalId} ${quoted}步骤 ${row.kind} 完成，继续下一步`
+  }
+  const tail = value === "done" ? "完成" : value === "failed" ? "失败" : "取消"
+  return `${row.externalId} ${quoted}${tail}`
+}
+
+const cancelLaterStages = async (
+  sql: Query,
+  taskId: string,
+  groupId: string,
+  deviceId: string,
+  externalId: string,
+  cause: { readonly name: string; readonly repeatCount: number; readonly repeatIndex: number },
+): Promise<void> => {
+  const stopped = await sql<
+    { id: string; name: string; repeatCount: number; repeatIndex: number }[]
+  >`
+    with recursive later as (
+      select id, name, repeat_index, repeat_count
+      from execution_task
+      where predecessor_task_id = ${taskId}::uuid
+        and status in ('queued', 'dispatching', 'ood')
+      union all
+      select t.id, t.name, t.repeat_index, t.repeat_count
+      from execution_task t
+      join later on t.predecessor_task_id = later.id
+      where t.status in ('queued', 'dispatching', 'ood')
+    )
+    update execution_task task
+    set status = 'cancelled', terminal_reason = 'previous_stage_stopped',
+      finished_at = now(), updated_at = now()
+    from later
+    where task.id = later.id
+    returning later.id::text as id, later.name, later.repeat_index as "repeatIndex",
+      later.repeat_count as "repeatCount"
+  `
+  if (stopped.length === 0) return
+  const ids = stopped.map((item) => item.id)
+  await sql`
+    update execution_task_step
+    set status = 'cancelled', finished_at = now()
+    where task_id = any(${ids}::uuid[]) and status in ('pending', 'held', 'claimed')
+  `
+  const because = stageQuote(cause.name, cause.repeatIndex, cause.repeatCount)
+  for (const item of stopped) {
+    await writeLog(
+      sql,
+      groupId,
+      deviceId,
+      "ok",
+      `${externalId} ${stageQuote(item.name, item.repeatIndex, item.repeatCount)}已取消，因为${because}未完成`,
+    )
+  }
+}
+
 type ClaimRow = {
   readonly afterMs: number
   readonly apiPort: number
   readonly backupHost: string | null
+  readonly chainName: string
   readonly deviceId: string
+  readonly dispatchItemId: string | null
   readonly externalId: string
   readonly groupId: string
   readonly guardCode: string | null
@@ -471,15 +774,26 @@ type ClaimRow = {
   readonly instanceId: string | null
   readonly kind: string
   readonly label: string | null
+  readonly needsMail: boolean
+  readonly nodeName: string
   readonly parameters: Record<string, string>
   readonly parentStepId: string | null
   readonly phase: string
   readonly role: string
+  readonly remark: string
+  readonly repeatCount: number
+  readonly repeatIndex: number
   readonly rpaPort: number
   readonly sequence: number
   readonly sources: unknown
+  readonly stageCount: number
+  readonly stagePosition: number
+  readonly stepCount: number
   readonly stepId: string
+  readonly taskChainId: string | null
+  readonly taskChainName: string
   readonly taskId: string
+  readonly taskName: string
 }
 
 const failStage = async (tx: TransactionSql, row: ClaimRow): Promise<void> => {
@@ -580,6 +894,17 @@ const stageShareClaim = async (
   return { kind: "stop" }
 }
 
+const claimPending = async (sql: Sql, deviceId: string): Promise<boolean> => {
+  const rows = await sql`
+    select id from execution_task
+    where device_id = ${deviceId}::uuid
+      and executor_key = 'box-agent'
+      and status in ('queued', 'dispatching', 'ood')
+      and cancel_requested_at is null
+    limit 1`
+  return rows.length > 0
+}
+
 const claimOnce = async (sql: Sql, device: AgentDevice): Promise<ClaimRow | null> => {
   try {
     return await sql.begin(async (tx) => {
@@ -589,17 +914,41 @@ const claimOnce = async (sql: Sql, device: AgentDevice): Promise<ClaimRow | null
         for update`
       if (allowed.length === 0) return null
       const rows = await tx<ClaimRow[]>`
-        select t.id as "taskId", t.group_id as "groupId", s.id as "stepId", s.kind, s.sequence,
+        select t.id as "taskId", t.group_id as "groupId", t.name as "taskName",
+          coalesce(t.chain_name, '') as "chainName",
+          t.task_chain_id::text as "taskChainId",
+          t.dispatch_item_id::text as "dispatchItemId",
+          coalesce(tc.name, '') as "taskChainName",
+          t.stage_position as "stagePosition", t.stage_count as "stageCount",
+          (select count(*)::int from execution_task_step counted where counted.task_id = t.id) as "stepCount",
+          exists (
+            select 1 from execution_task_step mail_step
+            where mail_step.task_id = t.id and mail_step.kind = 'FetchMailCode'
+          ) as "needsMail",
+          t.repeat_index as "repeatIndex", t.repeat_count as "repeatCount",
+          s.id as "stepId", s.kind, s.sequence,
+          coalesce(s.remark, '') as remark, coalesce(s.node_name, '') as "nodeName",
           s.parameters, s.after_ms as "afterMs", s.instance_id as "instanceId", s.guards, s.phase, s.role,
           s.guard_code as "guardCode", s.parent_step_id::text as "parentStepId",
           d.id::text as "deviceId", d.external_id as "externalId", d.host,
            coalesce(di.instance_index, (s.target->>'indexNum')::int) as "indexNum", coalesce(di.api_port, 0) as "apiPort",
           coalesce(di.rpa_port, 0) as "rpaPort", di.label,
-          (
-            select ds.sources from operation_dispatch_item item
-            join operation_dispatch_step ds on ds.item_id = item.id and ds.sequence = s.sequence
-            where item.execution_task_id = t.id
-            limit 1
+          coalesce(
+            (
+              select ds.sources from operation_dispatch_step ds
+              where t.dispatch_item_id is not null
+                and ds.item_id = t.dispatch_item_id
+                and ds.stage_position = t.stage_position
+                and ds.repeat_index = t.repeat_index
+                and ds.sequence = s.sequence
+              limit 1
+            ),
+            (
+              select ds.sources from operation_dispatch_item item
+              join operation_dispatch_step ds on ds.item_id = item.id and ds.sequence = s.sequence
+              where item.execution_task_id = t.id
+              limit 1
+            )
           ) as sources,
           (
             select backup.host from operation_account account
@@ -609,10 +958,18 @@ const claimOnce = async (sql: Sql, device: AgentDevice): Promise<ClaimRow | null
         from execution_task t
         join execution_task_step s on s.task_id = t.id and s.group_id = t.group_id
         join device d on d.id = t.device_id
+        left join task_chain tc on tc.id = t.task_chain_id
         left join device_instance di on di.id = s.instance_id
         where d.id = ${device.deviceId}::uuid
           and t.status in ('queued', 'dispatching', 'ood')
           and t.executor_key = 'box-agent' and t.cancel_requested_at is null
+          and (
+            t.predecessor_task_id is null
+            or exists (
+              select 1 from execution_task previous
+              where previous.id = t.predecessor_task_id and previous.status = 'succeeded'
+            )
+          )
           and s.status = 'pending'
           and not exists (select 1 from execution_task_step active
             where active.task_id = t.id and active.status in ('claimed', 'running'))
@@ -629,14 +986,14 @@ const claimOnce = async (sql: Sql, device: AgentDevice): Promise<ClaimRow | null
               and l.released_at is null
               and (l.instance_id is null or s.instance_id is null or l.instance_id = s.instance_id)
               and not (
-                s.kind in ('ScanShare', 'MoveShare', 'TransferShare') and l.instance_id is not null
+                s.kind in ('ScanShare', 'MoveShare', 'TransferShare', 'ListNas', 'MoveShareToNas', 'DeleteNasShare', 'DeleteNasDir') and l.instance_id is not null
               )
               and not (
                 s.instance_id is not null
                 and exists (
                   select 1 from execution_task_step box_step
                   where box_step.task_id = l.task_id
-                    and box_step.kind in ('ScanShare', 'MoveShare', 'TransferShare')
+                    and box_step.kind in ('ScanShare', 'MoveShare', 'TransferShare', 'ListNas', 'MoveShareToNas', 'DeleteNasShare', 'DeleteNasDir')
                 )
               )
           )
@@ -649,7 +1006,7 @@ const claimOnce = async (sql: Sql, device: AgentDevice): Promise<ClaimRow | null
                 and move.status in ('queued', 'dispatching', 'running')
             )
           )
-        order by t.created_at
+        order by t.queue_priority desc, t.created_at, t.stage_position, t.repeat_index, t.id
         for update of t skip locked
         limit 1
       `
@@ -696,7 +1053,7 @@ const claimOnce = async (sql: Sql, device: AgentDevice): Promise<ClaimRow | null
           id, task_id, group_id, step_id, attempt, status, worker_id, claim_token, claim_expires_at, heartbeat_at
         ) values (
           ${randomUUID()}::uuid, ${row.taskId}::uuid, ${row.groupId}::uuid, ${row.stepId}::uuid,
-          1, 'claimed', ${device.externalId}, ${lease}, now() + interval '45 seconds', now()
+          1, 'claimed', ${device.externalId}, ${lease}, now() + interval '90 seconds', now()
         )
       `
       await tx`
@@ -704,15 +1061,28 @@ const claimOnce = async (sql: Sql, device: AgentDevice): Promise<ClaimRow | null
           id, task_id, group_id, device_id, instance_id, lease_token, worker_id, expires_at, heartbeat_at
         ) values (
           ${randomUUID()}::uuid, ${row.taskId}::uuid, ${row.groupId}::uuid, ${device.deviceId}::uuid,
-          ${row.instanceId}::uuid, ${lease}, ${device.externalId}, now() + interval '45 seconds', now()
+          ${row.instanceId}::uuid, ${lease}, ${device.externalId}, now() + interval '90 seconds', now()
         )
       `
+      const earlier = await tx<{ n: number }[]>`
+        select count(*)::int as n from execution_task_step
+        where task_id = ${row.taskId}::uuid and id <> ${row.stepId}::uuid and status <> 'pending'
+      `
+      if ((earlier[0]?.n ?? 0) === 0) {
+        await writeLog(tx, row.groupId, row.deviceId, "info", claimLogText(row))
+      }
       return { ...row, kind: claimKind, parameters }
     })
   } catch (error) {
     if (isUniqueViolation(error)) return null
     throw error
   }
+}
+
+const claimTitle = (row: ClaimRow): string => {
+  const total = row.stepCount > 0 ? row.stepCount : row.sequence + 1
+  const label = skillByCode.get(row.kind)?.name ?? row.kind
+  return `${row.taskName} 第 ${row.sequence + 1}/${total} 步 ${label}`
 }
 
 const taskPointer = (row: ClaimRow) => ({
@@ -727,9 +1097,17 @@ const taskPointer = (row: ClaimRow) => ({
   guardCode: row.guardCode ?? "",
   guardLabel: row.role === "ood" ? guardLabel(row.guardCode ?? "") : "",
   guards: row.role === "ood" ? [] : (row.guards ?? []),
+  name: claimTitle(row),
   parentStepId: row.parentStepId ?? "",
   phase: row.phase || "skill",
+  needsMail: row.needsMail,
+  repeatCount: row.repeatCount,
+  repeatIndex: row.repeatIndex + 1,
   role: row.role || "native",
+  stepOrdinal: row.sequence + 1,
+  stepTotal: row.stepCount,
+  stageCount: row.stageCount,
+  stagePosition: row.stagePosition + 1,
   task_id: row.taskId,
   template: `${row.taskId}@1`,
   templateDoc: {
@@ -741,6 +1119,19 @@ const taskPointer = (row: ClaimRow) => ({
         ...(row.afterMs > 0 ? { afterMs: row.afterMs } : {}),
         id: row.stepId,
         ...claimedSkillStep(row.kind, row.parameters),
+        ...(() => {
+          const logTitle = stepLogTitle({
+            chainName: row.chainName ?? "",
+            dispatchItemId: row.dispatchItemId,
+            nodeName: row.nodeName ?? "",
+            remark: row.remark ?? "",
+            skill: row.kind,
+            taskChainId: row.taskChainId,
+            taskChainName: row.taskChainName ?? "",
+            taskName: row.taskName,
+          })
+          return logTitle.length > 0 ? { logTitle } : {}
+        })(),
       },
     ],
     version: "1",
@@ -753,8 +1144,11 @@ export const registerBoxLink = (
   databaseUrl: string,
   authService: AuthService,
   auditRepository: AuditRepository,
+  replayFailedStage: (groupId: string, taskId: string) => Promise<void> = async () => undefined,
+  cipher?: SecretCipher,
 ) => {
   registerBusinessLabels(app, sql, authService, auditRepository)
+  registerTaskChains(app, sql, userFromRequest)
   const frames = new Map<string, FrameHit>()
   const waiters = new Map<string, Set<() => void>>()
   const wake = (deviceId: string): void => {
@@ -763,17 +1157,25 @@ export const registerBoxLink = (
     for (const fn of list ?? []) fn()
   }
   registerShareFiles(app, sql, wake)
+  registerNasAgentRoutes(app, sql, cipher, createPostgresStorageRepository(sql))
   const listen = postgres(databaseUrl, { max: 1 })
   let stopping = false
   const listening = listen.listen("agent_task", wake)
   void listening.catch(() => {
     console.error("agent_task listen failed")
   })
+  const holder = presenceHolder()
   const cleanup = setInterval(() => {
     const now = Date.now()
     for (const [key, frame] of frames) if (now - frame.at > 15000) frames.delete(key)
-    void markBoxesWithoutHeartbeat(sql).catch((error: unknown) => {
-      console.error("box presence update failed", error instanceof Error ? error.name : "Error")
+    void sql`delete from device_watch where expires_at < now()`.catch((error: unknown) => {
+      console.error("device watch cleanup failed", sqlState(error))
+    })
+    void (async () => {
+      if (!(await tryAcquirePresenceLease(sql, holder))) return
+      await markBoxesWithoutHeartbeat(sql)
+    })().catch((error: unknown) => {
+      console.error("box presence update failed", sqlState(error))
     })
     void recoverBoxTasks(sql).catch(() => {
       console.error("box task recovery failed")
@@ -790,6 +1192,7 @@ export const registerBoxLink = (
     if (valid.length === 0) return context.body(null, 401)
     return next()
   })
+  registerMailCode(app, sql, cipher)
   app.use("/api/*", async (context, next) => {
     const path = context.req.path
     let pages: readonly string[] = []
@@ -882,6 +1285,12 @@ export const registerBoxLink = (
       where device_id = ${device.deviceId}::uuid
     `
     await sql`update device set status = 'online', last_seen_at = now(), updated_at = now() where id = ${device.deviceId}::uuid`
+    await sql`
+      update box_share_entry set box_online = (
+        select status = 'online' and enabled from device where id = ${device.deviceId}::uuid
+      )
+      where device_id = ${device.deviceId}::uuid
+    `
     return context.json({})
   })
 
@@ -906,81 +1315,94 @@ export const registerBoxLink = (
     if (device === null) return context.body(null, 401)
     const facts = body?.box ?? {}
     const text = (value: unknown): string => (typeof value === "string" ? value.trim() : "")
+    const hostPort = (value: unknown): number => {
+      const parsed = Number(value ?? 0)
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) return 0
+      return parsed
+    }
     const diskPct = Number(facts.diskPct ?? 0)
     const reportedPct = Number.isFinite(diskPct) && diskPct > 0 ? Math.round(diskPct) : 0
     const fileBrowserUrl = text(body?.fileBrowserUrl)
+    const model = text(facts.model)
+    const version = text(facts.version)
+    const firmware = text(facts.firmware)
+    const memory = text(facts.memory)
+    const disk = text(facts.disk)
     await sql`
-      update device_agent set
-        last_heartbeat_at = now(),
-        file_browser_url = case when ${fileBrowserUrl} <> '' then ${fileBrowserUrl} else file_browser_url end
-      where device_id = ${device.deviceId}::uuid
-    `
-    await sql`
-      update device set
-        status = 'online',
-        last_seen_at = now(),
-        updated_at = now(),
-        model = case when ${text(facts.model)} <> '' then ${text(facts.model)} else model end,
-        version = case when ${text(facts.version)} <> '' then ${text(facts.version)} else version end,
-        firmware = case when ${text(facts.firmware)} <> '' then ${text(facts.firmware)} else firmware end,
-        memory = case when ${text(facts.memory)} <> '' then ${text(facts.memory)} else memory end,
-        disk = case when ${text(facts.disk)} <> '' then ${text(facts.disk)} else disk end,
-        disk_pct = case when ${reportedPct} > 0 then ${reportedPct} else disk_pct end
-      where id = ${device.deviceId}::uuid
+      with agent as (
+        update device_agent set
+          last_heartbeat_at = now(),
+          file_browser_url = case when ${fileBrowserUrl} <> '' then ${fileBrowserUrl} else file_browser_url end
+        where device_id = ${device.deviceId}::uuid
+        returning device_id, last_heartbeat_at
+      ), dev as (
+        update device d set
+          status = 'online',
+          last_seen_at = agent.last_heartbeat_at,
+          updated_at = agent.last_heartbeat_at,
+          model = case when ${model} <> '' then ${model} else d.model end,
+          version = case when ${version} <> '' then ${version} else d.version end,
+          firmware = case when ${firmware} <> '' then ${firmware} else d.firmware end,
+          memory = case when ${memory} <> '' then ${memory} else d.memory end,
+          disk = case when ${disk} <> '' then ${disk} else d.disk end,
+          disk_pct = case when ${reportedPct} > 0 then ${reportedPct} else d.disk_pct end
+        from agent
+        where d.id = agent.device_id
+        returning d.id, d.status, d.enabled
+      )
+      update box_share_entry e
+      set box_online = (dev.status = 'online' and dev.enabled)
+      from dev
+      where e.device_id = dev.id
     `
     await sql`
       update execution_task_device_lease
-      set expires_at = now() + interval '45 seconds', heartbeat_at = now()
+      set expires_at = now() + interval '90 seconds', heartbeat_at = now()
       where device_id = ${device.deviceId}::uuid and released_at is null and expires_at > now()
     `
     await sql`
       update execution_task_run
-      set claim_expires_at = now() + interval '45 seconds', heartbeat_at = now()
+      set claim_expires_at = now() + interval '90 seconds', heartbeat_at = now()
       where finished_at is null and status in ('claimed', 'running') and claim_expires_at > now()
         and task_id in (select id from execution_task where device_id = ${device.deviceId}::uuid)
     `
-    for (const slot of body?.slots ?? []) {
-      const index = Number(slot["indexNum"] ?? 0)
-      if (index < 1 || index > 5) continue
-      const running = String(slot["status"] ?? "") === "running"
-      await sql`
-        insert into device_instance (id, device_id, instance_index, label, enabled, status, container_id, api_port, rpa_port, width, height)
-        values (
-          ${randomUUID()}::uuid, ${device.deviceId}::uuid, ${index}, ${String(slot["name"] ?? "")}, true,
-          ${running ? "online" : "offline"}, ${String(slot["id"] ?? "")}, ${Number(slot["apiPort"] ?? 0)},
-          ${Number(slot["rpaPort"] ?? 0)}, ${String(slot["width"] ?? "")}, ${String(slot["height"] ?? "")}
-        )
-        on conflict (device_id, instance_index) do update set
-          label = case when excluded.label <> '' then excluded.label else device_instance.label end,
-          enabled = true,
-          status = excluded.status,
-          container_id = case when excluded.container_id <> '' then excluded.container_id else device_instance.container_id end,
-          api_port = case when excluded.api_port > 0 then excluded.api_port else device_instance.api_port end,
-          rpa_port = case when excluded.rpa_port > 0 then excluded.rpa_port else device_instance.rpa_port end,
-          width = case when excluded.width <> '' then excluded.width else device_instance.width end,
-          height = case when excluded.height <> '' then excluded.height else device_instance.height end,
-          updated_at = now()
-      `
-    }
     const slots = body?.slots
     const stale = Array.isArray(slots) && slots.some((slot) => slot["stale"] === true)
-    let reported: number[] = []
-    if (Array.isArray(slots)) {
+    if (body?.slotsFresh === true && !stale && Array.isArray(slots)) {
+      const reported: number[] = []
       for (const slot of slots) {
+        if (slot["stale"] === true) continue
         const index = Number(slot["indexNum"] ?? 0)
-        if (index >= 1 && index <= 5) reported.push(index)
+        if (index < 1 || index > 5) continue
+        reported.push(index)
+        const running = String(slot["status"] ?? "") === "running"
+        const webrtcTcp = hostPort(slot["webrtcTcp"])
+        const webrtcUdp = hostPort(slot["webrtcUdp"])
+        await sql`
+          insert into device_instance (
+            id, device_id, instance_index, label, enabled, status, container_id,
+            api_port, rpa_port, webrtc_tcp, webrtc_udp, width, height
+          )
+          values (
+            ${randomUUID()}::uuid, ${device.deviceId}::uuid, ${index}, ${String(slot["name"] ?? "")}, true,
+            ${running ? "online" : "offline"}, ${String(slot["id"] ?? "")}, ${Number(slot["apiPort"] ?? 0)},
+            ${Number(slot["rpaPort"] ?? 0)}, ${webrtcTcp}, ${webrtcUdp},
+            ${String(slot["width"] ?? "")}, ${String(slot["height"] ?? "")}
+          )
+          on conflict (device_id, instance_index) do update set
+            label = excluded.label,
+            enabled = true,
+            status = excluded.status,
+            container_id = excluded.container_id,
+            api_port = excluded.api_port,
+            rpa_port = excluded.rpa_port,
+            webrtc_tcp = excluded.webrtc_tcp,
+            webrtc_udp = excluded.webrtc_udp,
+            width = excluded.width,
+            height = excluded.height,
+            updated_at = now()
+        `
       }
-    }
-    let inventory =
-      !stale && (body?.slotsFresh === true || (Array.isArray(slots) && slots.length > 0))
-    if (!inventory) {
-      const live = await boxPitIndexes(device.host)
-      if (live !== null) {
-        inventory = true
-        reported = live
-      }
-    }
-    if (inventory) {
       await sql`
         update device_instance
         set label = '', status = 'unknown', container_id = '', api_port = 0, rpa_port = 0,
@@ -991,7 +1413,6 @@ export const registerBoxLink = (
           and not (label = '' and status = 'unknown' and container_id = '')
       `
     }
-    await sql`delete from device_watch where expires_at < now()`
     const watches = await sql<{ indexNum: number }[]>`
       select instance_index as "indexNum" from device_watch
       where device_id = ${device.deviceId}::uuid and expires_at > now()
@@ -1029,8 +1450,10 @@ export const registerBoxLink = (
     const boxId = context.req.query("boxId") ?? ""
     const device = token === "" || boxId === "" ? null : await agentDevice(sql, token, boxId)
     if (device === null) return context.body(null, 401)
-    const first = await claimOnce(sql, device)
-    if (first !== null) return context.json(taskPointer(first))
+    if (await claimPending(sql, device.deviceId)) {
+      const first = await claimOnce(sql, device)
+      if (first !== null) return context.json(taskPointer(first))
+    }
     const waitMs = parseWait(context.req.query("wait"))
     if (waitMs > 0) {
       await new Promise<void>((resolve) => {
@@ -1050,8 +1473,10 @@ export const registerBoxLink = (
         if (context.req.raw.signal.aborted) done()
       })
       if (stopping || context.req.raw.signal.aborted) return context.body(null, 204)
-      const second = await claimOnce(sql, device)
-      if (second !== null) return context.json(taskPointer(second))
+      if (await claimPending(sql, device.deviceId)) {
+        const second = await claimOnce(sql, device)
+        if (second !== null) return context.json(taskPointer(second))
+      }
     }
     return context.body(null, 204)
   })
@@ -1067,23 +1492,42 @@ export const registerBoxLink = (
     const reportedStep = body?.checkpoint?.step_id ?? ""
     const rows = await sql<
       {
+        accountId: string | null
+        chainName: string
         deviceId: string
+        dispatchItemId: string | null
         externalId: string
         groupId: string
         kind: string
+        nodeName: string
         parameters: Record<string, string> | null
         parentStepId: string | null
+        remark: string
+        repeatCount: number
+        repeatIndex: number
         role: string
         sequence: number
         stepId: string
+        taskChainId: string | null
+        taskChainName: string
+        taskName: string
       }[]
     >`
-      select d.id as "deviceId", d.external_id as "externalId", t.group_id as "groupId", s.kind, s.id as "stepId",
+      select d.id as "deviceId", d.external_id as "externalId", t.group_id as "groupId", t.name as "taskName",
+        coalesce(t.chain_name, '') as "chainName",
+        t.task_chain_id::text as "taskChainId",
+        t.dispatch_item_id::text as "dispatchItemId",
+        coalesce(tc.name, '') as "taskChainName",
+        t.account_id::text as "accountId",
+        t.repeat_index as "repeatIndex", t.repeat_count as "repeatCount",
+        s.kind, s.id as "stepId",
+        coalesce(s.remark, '') as remark, coalesce(s.node_name, '') as "nodeName",
         s.sequence, s.parameters, s.role, s.parent_step_id::text as "parentStepId"
       from execution_task t
       join device d on d.id = t.device_id
       join device_agent a on a.device_id = d.id
       join execution_task_step s on s.task_id = t.id and s.status in ('claimed', 'running')
+      left join task_chain tc on tc.id = t.task_chain_id
       where t.id = ${taskId}::uuid and a.token_hash = ${hashToken(token)}
         and t.executor_key = 'box-agent' and t.status in ('queued','dispatching','running','ood')
         and exists (select 1 from execution_task_run r where r.task_id = t.id and r.step_id = s.id
@@ -1115,6 +1559,16 @@ export const registerBoxLink = (
       return context.body(null, 404)
     }
     const status = body?.status ?? ""
+    const logTitle = stepLogTitle({
+      chainName: row.chainName ?? "",
+      dispatchItemId: row.dispatchItemId,
+      nodeName: row.nodeName ?? "",
+      remark: row.remark ?? "",
+      skill: row.kind,
+      taskChainId: row.taskChainId,
+      taskChainName: row.taskChainName ?? "",
+      taskName: row.taskName,
+    })
     if (status === "succeeded" || status === "failed" || status === "cancelled") {
       const stepStatus = status
       const outputs = stripNull(body?.checkpoint?.outputs ?? {}) as Record<string, string>
@@ -1122,17 +1576,23 @@ export const registerBoxLink = (
         // Match claim/synchronization lock order before writing device-linked history.
         await tx`select id from device where id = ${row.deviceId}::uuid for update`
         await tx`select id from execution_task where id = ${taskId}::uuid for update`
-        const finish = async (value: "failed" | "cancelled" | "continue" | "done") => {
+        const finish = async (value: "failed" | "cancelled" | "continue" | "done", detail = "") => {
           await tx`select pg_notify('agent_task', ${row.deviceId})`
+          const quoted = stageQuote(row.taskName, row.repeatIndex, row.repeatCount)
           await writeLog(
             tx,
             row.groupId,
             row.deviceId,
             value === "failed" ? "error" : "ok",
-            value === "continue"
-              ? `${row.externalId} 步骤 ${row.kind} 完成，继续下一步`
-              : `${row.externalId} ${value === "done" ? "succeeded" : value}`,
+            detail.length > 0 ? `${row.externalId} ${quoted}${detail}` : progressLogText(row, value, logTitle),
           )
+          if (value === "failed" || value === "cancelled") {
+            await cancelLaterStages(tx, taskId, row.groupId, row.deviceId, row.externalId, {
+              name: row.taskName,
+              repeatCount: row.repeatCount,
+              repeatIndex: row.repeatIndex,
+            })
+          }
           return value
         }
         const active = await tx`select id from execution_task_step where id = ${row.stepId}::uuid
@@ -1195,7 +1655,16 @@ export const registerBoxLink = (
             }
           }
         }
-        if (status === "failed" || status === "cancelled") {
+        const liveSteps = jumpStepCount(row.parameters?.["steps"])
+        const liveSequence = Number(row.sequence)
+        const liveFailureJump =
+          status === "failed" &&
+          row.kind === "CheckLive" &&
+          jumpWhenMode(row.parameters?.["jumpWhen"], "off") === "failure" &&
+          liveSteps !== null &&
+          liveSteps > 0 &&
+          Number.isInteger(liveSequence)
+        if ((status === "failed" || status === "cancelled") && !liveFailureJump) {
           await tx`
             update execution_task_step
             set status = 'cancelled', finished_at = now()
@@ -1208,6 +1677,18 @@ export const registerBoxLink = (
           `
           return finish(status)
         }
+        if (liveFailureJump && liveSteps !== null) {
+          const skipped = await skipLaterSteps(tx, taskId, row.stepId, liveSequence, liveSteps)
+          if (skipped > 0) {
+            await writeLog(
+              tx,
+              row.groupId,
+              row.deviceId,
+              "ok",
+              `${row.externalId} 存活检测失败，跳过 ${skipped} 步`,
+            )
+          }
+        }
         const cancellation = await tx`select id from execution_task where id = ${taskId}::uuid
           and cancel_requested_at is not null`
         if (cancellation.length > 0) {
@@ -1217,36 +1698,50 @@ export const registerBoxLink = (
             terminal_reason = 'stopped_between_steps' where id = ${taskId}::uuid`
           return finish("cancelled")
         }
-        if (status === "succeeded" && row.kind === "JumpNodes") {
-          const found = Number(outputs["count"] ?? "")
+        const clickPassed = row.kind === "ClickJumpNodes" && clickJumpPassed(outputs["passed"])
+        const foundCount =
+          nodeJumpKind(row.kind) && !clickPassed ? jumpFoundCount(outputs["count"]) : null
+        if (status === "succeeded" && nodeJumpKind(row.kind) && !clickPassed) {
+          await writeJumpAccount(tx, row, outputs["count"], logTitle)
+        }
+        if (status === "succeeded" && row.kind === "ExportAndroidContainer") {
+          await writeBackupName(tx, row, outputs["exportName"] ?? "")
+        }
+        if (
+          status === "succeeded" &&
+          row.kind === "FetchMailCode" &&
+          /^[0-9]{6}$/.test(outputs["code"] ?? "")
+        ) {
+          await completeFollowingText(tx, taskId, Number(row.sequence), outputs["code"] ?? "")
+        }
+        if (
+          status === "succeeded" &&
+          !clickPassed &&
+          (nodeJumpKind(row.kind) || row.kind === "CheckLive")
+        ) {
+          const found = foundCount ?? Number(outputs["count"] ?? "")
+          const when = jumpWhenMode(
+            row.parameters?.["jumpWhen"],
+            row.kind === "CheckLive" ? "off" : "success",
+          )
           const steps = jumpStepCount(row.parameters?.["steps"])
           const sequence = Number(row.sequence)
-          if (
-            Number.isInteger(found) &&
-            found > 0 &&
-            steps !== null &&
-            steps > 0 &&
-            Number.isInteger(sequence)
-          ) {
-            const skipped = await tx`
-              update execution_task_step
-              set status = 'skipped', finished_at = now(), result = ${tx.json({ skippedBy: row.stepId })}
-              where id in (
-                select id from execution_task_step
-                where task_id = ${taskId}::uuid and status = 'pending' and sequence > ${sequence}
-                order by sequence
-                limit ${steps}
-              )
-              returning id
-            `
-            if (skipped.length > 0) {
-              await writeLog(
-                tx,
-                row.groupId,
-                row.deviceId,
-                "ok",
-                `${row.externalId} 节点跳跃命中，跳过 ${skipped.length} 步`,
-              )
+          const should =
+            when !== null &&
+            (row.kind === "CheckLive"
+              ? statusShouldJump(true, when)
+              : jumpNodesShouldSkip(found, when))
+          if (should && steps !== null && steps > 0 && Number.isInteger(sequence)) {
+            const skipped = await skipLaterSteps(tx, taskId, row.stepId, sequence, steps)
+            if (skipped > 0) {
+              const verb = when === "failure" ? "未命中" : "命中"
+              const text =
+                row.kind === "CheckLive"
+                  ? `${row.externalId} 存活检测成功，跳过 ${skipped} 步`
+                  : logTitle.length > 0
+                    ? `${row.externalId} ${logTitle} ${verb}，跳过 ${skipped} 步`
+                    : `${row.externalId} ${row.kind === "ClickJumpNodes" ? "点击节点跳跃" : "节点跳跃"}${verb}，跳过 ${skipped} 步`
+              await writeLog(tx, row.groupId, row.deviceId, "ok", text)
             }
           }
         }
@@ -1272,6 +1767,13 @@ export const registerBoxLink = (
       if (outcome === "stale") return context.json({ error: "stale_execution" }, 409)
       if (outcome === "guard_incomplete") return context.json({ error: "guard_incomplete" }, 409)
       if (outcome === "duplicate") return context.json({})
+      if (outcome === "failed") {
+        try {
+          await replayFailedStage(row.groupId, taskId)
+        } catch (error) {
+          console.error("stage auto replay failed", error)
+        }
+      }
       wake(row.deviceId)
       return context.json({})
     }
@@ -1398,22 +1900,22 @@ export const registerBoxLink = (
         await tx`
           insert into execution_task_step (
             id, task_id, group_id, sequence, command_idempotency_key, fingerprint, kind, target, parameters, status,
-            role, phase, guards, guard_code, guard_index, parent_step_id, instance_id
+            role, phase, guards, guard_code, guard_index, parent_step_id, instance_id, node_name
           ) values (
             ${insertedId}::uuid, ${taskId}::uuid, ${step.groupId}::uuid, ${step.sequence + 1},
             ${`${taskId}:ood:${insertedId}`}, ${insertedId}, 'ClickNode', ${tx.json(z.json().parse(step.target ?? {}))}, ${tx.json(input)}, 'pending',
-            'ood', 'skill', ${tx.json([])}, ${code}, 0, ${step.id}::uuid, ${step.instanceId}::uuid
+            'ood', 'skill', ${tx.json([])}, ${code}, 0, ${step.id}::uuid, ${step.instanceId}::uuid, ${skillNodeName("ClickNode")}
           )
         `
       } else {
         await tx`
           insert into execution_task_step (
             id, task_id, group_id, sequence, command_idempotency_key, fingerprint, kind, target, parameters, status,
-            role, phase, guards, guard_code, guard_index, parent_step_id
+            role, phase, guards, guard_code, guard_index, parent_step_id, node_name
           ) values (
             ${insertedId}::uuid, ${taskId}::uuid, ${step.groupId}::uuid, ${step.sequence + 1},
             ${`${taskId}:ood:${insertedId}`}, ${insertedId}, 'ClickNode', ${tx.json(z.json().parse(step.target ?? {}))}, ${tx.json(input)}, 'pending',
-            'ood', 'skill', ${tx.json([])}, ${code}, 0, ${step.id}::uuid
+            'ood', 'skill', ${tx.json([])}, ${code}, 0, ${step.id}::uuid, ${skillNodeName("ClickNode")}
           )
         `
       }
@@ -1501,37 +2003,28 @@ export const registerBoxLink = (
     const token = bearer(context.req.header("authorization"))
     const boxId = context.req.query("boxId") ?? ""
     const index = Number(context.req.query("indexNum") ?? "0")
-    if (!Number.isInteger(index) || index < 1 || index > 5)
+    const incoming = context.req.raw.body
+    if (!Number.isInteger(index) || index < 1 || index > 5) {
+      await readFrameBody(incoming)
       return context.json({ error: "invalid_index" }, 400)
+    }
     const device = token === "" || boxId === "" ? null : await agentDevice(sql, token, boxId)
-    if (device === null) return context.body(null, 401)
+    if (device === null) {
+      await readFrameBody(incoming)
+      return context.body(null, 401)
+    }
+    const read = await readFrameBody(incoming)
+    if (read.kind === "overflow") return context.body(null, 204)
     const watching = await sql<{ n: number }[]>`
       select count(*)::int as n from device_watch
       where device_id = ${device.deviceId}::uuid and instance_index = ${index} and expires_at > now()
     `
-    if ((watching[0]?.n ?? 0) === 0) return context.body(null, 204)
-    const reader = context.req.raw.body?.getReader()
-    if (reader === undefined) return context.body(null, 204)
-    const chunks: Uint8Array[] = []
-    let length = 0
-    for (;;) {
-      const chunk = await reader.read()
-      if (chunk.done) break
-      length += chunk.value.byteLength
-      if (length > 2 * 1024 * 1024) {
-        await reader.cancel()
-        return context.body(null, 204)
-      }
-      chunks.push(chunk.value)
-    }
-    if (length === 0) return context.body(null, 204)
-    const bytes = new Uint8Array(length)
-    let offset = 0
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset)
-      offset += chunk.byteLength
-    }
-    frames.set(`${device.deviceId}#${index}`, { at: Date.now(), bytes, groupId: device.groupId })
+    if ((watching[0]?.n ?? 0) === 0 || read.kind !== "bytes") return context.body(null, 204)
+    frames.set(`${device.deviceId}#${index}`, {
+      at: Date.now(),
+      bytes: read.bytes,
+      groupId: device.groupId,
+    })
     return context.body(null, 204)
   })
 
@@ -1570,7 +2063,6 @@ export const registerBoxLink = (
   app.get("/api/devices", async (context) => {
     const user = await userFromRequest(sql, context.req.raw)
     if (user === null) return context.json({ error: "authentication_required" }, 401)
-    await markBoxesWithoutHeartbeat(sql)
     const rows = await sql`
       select d.id, d.external_id as "externalId", d.host, d.name, d.model, d.version, d.firmware,
         d.memory, d.disk, d.disk_pct as "diskPct", d.enabled, d.status,
@@ -1822,8 +2314,10 @@ export const registerBoxLink = (
     const device =
       user === null ? null : await ownedDevice(sql, user, context.req.param("deviceId"))
     if (device === null) return context.json({ error: "not_found" }, 404)
+    const includeEmpty = context.req.query("includeEmpty") === "1"
     const rows = await sql`
       select di.instance_index as index, di.label, di.status, di.width, di.height, di.api_port as "apiPort", di.rpa_port as "rpaPort",
+        di.webrtc_tcp as "webrtcTcp", di.webrtc_udp as "webrtcUdp",
         d.host, coalesce(da.file_browser_url, '') as "fileBrowserUrl",
         exists (
           select 1 from execution_task_device_lease l
@@ -1833,7 +2327,10 @@ export const registerBoxLink = (
       join device d on d.id = di.device_id
       left join device_agent da on da.device_id = d.id
       where di.device_id = ${device.deviceId}::uuid
-        and not (di.label = '' and di.status = 'unknown' and di.container_id = '')
+        and (
+          ${includeEmpty}::boolean
+          or not (di.label = '' and di.status = 'unknown' and di.container_id = '')
+        )
       order by di.instance_index
     `
     return context.json(
@@ -1901,14 +2398,25 @@ export const registerBoxLink = (
         return context.json({ error: "idempotency_key_required" }, 400)
       const rawBody = await context.req.text()
       const body = JSON.parse(rawBody) as {
+        chainName?: unknown
         deviceId?: string
         indexNum?: number
         steps?: ReadonlyArray<{
           afterMs?: unknown
           guards?: unknown
           input?: Record<string, string>
+          remark?: unknown
+          scopes?: unknown
           skill?: string
+          sources?: unknown
         }>
+      }
+      const named = readChainName(body?.chainName)
+      if (!named.ok) return context.json({ error: named.error }, 400)
+      const remarks = (body?.steps ?? []).map((step) => readRemark(step.remark))
+      const rejectedRemark = remarks.find((item) => !item.ok)
+      if (rejectedRemark !== undefined && !rejectedRemark.ok) {
+        return context.json({ error: rejectedRemark.error }, 400)
       }
       const device = await ownedDevice(sql, user, body?.deviceId ?? "")
       if (device === null) return context.json({ error: "not_found" }, 404)
@@ -1919,11 +2427,8 @@ export const registerBoxLink = (
       if (guards.some((item) => item === null) || delays.some((item) => item === null))
         return context.json({ error: "skill_rejected" }, 400)
       if (
-        steps.some(
-          (step) =>
-            !skillByCode.has(step.skill ?? "") ||
-            (noBatch.has(step.skill ?? "") && steps.length > 1),
-        )
+        steps.some((step) => !skillByCode.has(step.skill ?? "")) ||
+        mixedBatchRejected(steps.map((step) => step.skill ?? ""))
       ) {
         return context.json({ error: "skill_rejected" }, 400)
       }
@@ -1940,13 +2445,71 @@ export const registerBoxLink = (
       ) {
         return context.json({ error: "video_path_rejected" }, 400)
       }
-      if (steps.some((step) => step.skill === "JumpNodes" && !jumpNodesReady(step.input))) {
+      if (
+        steps.some(
+          (step) =>
+            (nodeJumpKind(step.skill ?? "") && !jumpNodesReady(step.input)) ||
+            (step.skill === "ClickJumpNodes" && !clickChanceReady(step.input?.["clickChance"])) ||
+            (step.skill === "CheckLive" && !checkLiveReady(step.input)),
+        )
+      ) {
         return context.json({ error: "skill_rejected" }, 400)
       }
-      const parameters = steps.map((step) => ({ input: step.input ?? {}, skill: step.skill ?? "" }))
+      const prepared = steps.map((step) => {
+        const input = step.input ?? {}
+        const skill = step.skill ?? ""
+        if (
+          step.scopes !== undefined &&
+          (step.scopes === null || typeof step.scopes !== "object" || Array.isArray(step.scopes))
+        ) {
+          return null
+        }
+        const rawScopes = (step.scopes ?? {}) as Record<string, unknown>
+        const scopes: Record<string, "external" | "internal"> = {}
+        for (const key of Object.keys(input)) {
+          scopes[key] = rawScopes[key] === "external" ? "external" : "internal"
+        }
+        const sources = readStepSources(input, scopes, step.sources, null, skill)
+        if (sources === null) return null
+        return { input, scopes, skill, sources }
+      })
+      if (prepared.some((item) => item === null)) return context.json({ error: "skill_rejected" }, 400)
+      if (
+        prepared.some(
+          (item) =>
+            item !== null &&
+            item.skill === "ClickJumpNodes" &&
+            item.scopes.clickChance === "external" &&
+            item.sources.clickChance === "chance.external",
+        )
+      ) {
+        return context.json({ error: "没有外部概率" }, 400)
+      }
+      if (
+        prepared.some(
+          (item) =>
+            item !== null &&
+            item.skill === "SendText" &&
+            item.scopes.text === "external" &&
+            item.sources.text === "pool.text",
+        )
+      ) {
+        return context.json({ error: "没有文本池" }, 400)
+      }
+      const parameters = prepared.flatMap((item) =>
+        item === null ? [] : [{ input: item.input, scopes: item.scopes, skill: item.skill, sources: item.sources }],
+      )
       const indexNum = Number(body?.indexNum ?? 0)
       const hash = hashToken(
-        fingerprint({ deviceId: device.deviceId, indexNum, parameters, guards, delays }),
+        fingerprint({
+          chainName: named.name,
+          deviceId: device.deviceId,
+          delays,
+          guards,
+          indexNum,
+          parameters,
+          remarks: remarks.map((item) => (item.ok ? item.remark : "")),
+        }),
       )
       const existing = await sql<{ id: string; status: string; fingerprint: string }[]>`
        select id::text as id, status, fingerprint from execution_task
@@ -1977,10 +2540,10 @@ export const registerBoxLink = (
         if (current.length === 0) return { kind: "not_found" as const }
         const inserted = await tx`
         insert into execution_task (
-          id, group_id, requester_id, device_id, idempotency_key, fingerprint, name, executor_key, parameters, status
+          id, group_id, requester_id, device_id, idempotency_key, fingerprint, name, executor_key, parameters, status, chain_name
         ) values (
            ${taskId}::uuid, ${device.groupId}::uuid, ${user}::uuid, ${device.deviceId}::uuid, ${key}, ${hash},
-          ${steps[0]?.skill ?? "task"}, 'box-agent', ${tx.json(parameters)}, 'queued'
+          ${steps[0]?.skill ?? "task"}, 'box-agent', ${tx.json(parameters)}, 'queued', ${named.name}
          ) on conflict(group_id, idempotency_key) do nothing returning id
        `
         if (inserted.length === 0) {
@@ -1996,22 +2559,26 @@ export const registerBoxLink = (
         }
         const instanceId = instance[0]?.id
         for (const [sequence, step] of steps.entries()) {
+          const noted = remarks[sequence]
+          const remark = noted !== undefined && noted.ok ? noted.remark : ""
           if (instanceId === undefined) {
             await tx`
             insert into execution_task_step (
-              id, task_id, group_id, sequence, command_idempotency_key, fingerprint, kind, target, parameters, status, guards, after_ms
+              id, task_id, group_id, sequence, command_idempotency_key, fingerprint, kind, target, parameters, status, guards, after_ms, remark, node_name
             ) values (
               ${randomUUID()}, ${taskId}, ${device.groupId}, ${sequence}, ${`${key}:${sequence}`}, ${key},
-              ${step.skill ?? ""}, ${tx.json({ indexNum })}, ${tx.json(step.input ?? {})}, 'pending', ${tx.json(guards[sequence] ?? [])}, ${delays[sequence] ?? 0}
+              ${step.skill ?? ""}, ${tx.json({ indexNum })}, ${tx.json(step.input ?? {})}, 'pending', ${tx.json(guards[sequence] ?? [])}, ${delays[sequence] ?? 0},
+              ${remark}, ${skillNodeName(step.skill ?? "")}
             )
           `
           } else {
             await tx`
             insert into execution_task_step (
-              id, task_id, group_id, sequence, command_idempotency_key, fingerprint, kind, target, parameters, status, instance_id, guards, after_ms
+              id, task_id, group_id, sequence, command_idempotency_key, fingerprint, kind, target, parameters, status, instance_id, guards, after_ms, remark, node_name
             ) values (
               ${randomUUID()}, ${taskId}, ${device.groupId}, ${sequence}, ${`${key}:${sequence}`}, ${key},
-              ${step.skill ?? ""}, ${tx.json({ indexNum })}, ${tx.json(step.input ?? {})}, 'pending', ${instanceId}, ${tx.json(guards[sequence] ?? [])}, ${delays[sequence] ?? 0}
+              ${step.skill ?? ""}, ${tx.json({ indexNum })}, ${tx.json(step.input ?? {})}, 'pending', ${instanceId}, ${tx.json(guards[sequence] ?? [])}, ${delays[sequence] ?? 0},
+              ${remark}, ${skillNodeName(step.skill ?? "")}
             )
           `
           }
@@ -2105,18 +2672,37 @@ export const registerBoxLink = (
     const origin = body.origin === "ai" ? "ai" : body.origin === "rpa" ? "rpa" : ""
     const anchor = readAnchor(body.anchor)
     if (anchor === "invalid") return context.json({ error: "invalid_chain" }, 400)
-    const packed = readChainSteps(body.steps, anchor)
-    if (name.length === 0 || name.length > 80 || origin === "" || packed === null) {
+    const packed =
+      Array.isArray(body.steps) && body.steps.length === 0
+        ? {
+            ok: true as const,
+            delays: [] as number[],
+            guards: [] as GuardCode[][],
+            parameters: [] as ChainParameter[],
+            paramScopes: [] as ChainScope[],
+            paramSources: [] as ChainSource[],
+            remarks: [] as string[],
+          }
+        : readChainSteps(body.steps, anchor)
+    if (name.length === 0 || name.length > 80 || origin === "") {
       return context.json({ error: "invalid_chain" }, 400)
     }
+    if (!packed.ok) return context.json({ error: packed.error }, 400)
+    const taken = await sql<{ id: string }[]>`
+      select id::text as id from behavior_chain
+      where administrator_id = ${administratorId}::uuid and name = ${name}
+      limit 1
+    `
+    if (taken.length > 0) return context.json({ error: "chain_name_taken" }, 409)
     const rows = await sql<ChainRow[]>`
       insert into behavior_chain (
         group_id, administrator_id, created_by, name, origin, executor_key, parameters, param_scopes,
-        param_sources, anchor_table, anchor_key, guards, delays
+        param_sources, anchor_table, anchor_key, guards, delays, remarks
       ) values (
         ${groupId}::uuid, ${administratorId}::uuid, ${user}::uuid, ${name}, ${origin}, 'box-agent',
         ${sql.json(packed.parameters)}, ${sql.json(packed.paramScopes)}, ${sql.json(packed.paramSources)},
-        ${anchor?.table ?? ""}, ${anchor?.key ?? ""}, ${sql.json(packed.guards)}, ${sql.json(packed.delays)}
+        ${anchor?.table ?? ""}, ${anchor?.key ?? ""}, ${sql.json(packed.guards)}, ${sql.json(packed.delays)},
+        ${packed.remarks}::text[]
       )
       returning ${sql.unsafe(chainColumns)}
     `
@@ -2125,12 +2711,64 @@ export const registerBoxLink = (
     return context.json(chainView(row), 201)
   })
 
+  app.put("/api/behavior-chains/:id", async (context) => {
+    const user = await userFromRequest(sql, context.req.raw)
+    if (user === null) return context.json({ error: "authentication_required" }, 401)
+    const administratorId = await administratorFor(sql, user)
+    const id = context.req.param("id")
+    if (administratorId === null || !isUuid(id)) return context.json({ error: "not_found" }, 404)
+    let body: { anchor?: unknown; name?: unknown; steps?: unknown }
+    try {
+      body = await context.req.json()
+    } catch {
+      return context.json({ error: "invalid_chain" }, 400)
+    }
+    const name = typeof body.name === "string" ? body.name.trim() : ""
+    const anchor = readAnchor(body.anchor)
+    if (anchor === "invalid") return context.json({ error: "invalid_chain" }, 400)
+    const packed = readChainSteps(body.steps, anchor)
+    if (name.length === 0 || name.length > 80) return context.json({ error: "invalid_chain" }, 400)
+    if (!packed.ok) return context.json({ error: packed.error }, 400)
+    const taken = await sql<{ id: string }[]>`
+      select id::text as id from behavior_chain
+      where administrator_id = ${administratorId}::uuid and name = ${name} and id <> ${id}::uuid
+      limit 1
+    `
+    if (taken.length > 0) return context.json({ error: "chain_name_taken" }, 409)
+    const rows = await sql<ChainRow[]>`
+      update behavior_chain
+      set name = ${name},
+        parameters = ${sql.json(packed.parameters)},
+        param_scopes = ${sql.json(packed.paramScopes)},
+        param_sources = ${sql.json(packed.paramSources)},
+        anchor_table = ${anchor?.table ?? ""},
+        anchor_key = ${anchor?.key ?? ""},
+        guards = ${sql.json(packed.guards)},
+        delays = ${sql.json(packed.delays)},
+        remarks = ${packed.remarks}::text[],
+        updated_at = now()
+      where id = ${id}::uuid and administrator_id = ${administratorId}::uuid
+      returning ${sql.unsafe(chainColumns)}
+    `
+    const row = rows[0]
+    return row === undefined
+      ? context.json({ error: "not_found" }, 404)
+      : context.json(chainView(row))
+  })
+
   app.delete("/api/behavior-chains/:id", async (context) => {
     const user = await userFromRequest(sql, context.req.raw)
     if (user === null) return context.json({ error: "authentication_required" }, 401)
     const administratorId = await administratorFor(sql, user)
     const id = context.req.param("id")
     if (administratorId === null || !isUuid(id)) return context.json({ error: "not_found" }, 404)
+    const used = await sql`
+      select 1 from task_chain_item where chain_id = ${id}::uuid
+      union all
+      select 1 from operation_dispatch where chain_id = ${id}::uuid
+      limit 1
+    `
+    if (used.length > 0) return context.json({ error: "chain_in_use" }, 409)
     const rows = await sql<{ id: string }[]>`
       delete from behavior_chain
       where id = ${id}::uuid and administrator_id = ${administratorId}::uuid

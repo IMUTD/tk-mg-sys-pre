@@ -1,7 +1,7 @@
 import { Typography } from "antd"
 import type { ReactNode } from "react"
 
-import "../marketing/marketing.css"
+import "./studio.css"
 
 type StudioKind = "video" | "image" | "text" | "image-pool"
 

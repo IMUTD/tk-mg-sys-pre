@@ -80,3 +80,19 @@ canvas {
     transform: translateZ(0);
     contain: strict;
 }
+
+body.embed #container {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    contain: none;
+}
+
+body.embed video {
+    width: 100vh;
+    height: 100vw;
+    object-fit: cover;
+    contain: none;
+    transform: translate(-50%, -50%) rotate(90deg) translateZ(0);
+    -webkit-transform: translate(-50%, -50%) rotate(90deg) translateZ(0);
+}

@@ -45,7 +45,6 @@ import {
   expirePresetOptions,
   extraModeLabel,
   filterProxies,
-  getModeTags,
   getPrimaryCheckResult,
   getResultCountry,
   getResultIp,
@@ -56,12 +55,14 @@ import {
   type ProxyQuery,
   parseCheckResult,
   proxiesToCsv,
+  proxyDetectedRegion,
   proxyTypeLabel,
   SEED_DYNAMIC_TRAFFIC,
   shortDate,
   staticProxyCount,
   turboNodeLabel,
   turboNodeProxies,
+  uniqueRegionOptions,
   uniqueTagOptions,
 } from "./myt-proxy"
 import "./proxies.css"
@@ -255,6 +256,7 @@ export const ProxiesListPage = ({
   const proxyPaging = useClientPagination(JSON.stringify([filterMode, query]))
   const selected = proxies.filter((item) => selectedIds.includes(item.id))
   const tagOptions = uniqueTagOptions(proxies)
+  const regionOptions = uniqueRegionOptions(proxies)
   const [catalogGroups, setCatalogGroups] = useState<readonly string[]>([])
   const [catalogRemarks, setCatalogRemarks] = useState<readonly string[]>([])
   useEffect(() => {
@@ -307,7 +309,7 @@ export const ProxiesListPage = ({
         : [...current, updated],
     )
   }
-  const runDetect = (ids: readonly number[]): void => {
+  const runDetect = (ids: readonly number[], stride = 2): void => {
     void perform(async () => {
       let opened = false
       const { failed, requestFailures, succeeded } = await detectProxyBatch(
@@ -321,6 +323,7 @@ export const ProxiesListPage = ({
             setResultView({ id: row.id, result })
           }
         },
+        stride,
       )
       if (ids.length !== 1) message.info(`检测完成，成功 ${succeeded} 个，失败 ${failed} 个`)
       else if (!opened || requestFailures > 0) message.error("检测失败")
@@ -501,18 +504,18 @@ export const ProxiesListPage = ({
           title="类型"
         />
         <LabelFilterRow
+          onChange={(values) => changeSelectQuery({ region: values[0] ?? "" })}
+          options={regionOptions}
+          selected={choice(draft.region)}
+          system
+          title="地区"
+        />
+        <LabelFilterRow
           onChange={(values) => changeSelectQuery({ save: values[0] ?? "" })}
           options={ENABLE_OPTIONS.map((option) => ({ label: option.label, value: option.value }))}
           selected={choice(draft.save)}
           system
           title="节流"
-        />
-        <LabelFilterRow
-          onChange={(values) => changeSelectQuery({ tun: values[0] ?? "" })}
-          options={ENABLE_OPTIONS.map((option) => ({ label: option.label, value: option.value }))}
-          selected={choice(draft.tun)}
-          system
-          title="TUN模式"
         />
         <LabelFilterRow
           onChange={(values) => changeSelectQuery({ expiredTime: values[0] ?? "" })}
@@ -602,6 +605,19 @@ export const ProxiesListPage = ({
           ) : null}
         </Space>
         <Space wrap>
+          {canWrite ? (
+            <Button
+              disabled={busy || proxies.length === 0}
+              onClick={() =>
+                runDetect(
+                  proxies.map((item) => item.id),
+                  1,
+                )
+              }
+            >
+              一键检测
+            </Button>
+          ) : null}
           <Button
             disabled={selected.length === 0}
             icon={<DownloadOutlined aria-hidden />}
@@ -747,21 +763,13 @@ export const ProxiesListPage = ({
             width: 220,
           },
           {
-            key: "mode",
-            render: (_value: unknown, item: MytProxy) => (
-              <div className="proxy-mode-list">
-                {getModeTags(item).map((tag) => (
-                  <Tag
-                    className={`proxy-mode-tag mode-${tag.key} ${tag.enabled ? "is-on" : "is-off"}`}
-                    key={tag.key}
-                  >
-                    {tag.label}
-                  </Tag>
-                ))}
-              </div>
-            ),
-            title: "模式",
-            width: 140,
+            key: "region",
+            render: (_value: unknown, item: MytProxy) => {
+              const region = proxyDetectedRegion(item)
+              return region.length === 0 ? "-" : region
+            },
+            title: "地区",
+            width: 80,
           },
           {
             dataIndex: "bindNumber",

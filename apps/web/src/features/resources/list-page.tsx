@@ -197,6 +197,7 @@ export const ResourcesListPage = ({
       <Card className="condition-panel filter-bar" size="small">
         <BusinessLabelFilter
           page={PageKey.StudioTextPool}
+          system
           title="标签"
           blankLabel={usageLabel("未标签", untaggedCount)}
           independentUnassigned

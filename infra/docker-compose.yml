@@ -46,8 +46,9 @@ services:
     command:
       ["sh", "-ec", "bun --cwd apps/api node_modules/drizzle-kit/bin.cjs migrate --config=drizzle.config.ts && exec bun apps/api/src/main.ts"]
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD_URL_ENCODED}@postgres:5432/${POSTGRES_DB}
-      REDIS_URL: redis://:${REDIS_PASSWORD_URL_ENCODED}@redis:6379/0
+      DATABASE_URL: ${API_DATABASE_URL:-postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD_URL_ENCODED}@postgres:5432/${POSTGRES_DB}}
+      REDIS_URL: ${API_REDIS_URL:-redis://:${REDIS_PASSWORD_URL_ENCODED}@redis:6379/0}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
       SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY}
       PROXY_PROBE_BINARY: ${PROXY_PROBE_BINARY:-/usr/local/bin/sing-box}
       MIHOMO_BINARY: ${MIHOMO_BINARY:-/usr/local/bin/mihomo}
@@ -73,7 +74,7 @@ services:
       target: worker
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD_URL_ENCODED}@postgres:5432/${POSTGRES_DB}
+      DATABASE_URL: ${API_DATABASE_URL:-postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD_URL_ENCODED}@postgres:5432/${POSTGRES_DB}}
       TK_MG_SYSTEM_ACTOR_ID: ${TK_MG_SYSTEM_ACTOR_ID}
       TK_MG_WORKER_ID: ${TK_MG_WORKER_ID:-worker-1}
       TK_MG_WORKER_CONCURRENCY: ${TK_MG_WORKER_CONCURRENCY:-4}

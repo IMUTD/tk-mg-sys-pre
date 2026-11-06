@@ -51,16 +51,6 @@ export const PROXY_FAQS = [
     question: "节流模式说明",
     answer: "节流用于降低流量消耗，需要有加速节点或者在海外环境。",
   },
-  {
-    key: "tun",
-    question: "TUN 模式说明",
-    answer: "TUN 为全局接管模式，会接管设备网络流量。",
-  },
-  {
-    key: "safe",
-    question: "强力安全模式说明",
-    answer: "请配合 TUN 模式打开。强隐私场景使用前请联系客服确认。",
-  },
 ] as const
 
 export const SEED_DYNAMIC_TRAFFIC = "0 GB"
@@ -117,6 +107,7 @@ export type ProxyQuery = {
   remarks: readonly string[]
   save: string
   search: string
+  region: string
   tag: string
   tun: string
   turboNode: string
@@ -190,17 +181,12 @@ export type ProxyDevice = {
   seqs: readonly number[]
 }
 
-export type ProxyModeTag = {
-  enabled: boolean
-  key: "safe" | "save" | "tun" | "turbo"
-  label: string
-}
-
 export const emptyProxyQuery = (): ProxyQuery => ({
   expiredTime: "",
   favorite: false,
   id: "",
   noTag: false,
+  region: "",
   remarks: [],
   save: "",
   search: "",
@@ -300,12 +286,6 @@ export const endpointText = (proxy: MytProxy): string => {
   return `${proxy.ip}:${proxy.port}`
 }
 
-export const getModeTags = (proxy: MytProxy): readonly ProxyModeTag[] => [
-  { enabled: proxy.tun, key: "tun", label: "TUN" },
-  { enabled: proxy.turbo || proxy.turboNode !== null, key: "turbo", label: "加速" },
-  { enabled: proxy.safe, key: "safe", label: "安全" },
-]
-
 export const attributionText = (result: ProxyCheckResult): string => {
   const body = getPrimaryCheckResult(result)?.response_body
   if (body === undefined) return "-"
@@ -336,6 +316,31 @@ export const turboNodeLabel = (proxy: MytProxy): string => {
 
 export const turboNodeProxies = (proxies: readonly MytProxy[]): MytProxy[] =>
   proxies.filter((item) => item.status && (item.type === "0" || item.turbo) && item.type !== "3")
+
+export const UNDETECTED_REGION = "none"
+
+export const proxyDetectedRegion = (proxy: MytProxy): string => {
+  const parsed = parseCheckResult(proxy.result)
+  return parsed === null ? "" : (detectedRegionCode(parsed) ?? "")
+}
+
+export const uniqueRegionOptions = (
+  proxies: readonly MytProxy[],
+): { label: string; value: string }[] => {
+  const counts = new Map<string, number>()
+  let undetected = 0
+  for (const item of proxies) {
+    const region = proxyDetectedRegion(item)
+    if (region.length === 0) undetected += 1
+    else counts.set(region, (counts.get(region) ?? 0) + 1)
+  }
+  return [
+    { label: `未检测(${undetected})`, value: UNDETECTED_REGION },
+    ...[...counts.entries()]
+      .sort(([left], [right]) => left.localeCompare(right, "en"))
+      .map(([region, count]) => ({ label: `${region}(${count})`, value: region })),
+  ]
+}
 
 export const uniqueTagOptions = (
   proxies: readonly MytProxy[],
@@ -380,6 +385,11 @@ export const filterProxies = (
       query.unremarked ? remarkParts.length === 0 : null,
       ...(query.unremarked ? [] : query.remarks.map((name) => remarkParts.includes(name))),
       query.favorite ? item.favorite : null,
+      query.region === UNDETECTED_REGION
+        ? proxyDetectedRegion(item).length === 0
+        : query.region.length > 0
+          ? proxyDetectedRegion(item) === query.region
+          : null,
       keyword.length > 0
         ? [item.ip, item.port, item.remark, item.tag].some((field) =>
             includesIgnoreCase(field, keyword),
@@ -412,6 +422,11 @@ export const getResultIp = (item: ProxyCheckItem | null): string => item?.respon
 
 export const getResultCountry = (item: ProxyCheckItem | null): string =>
   item?.response_body?.country ?? "-"
+
+export const detectedRegionCode = (result: ProxyCheckResult): string | null => {
+  const country = getPrimaryCheckResult(result)?.response_body?.country?.trim().toUpperCase() ?? ""
+  return /^[A-Z]{2}$/.test(country) ? country : null
+}
 
 export const getResultStatusLabel = (ok: boolean): string => (ok ? "成功" : "失败")
 

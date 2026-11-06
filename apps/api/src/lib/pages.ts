@@ -1,15 +1,11 @@
 export const PageKey = {
   Overview: "/overview",
-  MarketingDashboard: "/marketing/dashboard",
-  MarketingAccounts: "/marketing/accounts",
-  MarketingNodes: "/marketing/nodes",
-  MarketingSales: "/marketing/sales",
-  MarketingOps: "/marketing/ops",
   MallRecords: "/mall/records",
   MallOrders: "/mall/orders",
   MallInvoices: "/mall/invoices",
   MallRedeem: "/mall/redeem",
   Devices: "/operations/devices",
+  CloudPreview: "/operations/previews",
   Accounts: "/operations/accounts",
   AccountPool: "/operations/account-pool",
   OperationsRegistration: "/operations/registration",
@@ -38,7 +34,6 @@ export type PageKey = (typeof PageKey)[keyof typeof PageKey]
 
 export type PageGroup =
   | "概览"
-  | "营销中心"
   | "积分商场"
   | "运营中心"
   | "工程中心"
@@ -68,16 +63,12 @@ export type ConfigurableRole =
 
 export const PAGE_CATALOG: readonly PageDefinition[] = [
   { group: "概览", key: PageKey.Overview, label: "运营概览" },
-  { group: "营销中心", key: PageKey.MarketingDashboard, label: "营销面板" },
-  { group: "营销中心", key: PageKey.MarketingAccounts, label: "账号市场" },
-  { group: "营销中心", key: PageKey.MarketingNodes, label: "节点市场" },
-  { group: "营销中心", key: PageKey.MarketingSales, label: "销售业绩" },
-  { group: "营销中心", key: PageKey.MarketingOps, label: "运营业绩" },
   { group: "积分商场", key: PageKey.MallRecords, label: "积分记录" },
   { group: "积分商场", key: PageKey.MallOrders, label: "我的订单" },
   { group: "积分商场", key: PageKey.MallInvoices, label: "发票申请" },
   { group: "积分商场", key: PageKey.MallRedeem, label: "兑换中心" },
   { group: "运营中心", key: PageKey.Devices, label: "盒子管理" },
+  { group: "运营中心", key: PageKey.CloudPreview, label: "云机预览" },
   { group: "运营中心", key: PageKey.Accounts, label: "账号管理" },
   { group: "运营中心", key: PageKey.AccountPool, label: "账号池" },
   { group: "运营中心", key: PageKey.OperationsRegistration, label: "注册池" },
@@ -88,7 +79,6 @@ export const PAGE_CATALOG: readonly PageDefinition[] = [
   { group: "工程中心", key: PageKey.Storage, label: "私有云储存" },
   { group: "工程中心", key: PageKey.Robots, label: "运营机器人" },
   { group: "工程中心", key: PageKey.Behaviors, label: "行为中心" },
-  { group: "工程中心", key: PageKey.Configuration, label: "配置中心" },
   { group: "制作中心", key: PageKey.StudioVideo, label: "视频制作" },
   { group: "制作中心", key: PageKey.StudioImage, label: "图片制作" },
   { group: "制作中心", key: PageKey.StudioText, label: "文本制作" },
@@ -112,11 +102,6 @@ export const isDeleteLockedPath = (path: string): boolean =>
   NO_DELETE_PAGE_KEYS.some((key) => path === key || path.startsWith(`${key}/`))
 
 const SALES_PAGES: readonly PageKey[] = [
-  PageKey.MarketingDashboard,
-  PageKey.MarketingAccounts,
-  PageKey.MarketingNodes,
-  PageKey.MarketingSales,
-  PageKey.MarketingOps,
   PageKey.MallRecords,
   PageKey.MallOrders,
   PageKey.MallInvoices,
@@ -125,6 +110,7 @@ const SALES_PAGES: readonly PageKey[] = [
 
 const OPERATIONS_CORE_PAGES: readonly PageKey[] = [
   PageKey.Devices,
+  PageKey.CloudPreview,
   PageKey.Accounts,
   PageKey.AccountPool,
   PageKey.OperationsRegistration,
@@ -133,7 +119,7 @@ const OPERATIONS_CORE_PAGES: readonly PageKey[] = [
   PageKey.Proxies,
 ]
 
-const OPERATIONS_PAGES: readonly PageKey[] = [...OPERATIONS_CORE_PAGES, PageKey.Configuration]
+const OPERATIONS_PAGES: readonly PageKey[] = OPERATIONS_CORE_PAGES
 
 const ENGINEERING_CORE_PAGES: readonly PageKey[] = [
   PageKey.Storage,
@@ -162,7 +148,6 @@ const OPERATOR_PAGES: readonly PageKey[] = [
 const OPERATIONS_DIRECTOR_PAGES: readonly PageKey[] = [
   PageKey.Overview,
   ...OPERATIONS_PAGES,
-  PageKey.MarketingOps,
   ...RESOURCE_PAGES,
 ]
 
@@ -214,7 +199,7 @@ const deletePagesForConfigurableRole = (role: ConfigurableRole): readonly PageKe
     case "engineering_director":
       return [...ENGINEERING_CORE_PAGES, ...RESOURCE_PAGES]
     case "operations_director":
-      return [...OPERATIONS_PAGES, PageKey.MarketingOps, ...RESOURCE_PAGES]
+      return [...OPERATIONS_PAGES, ...RESOURCE_PAGES]
     case "sales_director":
       return [...SALES_PAGES, ...RESOURCE_PAGES]
   }
@@ -294,7 +279,7 @@ export const matchPageAccess = (
 export const permissionsForPages = (pages: readonly PageAccess[]): readonly string[] => {
   const canView = (key: PageKey): boolean => pages.some((page) => page.key === key && page.canView)
   const permissions: string[] = []
-  if (canView(PageKey.Configuration) || canView(PageKey.Members)) {
+  if (canView(PageKey.Members)) {
     permissions.push("configuration:write")
   }
   if (canView(PageKey.Devices)) {

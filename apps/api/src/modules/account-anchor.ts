@@ -10,17 +10,12 @@ export const accountAnchorFields = [
   { label: "V2链接", source: "proxy.link" },
   { label: "TUN模式", source: "proxy.tun" },
   { label: "强力安全模式", source: "proxy.safe" },
-  { label: "盒子", source: "device.host" },
-  { label: "坑位", source: "instance.index" },
-  { label: "备份路径", source: "account.backup_key" },
-  { label: "备份盒子", source: "account.backup_device" },
-  { label: "文本池", source: "pool.text" },
-  { label: "视频池", source: "pool.video" },
-  { label: "视频盒子", source: "pool.video_host" },
-  { label: "图片池", source: "pool.image" },
-  { label: "图片盒子", source: "pool.image_host" },
-  { label: "备份池", source: "pool.backup" },
-  { label: "备份文件盒子", source: "pool.backup_host" },
+  { label: "备份名字", source: "account.backup_name" },
+  { label: "邮箱", source: "account.email" },
+  { label: "客户端ID", source: "account.ms_client_id" },
+  { label: "令牌TOKEN", source: "account.ms_token" },
+  { label: "视频ID", source: "media.video_id" },
+  { label: "图片ID", source: "media.image_id" },
 ] as const
 
 const fieldSources = new Set<string>(accountAnchorFields.map((item) => item.source))
@@ -73,10 +68,34 @@ export const readStepSources = (
   const sources: Record<string, string> = {}
   for (const key of Object.keys(input)) {
     const declared = given[key]
-    if (skill === "JumpNodes" && key === "steps") {
+    if (
+      ((skill === "JumpNodes" || skill === "ClickJumpNodes" || skill === "CheckLive") &&
+        (key === "steps" || key === "jumpWhen")) ||
+      ((skill === "JumpNodes" || skill === "ClickJumpNodes") &&
+        (key === "tagOnSuccess" ||
+          key === "tagOnFailure" ||
+          key === "writeOnSuccessField" ||
+          key === "writeOnSuccessValue" ||
+          key === "writeOnFailureField" ||
+          key === "writeOnFailureValue"))
+    ) {
       if (scopes[key] === "external") return null
       if (declared !== undefined && declared !== "literal") return null
       sources[key] = "literal"
+      continue
+    }
+    if (skill === "ClickJumpNodes" && key === "clickChance") {
+      if (scopes[key] !== "external") {
+        if (declared !== undefined && declared !== "literal") return null
+        sources[key] = "literal"
+        continue
+      }
+      if (declared !== "chance.external") return null
+      sources[key] = "chance.external"
+      continue
+    }
+    if (skill === "SendText" && key === "text" && scopes[key] === "external" && declared === "pool.text") {
+      sources[key] = "pool.text"
       continue
     }
     if (scopes[key] !== "external") {
@@ -84,7 +103,11 @@ export const readStepSources = (
       sources[key] = "literal"
       continue
     }
-    if (anchor === null || typeof declared !== "string" || !fieldSources.has(declared)) return null
+    if (declared === undefined || declared === "") {
+      sources[key] = ""
+      continue
+    }
+    if (typeof declared !== "string" || !fieldSources.has(declared)) return null
     sources[key] = declared
   }
   return sources

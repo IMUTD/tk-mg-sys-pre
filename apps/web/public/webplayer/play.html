@@ -45,6 +45,9 @@
 </head>
 
 <body class="webpBack">
+<script>
+if (new URLSearchParams(location.search).get("embed") === "1") document.body.classList.add("embed");
+</script>
 <div id="root">
 	<div id="assistDiv">
 		<!-- 视频区域 -->

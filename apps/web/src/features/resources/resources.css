@@ -4,7 +4,7 @@
 }
 
 .resources-page .filter-label {
-  color: #606266;
+  color: var(--ant-color-text, #606266);
   font-size: 13px;
 }
 

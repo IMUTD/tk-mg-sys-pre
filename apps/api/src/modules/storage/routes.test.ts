@@ -12,6 +12,20 @@ const administratorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 const operatorId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 const groupId = "11111111-1111-4111-8111-111111111111"
 
+const cardId = "22222222-2222-4222-8222-222222222222"
+const nasBody = {
+  items: [
+    {
+      bucket: "backup",
+      id: cardId,
+      loginUrl: "http://192.168.76.19:8010",
+      name: "机房",
+      password: "nas-password",
+      username: "admin",
+    },
+  ],
+}
+
 const createAuthenticatedApp = () => {
   const auditRepository = createInMemoryAuditRepository()
   const authService = createAuthService(
@@ -62,47 +76,49 @@ const login = async (app: ReturnType<typeof createApp>, email: string): Promise<
 
 describe("storage routes", () => {
   it("shows an unconfigured storage status to an authorized engineer", async () => {
-    // Given
     const { app } = createAuthenticatedApp()
     const cookie = await login(app, "engineer@example.com")
 
-    // When
     const response = await app.request("/api/storage/status", { headers: { Cookie: cookie } })
 
-    // Then
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({
-      configuration: null,
-      credentialsConfigured: false,
-      state: "unconfigured",
-    })
+    await expect(response.json()).resolves.toEqual({ items: [], prefix: `${operatorId}/` })
   })
 
-  it("allows only an administrator to save a redacted storage configuration", async () => {
-    // Given
+  it("returns the secret to a storage viewer and hides it from the audit log", async () => {
     const { app, auditRepository } = createAuthenticatedApp()
     const adminCookie = await login(app, "admin@example.com")
     const operatorCookie = await login(app, "operator@example.com")
 
-    // When
     const saved = await app.request("/api/storage/configuration", {
-      body: JSON.stringify({
-        credentials: { password: "nas-password", username: "nas-user" },
-        host: "nas.internal",
-        protocol: "smb",
-        rootPath: "/TK-MG",
-      }),
+      body: JSON.stringify(nasBody),
       headers: { "Content-Type": "application/json", Cookie: adminCookie },
       method: "PATCH",
     })
-    const hidden = await app.request("/api/storage/configuration", {
-      headers: { Cookie: operatorCookie },
-    })
+    const again = await app.request("/api/storage/configuration", { headers: { Cookie: adminCookie } })
+    const hidden = await app.request("/api/storage/configuration", { headers: { Cookie: operatorCookie } })
 
-    // Then
     expect(saved.status).toBe(200)
-    expect(JSON.stringify(await saved.json())).not.toContain("nas-password")
+    await expect(saved.json()).resolves.toEqual({
+      items: [
+        {
+          bucket: "backup",
+          endpoint: "http://192.168.76.19:8010",
+          id: cardId,
+          loginUrl: "http://192.168.76.19:8010",
+          name: "机房",
+          password: "nas-password",
+          prefix: `${administratorId}/`,
+          username: "admin",
+        },
+      ],
+      prefix: `${administratorId}/`,
+    })
+    await expect(again.json()).resolves.toMatchObject({
+      items: [{ id: cardId, password: "nas-password", prefix: `${administratorId}/` }],
+    })
     expect(hidden.status).toBe(404)
+    expect(JSON.stringify(auditRepository.all())).not.toContain("nas-password")
     expect(auditRepository.all()).toContainEqual(
       expect.objectContaining({
         action: "storage.configuration.read",
@@ -113,23 +129,15 @@ describe("storage routes", () => {
   })
 
   it("records the exact allowed audit event when an administrator saves storage configuration", async () => {
-    // Given
     const { app, auditRepository } = createAuthenticatedApp()
     const cookie = await login(app, "admin@example.com")
 
-    // When
     const response = await app.request("/api/storage/configuration", {
-      body: JSON.stringify({
-        credentials: { password: "nas-password", username: "nas-user" },
-        host: "nas.internal",
-        protocol: "smb",
-        rootPath: "/TK-MG",
-      }),
+      body: JSON.stringify(nasBody),
       headers: { "Content-Type": "application/json", Cookie: cookie },
       method: "PATCH",
     })
 
-    // Then
     expect(response.status).toBe(200)
     expect(auditRepository.all()).toContainEqual(
       expect.objectContaining({
@@ -141,19 +149,47 @@ describe("storage routes", () => {
     )
   })
 
-  it("rejects an undefined storage protocol", async () => {
-    // Given
+  it("rejects a new card that has no password", async () => {
     const { app } = createAuthenticatedApp()
     const cookie = await login(app, "admin@example.com")
 
-    // When
-    const response = await app.request("/api/storage/configuration", {
-      body: JSON.stringify({ host: "nas.internal", protocol: "ftp", rootPath: "/TK-MG" }),
+    const missing = await app.request("/api/storage/configuration", {
+      body: JSON.stringify({
+        items: [{ bucket: "backup", id: cardId, loginUrl: "http://192.168.76.19:8010", name: "机房", username: "admin" }],
+      }),
       headers: { "Content-Type": "application/json", Cookie: cookie },
       method: "PATCH",
     })
 
-    // Then
-    expect(response.status).toBe(400)
+    expect(missing.status).toBe(400)
+  })
+
+  it("keeps one card per address and bucket, and hides another administrator", async () => {
+    const { app } = createAuthenticatedApp()
+    const cookie = await login(app, "admin@example.com")
+    const first = await app.request("/api/storage/configuration", {
+      body: JSON.stringify(nasBody),
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      method: "PATCH",
+    })
+    const duplicate = await app.request("/api/storage/configuration", {
+      body: JSON.stringify({
+        items: [
+          ...nasBody.items,
+          {
+            bucket: "backup",
+            id: "33333333-3333-4333-8333-333333333333",
+            loginUrl: "http://192.168.76.19:8010",
+            name: "另一张",
+            password: "nas-password",
+            username: "admin",
+          },
+        ],
+      }),
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      method: "PATCH",
+    })
+    expect(first.status).toBe(200)
+    expect(duplicate.status).toBe(400)
   })
 })

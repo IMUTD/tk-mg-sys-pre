@@ -73,8 +73,16 @@ bun -e '
   for (const enabled of ["false", "", "TRUE"]) assert(!allows("deploy", github, needs, enabled), "Deploy ignores DEPLOY_ENABLED");
   for (const job of ["build", "deploy"]) assert(!allows(job, github, needs, "true", true), `${job} permits a cancelled workflow`);
   const targets = workflow.jobs.build.strategy.matrix.target;
+  assert(JSON.stringify(targets) === JSON.stringify(["api", "web"]), "Release builds only api and web");
   if (c.services.postgres.ports?.length || c.services.redis.ports?.length) throw new Error("Database ports exposed");
+  const stable = {postgres: "16-alpine", redis: "7-alpine"};
   for (const name of ["api", "worker", "web", "initialize", "postgres", "redis"]) {
+    if (name === "postgres" || name === "redis") {
+      const expected = `ghcr.io/imutd/tk-mg-sys-${name}:${stable[name]}`;
+      if (c.services[name].image !== expected) throw new Error(`${name} must keep its fixed image`);
+      if (c.services[name].build) throw new Error("Server must not build images");
+      continue;
+    }
     const target = ["initialize", "worker"].includes(name) ? "api" : name;
     const expected = `ghcr.io/imutd/tk-mg-sys-${target}:${process.argv[3]}`;
     if (c.services[name].image !== expected) throw new Error(`${name} must use the release image from GHCR`);
@@ -98,7 +106,7 @@ case "$*" in
     [[ "${DEPLOY_TEST_FAILURE:-}" != empty-images ]] || exit 0
     for target in api web postgres redis; do printf 'ghcr.io/imutd/tk-mg-sys-%s:%s\n' "$target" "$IMAGE_TAG"; done ;;
   "image inspect "*) [[ "${DEPLOY_TEST_FAILURE:-}" != missing-image ]] ;;
-  *"bootstrap pull"*) [[ "${DEPLOY_TEST_FAILURE:-}" != pull ]] ;;
+  *"pull api web"*) [[ "${DEPLOY_TEST_FAILURE:-}" != pull ]] ;;
   *"run --rm --no-deps --pull never initialize"*) [[ "${DEPLOY_TEST_FAILURE:-}" != initialize ]] ;;
   *"pg_dump"*) echo "test-backup" ;;
 esac
@@ -134,7 +142,7 @@ for failure in missing-image config-images empty-images; do
   [[ $(cat "$root/current-release") = "$tag_one" ]]
   [[ ! -f "$root/pending-release" ]]
   [[ -z $(ls -A "$root/backups") ]]
-  ! grep -Eq 'bootstrap pull| up | stop |pg_dump| initialize' "$DEPLOY_TEST_LOG"
+  ! grep -Eq 'pull api web| up | stop |pg_dump| initialize' "$DEPLOY_TEST_LOG"
 done
 export DEPLOY_TEST_FAILURE=pull
 if deploy "$tag_two" > /dev/null 2>&1; then echo "Ignored pull failure" >&2; exit 1; fi
@@ -148,7 +156,7 @@ unset DEPLOY_TEST_FAILURE
 bash "$script_dir/rollback.sh" "$root" > "$test_root/recover.log"
 [[ $(cat "$root/current-release") = "$tag_one" ]]
 [[ ! -f "$root/pending-release" ]]
-! grep -q 'initialize\|bootstrap pull' "$DEPLOY_TEST_LOG"
+! grep -q 'initialize\|pull api web' "$DEPLOY_TEST_LOG"
 export DEPLOY_TEST_LOCKED=true
 if deploy "$tag_two" > /dev/null 2>&1; then echo "Ignored deployment lock" >&2; exit 1; fi
 if deploy "$tag_two" --preloaded > /dev/null 2>&1; then echo "Preloaded deployment ignored lock" >&2; exit 1; fi
@@ -159,13 +167,13 @@ deploy "$tag_two" > "$test_root/second.log"
 : > "$DEPLOY_TEST_LOG"
 bash "$script_dir/rollback.sh" "$root" > "$test_root/rollback.log"
 [[ $(cat "$root/current-release") = "$tag_one" ]]
-! grep -q 'initialize\|bootstrap pull' "$DEPLOY_TEST_LOG"
+! grep -q 'initialize\|pull api web' "$DEPLOY_TEST_LOG"
 ! grep -q 'down' "$DEPLOY_TEST_LOG"
 : > "$DEPLOY_TEST_LOG"
 deploy "$tag_two" --preloaded > "$test_root/preloaded.log"
 [[ $(cat "$root/current-release") = "$tag_two" ]]
 [[ $(grep -c '^image inspect ghcr.io/imutd/tk-mg-sys-' "$DEPLOY_TEST_LOG") -eq 4 ]]
-! grep -q 'bootstrap pull' "$DEPLOY_TEST_LOG"
+! grep -q 'pull api web' "$DEPLOY_TEST_LOG"
 grep -q 'run --rm --no-deps --pull never initialize' "$DEPLOY_TEST_LOG"
 
 # Execute the workflow shell against a temporary server with mocked transports.
@@ -216,8 +224,8 @@ unset DEPLOY_TEST_FAILURE
 : > "$DEPLOY_TEST_LOG"
 (cd "$test_root/runner" && bash "$test_root/workflow.sh") > "$test_root/workflow-success.log" 2>&1
 [[ $(cat "$root/current-release") = "$tag_one" ]]
-[[ $(grep -c '^compose .*bootstrap pull$' "$DEPLOY_TEST_LOG") -eq 1 ]]
-grep -q '^timeout:20m docker compose .*bootstrap pull$' "$DEPLOY_TEST_LOG"
+[[ $(grep -c '^compose .*pull api web$' "$DEPLOY_TEST_LOG") -eq 1 ]]
+grep -q '^timeout:20m docker compose .*pull api web$' "$DEPLOY_TEST_LOG"
 grep -q '^timeout:12m bash .*deploy.sh .* --preloaded$' "$DEPLOY_TEST_LOG"
 [[ $(grep -c '^image inspect ghcr.io/imutd/tk-mg-sys-' "$DEPLOY_TEST_LOG") -eq 4 ]]
 cmp "$test_root/original.env" "$root/shared/.env"

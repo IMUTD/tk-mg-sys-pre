@@ -100,9 +100,29 @@ describe("persistent proxy graph and probes", () => {
       const page = await service.list({ groupId, page: 1, pageSize: 100 })
       expect(page.items[0]?.displayId).toBe(proxy.displayId)
       expect(page.items[0]?.checkResult).toEqual(result)
+      expect(page.items[0]?.tags).toEqual(["integration"])
+      expect(page.items.find((item) => item.id === proxy.id)?.note).toBe("persisted")
       const stored = await client`select encrypted_credentials from operation_proxy`
       expect(JSON.stringify(stored)).not.toContain("password-private")
       expect(await service.credentials?.(actor, otherGroup, proxy.id)).toBeNull()
+      const ungrouped = await service.create(actor, groupId, {
+        name: "ungrouped",
+        endpoint: "1.1.1.1:8080",
+        credentials: JSON.stringify({ username: "u", password: "password-private" }),
+        note: "",
+        tags: [],
+        status: "ready",
+        configuration: ProxyConfigurationSchema.parse({ host: "1.1.1.1", port: 8080 }),
+      })
+      await service.detect?.(actor, groupId, ungrouped.id, {
+        channel: "us",
+        mode: "detailed",
+        useTurbo: false,
+      })
+      const grouped = await service.list({ groupId, page: 1, pageSize: 100 })
+      const detected = grouped.items.find((item) => item.id === ungrouped.id)
+      expect(detected?.tags).toEqual([])
+      expect(detected?.note).toBe("")
       expect(
         await service.detect?.(actor, otherGroup, proxy.id, {
           channel: "us",

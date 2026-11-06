@@ -20,6 +20,7 @@ import { createPostgresDeviceCommandRepository } from "./modules/device-commands
 import { createDeviceCommandService } from "./modules/device-commands/service"
 import { createPostgresDeviceRepository } from "./modules/devices/postgres-repository"
 import { createDeviceService } from "./modules/devices/service"
+import { createDispatchRepository } from "./modules/dispatch/repository"
 import { registerDispatchRoutes } from "./modules/dispatch/routes"
 import { createPostgresPagePermissionRepository } from "./modules/members/page-permission-repository"
 import { createPostgresMemberRepository } from "./modules/members/repository"
@@ -27,8 +28,6 @@ import { createMemberService } from "./modules/members/service"
 import { createMihomoProbeTransport } from "./modules/proxies/mihomo-probe"
 import { createPostgresProxyRepository } from "./modules/proxies/repository"
 import { createProxyService } from "./modules/proxies/service"
-import { createPostgresRegistrationResourceRepository } from "./modules/registration-resources/postgres-repository"
-import { createRegistrationResourceService } from "./modules/registration-resources/service"
 import { createPostgresResourceRepository } from "./modules/resources/repository"
 import { createResourceService } from "./modules/resources/service"
 import { createPostgresSettingsRepository } from "./modules/settings/repository"
@@ -60,11 +59,6 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
   const authService = createAuthService(authRepository)
   const auditRepository = createPostgresAuditRepository(client)
   const cipher = createSecretCipher(config.secretEncryptionKey)
-  const registrationResourceService = createRegistrationResourceService({
-    auditRepository,
-    cipher,
-    repository: createPostgresRegistrationResourceRepository(client),
-  })
   const deviceRepository = createPostgresDeviceRepository(client)
   const deviceService = createDeviceService({
     auditRepository,
@@ -136,13 +130,21 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
     poolService,
     accountService,
     proxyService,
-    registrationResourceService,
     resourceService,
     settingsService,
     storageService,
     taskExecutionService,
   })
-  const boxLink = registerBoxLink(app, client, config.databaseUrl, authService, auditRepository)
+  const dispatchRepository = createDispatchRepository(client, cipher)
+  const boxLink = registerBoxLink(
+    app,
+    client,
+    config.databaseUrl,
+    authService,
+    auditRepository,
+    (groupId, taskId) => dispatchRepository.autoReplay(groupId, taskId),
+    cipher,
+  )
   registerDispatchRoutes(app, client, cipher, authService, auditRepository)
   return {
     app,

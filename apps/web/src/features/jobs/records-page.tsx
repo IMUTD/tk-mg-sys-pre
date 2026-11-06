@@ -24,9 +24,48 @@ type TaskRecordsPageProps = {
   readonly groupId?: string
 }
 
+const segmentsOf = (steps: DispatchRecordTask["steps"]) => {
+  const groups = new Map<string, DispatchRecordTask["steps"][number][]>()
+  for (const step of steps) {
+    const key = `${step.stagePosition}:${step.repeatIndex}`
+    const list = groups.get(key) ?? []
+    list.push(step)
+    groups.set(key, list)
+  }
+  return [...groups.entries()].map(([key, rows]) => {
+    const head = rows[0]
+    const latestAttempt = Math.max(...rows.map((item) => item.attempt))
+    const latest = rows.find((item) => item.attempt === latestAttempt)
+    const repeat =
+      head !== undefined && head.repeatCount > 1
+        ? ` 第 ${head.repeatIndex + 1}/${head.repeatCount} 次`
+        : ""
+    const title =
+      head === undefined ? "" : `${head.stageName.length > 0 ? head.stageName : `第 ${head.stagePosition + 1} 段`}${repeat}`
+    const used = latest?.autoUsed ?? 0
+    const note =
+      used > 0
+        ? `已自动重跑 ${used}/${latest?.autoRetryLimit ?? 0} 次`
+        : latest?.replayOrigin === "manual"
+          ? "已手动重跑"
+          : ""
+    return {
+      key,
+      note,
+      steps: rows,
+      title,
+    }
+  })
+}
+
 const stepColumns: TableColumnsType<DispatchRecordTask["steps"][number]> = [
   { dataIndex: "sequence", title: "步骤", width: 80, render: (value: number) => value + 1 },
-  { dataIndex: "skill", title: "接口", width: 180 },
+  {
+    dataIndex: "skill",
+    title: "接口",
+    width: 180,
+    render: (value: string, step) => (step.attempt > 1 ? `重跑 ${value}` : value),
+  },
   { dataIndex: "status", title: "状态", width: 120 },
   {
     dataIndex: "parameters",
@@ -35,14 +74,56 @@ const stepColumns: TableColumnsType<DispatchRecordTask["steps"][number]> = [
   },
 ]
 
+const recordStatus = (task: DispatchRecordTask): string => {
+  if (!task.started) return task.status === "incomplete" ? "参数未齐" : "待开始"
+  const named = runLabel(task.runStatus ?? "")
+  if (named.length > 0) return named
+  const attempts = new Map<string, { attempt: number; priority: number; repeat: number; stage: number; status: string }>()
+  for (const step of task.steps) {
+    if (step.taskId.length === 0) continue
+    const key = `${step.stagePosition}:${step.repeatIndex}`
+    const current = attempts.get(key)
+    if (current !== undefined && current.attempt > step.attempt) continue
+    attempts.set(key, {
+      attempt: step.attempt,
+      priority: step.queuePriority ?? 0,
+      repeat: step.repeatIndex,
+      stage: step.stagePosition,
+      status: step.taskStatus,
+    })
+  }
+  const ordered = [...attempts.values()].sort((left, right) => left.stage - right.stage || left.repeat - right.repeat)
+  if (ordered.length === 0) return "已下发"
+  const current = ordered.every((item) => item.status === "succeeded")
+    ? { priority: 0, status: "succeeded" }
+    : ordered.find((item) => item.status !== "succeeded")
+  if (current === undefined) return "已下发"
+  if (current.status === "failed") return "失败"
+  if (current.status === "cancelled") return "已取消"
+  if (current.status === "succeeded") return "成功"
+  if (current.priority === 1) return "重跑中"
+  if (current.status === "running" || current.status === "ood") return "执行中"
+  if (current.status === "queued" || current.status === "dispatching") return "排队中"
+  return "已下发"
+}
+
+const runLabel = (status: string): string => {
+  if (status === "replaying") return "重跑中"
+  if (status === "running") return "执行中"
+  if (status === "queued") return "排队中"
+  if (status === "failed") return "失败"
+  if (status === "succeeded") return "成功"
+  if (status === "cancelled") return "已取消"
+  return ""
+}
+
 const taskColumns: TableColumnsType<DispatchRecordTask> = [
   { dataIndex: "name", title: "任务", width: 180 },
   { dataIndex: "account", title: "账号", width: 180 },
   {
     title: "状态",
     width: 120,
-    render: (_value: unknown, item: DispatchRecordTask) =>
-      item.started ? item.status : item.status === "incomplete" ? "参数未齐" : "待开始",
+    render: (_value: unknown, item: DispatchRecordTask) => recordStatus(item),
   },
 ]
 
@@ -139,16 +220,24 @@ const LiveRecords = ({
               dataSource={[...box.tasks]}
               expandable={{
                 expandedRowRender: (task: DispatchRecordTask) => (
-                  <Table
-                    columns={stepColumns}
-                    dataSource={task.steps.map((step) => ({
-                      ...step,
-                      id: `${task.id}-${step.sequence}`,
-                    }))}
-                    pagination={false}
-                    rowKey="id"
-                    size="small"
-                  />
+                  <div>
+                    {segmentsOf(task.steps).map((segment) => (
+                      <div key={segment.key}>
+                        <div style={{ margin: "8px 0" }}>{segment.title}</div>
+                        {segment.note.length > 0 ? <div>{segment.note}</div> : null}
+                        <Table
+                          columns={stepColumns}
+                          dataSource={segment.steps.map((step, index) => ({
+                            ...step,
+                            id: `${task.id}-${segment.key}-${index}`,
+                          }))}
+                          pagination={false}
+                          rowKey="id"
+                          size="small"
+                        />
+                      </div>
+                    ))}
+                  </div>
                 ),
               }}
               pagination={false}

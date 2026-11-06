@@ -53,6 +53,7 @@ const deskBackup = (backupType: OperationAccount["backupType"]): MytAccount["bac
 export const toDeskAccount = (item: OperationAccount, index: number): MytAccount => ({
   app: item.app ?? "tiktok",
   backKey: item.backupKey,
+  backupName: item.backupName,
   backType: deskBackup(item.backupType),
   createTime: item.createdAt.toISOString().replace("T", " ").slice(0, 19),
   deleted: item.deleted,

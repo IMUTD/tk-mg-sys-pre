@@ -1,5 +1,5 @@
 import { Button, Card } from "antd"
-import type { ReactNode } from "react"
+import { type ReactNode, useMemo } from "react"
 
 import type { TestResult } from "./rpa-api"
 
@@ -65,6 +65,146 @@ const isXml = (key: string, value: string): boolean => {
   )
 }
 
+const FLAG_LABELS: ReadonlyArray<readonly [string, string, string]> = [
+  ["clickable", "true", "可点"],
+  ["focused", "true", "已聚焦"],
+  ["selected", "true", "已选中"],
+  ["checked", "true", "已勾选"],
+  ["enabled", "false", "不可用"],
+  ["scrollable", "true", "可滚动"],
+]
+
+type NodeView = {
+  bounds: string
+  children: NodeView[]
+  className: string
+  desc: string
+  flags: string[]
+  hidden: boolean
+  id: string
+  path: string
+  text: string
+}
+
+const clip = (value: string): string => (value.length > 60 ? `${value.slice(0, 60)}…` : value)
+
+const shortClass = (className: string): string => {
+  const dot = className.lastIndexOf(".")
+  return dot >= 0 ? className.slice(dot + 1) : className
+}
+
+const readNode = (el: Element, path: string): NodeView => {
+  const bounds = el.getAttribute("bounds") ?? ""
+  const flags: string[] = []
+  for (const [attr, expect, label] of FLAG_LABELS) {
+    if (el.getAttribute(attr) === expect) flags.push(label)
+  }
+  const children = Array.from(el.children)
+    .filter((child) => child.tagName.toLowerCase() === "node")
+    .map((child, index) => readNode(child, `${path}.${index}`))
+  return {
+    bounds,
+    children,
+    className: el.getAttribute("class") ?? "",
+    desc: el.getAttribute("content-desc") ?? "",
+    flags,
+    hidden: bounds === "[0,0][0,0]",
+    id: el.getAttribute("resource-id") ?? "",
+    path,
+    text: el.getAttribute("text") ?? "",
+  }
+}
+
+const nodeCount = (node: NodeView): number =>
+  1 + node.children.reduce((sum, child) => sum + nodeCount(child), 0)
+
+const parseHierarchy = (xml: string): { count: number; roots: NodeView[] } | null => {
+  const doc = new DOMParser().parseFromString(xml, "text/xml")
+  if (doc.querySelector("parsererror") !== null) return null
+  const root = doc.documentElement
+  if (root === null) return null
+  const source =
+    root.tagName.toLowerCase() === "node"
+      ? [root]
+      : Array.from(root.children).filter((child) => child.tagName.toLowerCase() === "node")
+  if (source.length === 0) return null
+  const roots = source.map((el, index) => readNode(el, String(index)))
+  return { count: roots.reduce((sum, node) => sum + nodeCount(node), 0), roots }
+}
+
+const NodeLine = ({ depth, node }: { readonly depth: number; readonly node: NodeView }): ReactNode => {
+  const named = node.text.length > 0 || node.desc.length > 0 || node.id.length > 0
+  const classLabel = named ? shortClass(node.className) : node.className
+  return (
+    <>
+      <div
+        className={node.hidden ? "api-lab-node is-hidden" : "api-lab-node"}
+        style={{ paddingLeft: depth * 16 }}
+      >
+        <b title={node.className}>{classLabel}</b>
+        {node.text.length > 0 ? <span title={node.text}> 文字={clip(node.text)}</span> : null}
+        {node.desc.length > 0 ? <span title={node.desc}> 说明={clip(node.desc)}</span> : null}
+        {node.id.length > 0 ? <span> resource-id={node.id}</span> : null}
+        {node.bounds.length > 0 ? <span> {node.bounds}</span> : null}
+        {node.flags.map((flag) => (
+          <span key={flag}> {flag}</span>
+        ))}
+        {node.hidden ? <span> 看不见</span> : null}
+      </div>
+      {node.children.map((child) => (
+        <NodeLine depth={depth + 1} key={child.path} node={child} />
+      ))}
+    </>
+  )
+}
+
+const NodeTree = ({ xml }: { readonly xml: string }): ReactNode => {
+  const parsed = useMemo(() => parseHierarchy(xml), [xml])
+  if (parsed === null) {
+    return (
+      <details className="api-lab-xml">
+        <summary>XML · {xml.length} 字符，点击展开</summary>
+        <pre>{xml}</pre>
+      </details>
+    )
+  }
+  return (
+    <div className="api-lab-nodes">
+      <p className="behaviors-meta">共 {parsed.count} 个节点。范围是 [0,0][0,0] 的当前看不见。</p>
+      {parsed.roots.map((node) => (
+        <NodeLine depth={0} key={node.path} node={node} />
+      ))}
+      <details className="api-lab-xml">
+        <summary>原始 XML · {xml.length} 字符</summary>
+        <pre>{xml}</pre>
+      </details>
+    </div>
+  )
+}
+
+const arrangedLine = (index: string, bounds: string): string => `${index}  ${bounds}`
+
+const arrangedNodeLines = (value: string): string | null => {
+  const text = value.trim()
+  if (!text.startsWith("[")) return null
+  try {
+    const parsed = JSON.parse(text) as unknown
+    if (!Array.isArray(parsed)) return null
+    const lines: string[] = []
+    for (const item of parsed) {
+      if (item === null || typeof item !== "object" || Array.isArray(item)) return null
+      const row = item as Record<string, unknown>
+      if (typeof row["index"] !== "number" || typeof row["bounds"] !== "string") return null
+      lines.push(arrangedLine(String(row["index"]), row["bounds"]))
+    }
+    return lines.length === 0 ? "没有可用坐标" : lines.join("\n")
+  } catch {
+    const found = [...text.matchAll(/\{(\d+)\s+(\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\])\}/g)]
+    if (found.length === 0) return null
+    return found.map((item) => arrangedLine(item[1] ?? "", item[2] ?? "")).join("\n")
+  }
+}
+
 const ResultValue = ({
   name,
   value,
@@ -74,14 +214,9 @@ const ResultValue = ({
 }): ReactNode => {
   if (value.startsWith("data:image/"))
     return <img alt={name} className="api-lab-image" src={value} />
-  if (isXml(name, value)) {
-    return (
-      <details className="api-lab-xml">
-        <summary>XML · {value.length} 字符，点击展开</summary>
-        <pre>{value}</pre>
-      </details>
-    )
-  }
+  if (isXml(name, value)) return <NodeTree xml={value} />
+  const arranged = arrangedNodeLines(value)
+  if (arranged !== null) return <pre className="api-lab-text">{arranged}</pre>
   return <pre className="api-lab-text">{value}</pre>
 }
 

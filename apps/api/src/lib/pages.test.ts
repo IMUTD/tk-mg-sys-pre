@@ -7,13 +7,13 @@ describe("defaultPagesForRole", () => {
     const pages = defaultPagesForRole("operator")
     const devices = pages.find((page) => page.key === PageKey.Devices)
     const members = pages.find((page) => page.key === PageKey.Members)
-    const marketing = pages.find((page) => page.key === PageKey.MarketingDashboard)
+    const mall = pages.find((page) => page.key === PageKey.MallRecords)
     const videoPool = pages.find((page) => page.key === PageKey.StudioVideoPool)
     const workLogs = pages.find((page) => page.key === PageKey.WorkLogs)
     const overview = pages.find((page) => page.key === PageKey.Overview)
     expect(devices).toEqual({ canDelete: false, canView: true, key: PageKey.Devices })
     expect(members).toEqual({ canDelete: false, canView: false, key: PageKey.Members })
-    expect(marketing).toEqual({ canDelete: false, canView: false, key: PageKey.MarketingDashboard })
+    expect(mall).toEqual({ canDelete: false, canView: false, key: PageKey.MallRecords })
     expect(videoPool).toEqual({ canDelete: false, canView: true, key: PageKey.StudioVideoPool })
     expect(workLogs).toEqual({ canDelete: false, canView: false, key: PageKey.WorkLogs })
     expect(overview).toEqual({ canDelete: false, canView: true, key: PageKey.Overview })
@@ -21,7 +21,7 @@ describe("defaultPagesForRole", () => {
 
   it("gives department directors delete on their own pages and resource center", () => {
     const sales = defaultPagesForRole("sales_director").find(
-      (page) => page.key === PageKey.MarketingAccounts,
+      (page) => page.key === PageKey.MallRecords,
     )
     const ops = defaultPagesForRole("operations_director").find(
       (page) => page.key === PageKey.Devices,
@@ -36,7 +36,7 @@ describe("defaultPagesForRole", () => {
     const engineeringDirector = defaultPagesForRole("engineering_director").find(
       (page) => page.key === PageKey.StudioTextPool,
     )
-    expect(sales).toEqual({ canDelete: true, canView: true, key: PageKey.MarketingAccounts })
+    expect(sales).toEqual({ canDelete: true, canView: true, key: PageKey.MallRecords })
     expect(ops).toEqual({ canDelete: true, canView: true, key: PageKey.Devices })
     expect(opsResource).toEqual({ canDelete: true, canView: true, key: PageKey.StudioVideoPool })
     expect(opsLogs).toEqual({ canDelete: false, canView: false, key: PageKey.WorkLogs })

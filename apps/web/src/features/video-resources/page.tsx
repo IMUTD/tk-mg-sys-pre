@@ -41,6 +41,7 @@ type ShareBox = {
 }
 
 type ScanReply = {
+  deviceId?: string
   host?: string
   name?: string
   status: string
@@ -118,12 +119,56 @@ const columns: TableColumnsType<ShareFile> = [
   },
 ]
 
+type NasDirectory = {
+  id: string
+  name: string
+}
+
+type NasGroup = {
+  directories?: NasDirectory[]
+  files: ShareFile[]
+  nasId: string
+}
+
+type BackupFolder = {
+  files: ShareFile[]
+  id: string
+  name: string
+}
+
+const backupFolders = (
+  files: readonly ShareFile[],
+  directories: readonly NasDirectory[],
+): { folders: BackupFolder[]; loose: ShareFile[] } => {
+  const folders = new Map<string, BackupFolder>()
+  for (const dir of directories) folders.set(dir.name, { files: [], id: dir.id, name: dir.name })
+  const loose: ShareFile[] = []
+  for (const file of files) {
+    const slash = file.path.indexOf("/")
+    if (slash <= 0) {
+      loose.push(file)
+      continue
+    }
+    const name = file.path.slice(0, slash)
+    const folder = folders.get(name)
+    if (folder === undefined) folders.set(name, { files: [file], id: "", name })
+    else folder.files.push(file)
+  }
+  return { folders: [...folders.values()], loose }
+}
+
+type NasChoice = {
+  bucket: string
+  id: string
+  name: string
+}
+
 type VideoResourcesPageProps = {
   readonly view?: "backup" | "image" | "pool" | "video"
 }
 
 export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): ReactNode => {
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const [params, setParams] = useSearchParams()
   const requested = params.get("tab")
   const category: ShareCategory =
@@ -139,7 +184,16 @@ export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): 
   const backup = category === "backup"
   const canTransfer = category === "video" || category === "image" || backup
   const [boxes, setBoxes] = useState<ShareBox[]>([])
+  const [nasGroups, setNasGroups] = useState<NasGroup[]>([])
+  const [nasCards, setNasCards] = useState<NasChoice[]>([])
+  const [nasId, setNasId] = useState("")
+  const [nasOpen, setNasOpen] = useState(false)
+  const [nasDirs, setNasDirs] = useState<readonly string[]>([])
+  const [nasDir, setNasDir] = useState("")
+  const [nasDirNew, setNasDirNew] = useState("")
   const [selected, setSelected] = useState<readonly string[]>([])
+  const [nasSelected, setNasSelected] = useState<readonly string[]>([])
+  const [nasWatch, setNasWatch] = useState(false)
   const [open, setOpen] = useState(false)
   const [targetDeviceId, setTargetDeviceId] = useState("")
   const [targetDirectory, setTargetDirectory] = useState("")
@@ -150,19 +204,228 @@ export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): 
     const query = backup ? "bucket=backup" : `category=${category}`
     const response = await fetch(`/api/share-files?${query}`, { credentials: "same-origin" })
     if (!response.ok) return
-    const body = (await response.json()) as { boxes: ShareBox[] }
+    const body = (await response.json()) as { boxes: ShareBox[]; nas?: NasGroup[] }
     setBoxes(body.boxes)
+    setNasGroups(body.nas ?? [])
   }, [backup, category])
 
   useEffect(() => {
     void load()
   }, [load])
 
+  const nasBucket = category === "image" ? "pictures" : category === "video" ? "videos" : backup ? "backup" : ""
+  const canMoveNas = category === "image" || category === "video" || backup
+  const canDeleteNas = canMoveNas
+  useEffect(() => {
+    if (nasBucket.length === 0) return
+    let cancelled = false
+    const loadCards = async (): Promise<void> => {
+      const response = await fetch("/api/storage/configuration", { credentials: "same-origin" })
+      if (!response.ok || cancelled) return
+      const payload = (await response.json()) as { items?: NasChoice[] }
+      const cards = (payload.items ?? []).filter((item) => item.bucket === nasBucket)
+      if (cancelled) return
+      setNasCards(cards)
+      setNasId((current) => (cards.some((item) => item.id === current) ? current : (cards[0]?.id ?? "")))
+    }
+    void loadCards()
+    return () => {
+      cancelled = true
+    }
+  }, [nasBucket])
+
+  const nasFileIds = new Set(nasGroups.flatMap((group) => group.files.map((file) => file.id)))
+  const nasChosen = nasSelected.filter((id) => nasFileIds.has(id))
+  const nasNoun = backup ? "备份" : category === "image" ? "图片" : "视频"
+  const deviceByFile = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const box of boxes) {
+      for (const dir of box.directories) {
+        for (const file of dir.files) map.set(file.id, box.deviceId)
+      }
+    }
+    return map
+  }, [boxes])
+  const openNas = async (): Promise<void> => {
+    setNasDir("")
+    setNasDirNew("")
+    setNasOpen(true)
+    const response = await fetch(`/api/share-nas-directories?nasId=${encodeURIComponent(nasId)}`, {
+      credentials: "same-origin",
+    })
+    if (!response.ok) {
+      setNasDirs([])
+      return
+    }
+    const body = (await response.json()) as { directories?: string[] }
+    setNasDirs(body.directories ?? [])
+  }
+
+  const moveToNas = async (directory: string): Promise<void> => {
+    const ids = selected.filter((id) => !nasFileIds.has(id))
+    const deviceIds = [...new Set(ids.flatMap((id) => {
+      const deviceId = deviceByFile.get(id)
+      return deviceId === undefined ? [] : [deviceId]
+    }))]
+    if (nasId.length === 0 || deviceIds.length === 0) return
+    setSending(true)
+    const scanResponse = await fetch("/api/share-scans", {
+      body: JSON.stringify(backup ? { deviceIds, scope: "backup" } : { deviceIds }),
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    })
+    if (!scanResponse.ok) {
+      setSending(false)
+      message.error("扫描没有下发")
+      return
+    }
+    const scanBody = (await scanResponse.json()) as { scans: ScanReply[] }
+    const started = new Set(
+      scanBody.scans
+        .filter((item) => (item.status === "pending" || item.status === "running") && item.deviceId !== undefined)
+        .map((item) => item.deviceId ?? ""),
+    )
+    if (started.size === 0) {
+      setSending(false)
+      reportScan(scanBody.scans, message)
+      return
+    }
+    const deadline = Date.now() + 10 * 60 * 1000
+    let freshBoxes: ShareBox[] | null = null
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => window.setTimeout(resolve, 2000))
+      const response = await fetch(backup ? "/api/share-files?bucket=backup" : `/api/share-files?category=${category}`, {
+        credentials: "same-origin",
+      })
+      if (!response.ok) continue
+      const body = (await response.json()) as { boxes: ShareBox[]; nas?: NasGroup[] }
+      setBoxes(body.boxes)
+      setNasGroups(body.nas ?? [])
+      const pending = body.boxes.some(
+        (box) => started.has(box.deviceId) && (box.scanStatus === "pending" || box.scanStatus === "running"),
+      )
+      if (!pending) {
+        freshBoxes = body.boxes
+        break
+      }
+    }
+    if (freshBoxes === null) {
+      setSending(false)
+      message.error("扫描还没结束，没有转入 NAS")
+      return
+    }
+    const fileIds: string[] = []
+    for (const box of freshBoxes) {
+      if (!started.has(box.deviceId) || box.scanStatus === "failed") continue
+      for (const dir of box.directories) {
+        for (const file of dir.files) {
+          if (ids.includes(file.id)) fileIds.push(file.id)
+        }
+      }
+    }
+    if (fileIds.length === 0) {
+      setSending(false)
+      message.error("没有可转入 NAS 的文件")
+      return
+    }
+    const response = await fetch("/api/share-nas-transfers", {
+      body: JSON.stringify({ directory, fileIds, nasId }),
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    })
+    setSending(false)
+    if (!response.ok) {
+      message.error("没有转到 NAS")
+      return
+    }
+    message.success("已下发，盒子会先核对再传入 NAS，然后删除盒子上的那一份")
+    setSelected([])
+  }
+
+  const removeNas = async (): Promise<void> => {
+    const response = await fetch("/api/share-nas-deletes", {
+      body: JSON.stringify({ fileIds: nasChosen }),
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    })
+    if (!response.ok) {
+      message.error("没有删掉")
+      return
+    }
+    const body = (await response.json()) as { queued?: boolean }
+    if (body.queued !== true) {
+      message.error("没有在线盒子")
+      return
+    }
+    message.success("已下发，盒子会删掉 NAS 上的文件，然后去掉列表里的记录")
+    setNasSelected([])
+    setNasWatch(true)
+  }
+
+  const askRemoveNas = (): void => {
+    modal.confirm({
+      cancelText: "取消",
+      content: `将删除这 ${nasChosen.length} 个${nasNoun}。NAS 上的文件和表里的记录都会去掉。`,
+      okButtonProps: { danger: true },
+      okText: "删除",
+      onOk: () => removeNas(),
+      title: "删除",
+    })
+  }
+
+  const removeDirectory = async (entryId: string): Promise<void> => {
+    const response = await fetch("/api/share-nas-directory-deletes", {
+      body: JSON.stringify({ entryId }),
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    })
+    if (response.status === 409) {
+      message.error("目录里还有备份")
+      return
+    }
+    if (!response.ok) {
+      message.error("没有删掉")
+      return
+    }
+    const body = (await response.json()) as { queued?: boolean }
+    if (body.queued !== true) {
+      message.error("没有在线盒子")
+      return
+    }
+    message.success("已下发，盒子会先删掉目录，确认找不到后再去掉列表里的记录")
+    setNasWatch(true)
+  }
+
+  const askRemoveDirectory = (entryId: string, name: string): void => {
+    modal.confirm({
+      cancelText: "取消",
+      content: `将删除目录 ${name}。NAS 上的目录和表里的记录都会去掉。`,
+      okButtonProps: { danger: true },
+      okText: "删除",
+      onOk: () => removeDirectory(entryId),
+      title: "删除目录",
+    })
+  }
+
   useEffect(() => {
     if (!boxes.some((box) => box.scanStatus === "pending" || box.scanStatus === "running")) return
     const timer = window.setInterval(() => void load(), 5000)
     return () => window.clearInterval(timer)
   }, [boxes, load])
+
+  useEffect(() => {
+    if (!nasWatch) return
+    const timer = window.setInterval(() => void load(), 3000)
+    const stop = window.setTimeout(() => setNasWatch(false), 60000)
+    return () => {
+      window.clearInterval(timer)
+      window.clearTimeout(stop)
+    }
+  }, [load, nasWatch])
 
   const filesById = useMemo(() => {
     const map = new Map<string, ShareFile>()
@@ -240,6 +503,7 @@ export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): 
               { replace: true },
             )
             setSelected([])
+            setNasSelected([])
           }}
           tabBarExtraContent={
             <Button loading={scanning} onClick={() => void scan()} type="primary">
@@ -249,6 +513,31 @@ export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): 
         />
       ) : (
         <Space style={{ display: "flex", justifyContent: "flex-end" }}>
+          {canDeleteNas && nasChosen.length > 0 ? (
+            <Button danger onClick={askRemoveNas}>
+              删除
+            </Button>
+          ) : null}
+          {canMoveNas ? (
+            <>
+              <Select
+                aria-label="NAS"
+                onChange={setNasId}
+                options={nasCards.map((item) => ({ label: `${item.name} · ${item.bucket}`, value: item.id }))}
+                placeholder="选择 NAS"
+                style={{ width: 220 }}
+                value={nasId.length === 0 ? null : nasId}
+                virtual={false}
+              />
+              <Button
+                disabled={nasId.length === 0 || selected.filter((id) => !nasFileIds.has(id)).length === 0}
+                loading={sending}
+                onClick={() => void openNas()}
+              >
+                转移到 NAS
+              </Button>
+            </>
+          ) : null}
           {canTransfer ? (
             <Button disabled={selected.length === 0} onClick={() => setOpen(true)}>
               转移到目录
@@ -259,7 +548,83 @@ export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): 
           </Button>
         </Space>
       )}
-      {boxes.length === 0 ? <Empty description="这个管理员名下还没有盒子" /> : null}
+      {boxes.length === 0 && nasGroups.length === 0 ? <Empty description="这个管理员名下还没有盒子" /> : null}
+      {nasGroups.map((group) => {
+        const card = nasCards.find((item) => item.id === group.nasId)
+        const grouped = backup ? backupFolders(group.files, group.directories ?? []) : null
+        const fileTable = (files: readonly ShareFile[]): ReactNode => (
+          <Table
+            columns={columns}
+            dataSource={[...files]}
+            pagination={false}
+            rowKey="id"
+            {...(canDeleteNas
+              ? {
+                  rowSelection: filteredRowSelection({
+                    onChange: (keys) => setNasSelected(keys.map(String)),
+                    rowKey: "id",
+                    rows: files,
+                    selectedKeys: nasSelected,
+                  }),
+                }
+              : {})}
+            size="small"
+          />
+        )
+        return (
+          <Collapse
+            key={group.nasId}
+            items={[
+              {
+                children:
+                  grouped === null ? (
+                    fileTable(group.files)
+                  ) : (
+                    <Space direction="vertical" style={{ display: "flex" }}>
+                      {grouped.folders.length === 0 && grouped.loose.length === 0 ? (
+                        <Empty description="还没有目录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                      ) : null}
+                      {grouped.folders.length > 0 ? (
+                        <Collapse
+                          items={grouped.folders.map((folder) => ({
+                            children:
+                              folder.files.length === 0 ? (
+                                <Empty description="目录是空的" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                              ) : (
+                                fileTable(folder.files)
+                              ),
+                            key: folder.name,
+                            label: (
+                              <Space>
+                                <span>{`${folder.name}（${folder.files.length}）`}</span>
+                                {folder.id.length > 0 ? (
+                                  <Button
+                                    danger
+                                    disabled={folder.files.length > 0}
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      askRemoveDirectory(folder.id, folder.name)
+                                    }}
+                                    size="small"
+                                  >
+                                    删除目录
+                                  </Button>
+                                ) : null}
+                              </Space>
+                            ),
+                          }))}
+                        />
+                      ) : null}
+                      {grouped.loose.length > 0 ? fileTable(grouped.loose) : null}
+                    </Space>
+                  ),
+                key: group.nasId,
+                label: card === undefined ? group.nasId : `${card.name} · ${card.bucket}`,
+              },
+            ]}
+          />
+        )
+      })}
       <Collapse
         items={boxes.map((box) => ({
           children:
@@ -311,6 +676,41 @@ export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): 
           ),
         }))}
       />
+      <Modal
+        confirmLoading={sending}
+        okText="转入"
+        onCancel={() => setNasOpen(false)}
+        onOk={() => {
+          const directory = nasDirNew.trim() || nasDir
+          if (directory.length === 0) {
+            message.error("请选择或新建目录")
+            return
+          }
+          setNasOpen(false)
+          void moveToNas(directory)
+        }}
+        open={nasOpen}
+        title="转到 NAS 的目录"
+      >
+        <Space direction="vertical" style={{ width: "100%" }}>
+          <Select
+            aria-label="已有目录"
+            onChange={setNasDir}
+            options={nasDirs.map((item) => ({ label: item, value: item }))}
+            placeholder="选择已有目录"
+            style={{ width: "100%" }}
+            value={nasDir.length === 0 ? null : nasDir}
+            virtual={false}
+          />
+          <Input
+            aria-label="新建目录"
+            maxLength={80}
+            onChange={(event) => setNasDirNew(event.target.value)}
+            placeholder="新建目录，例如 短视频"
+            value={nasDirNew}
+          />
+        </Space>
+      </Modal>
       <Modal
         confirmLoading={sending}
         okButtonProps={{ disabled: targetDeviceId === "" }}

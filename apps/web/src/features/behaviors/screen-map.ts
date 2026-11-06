@@ -5,6 +5,69 @@ export type DevicePoint = {
   y: number
 }
 
+export type ScreenRect = {
+  bottom: number
+  index: number
+  left: number
+  right: number
+  top: number
+}
+
+const boundsOf = (
+  text: string,
+): { bottom: number; left: number; right: number; top: number } | null => {
+  const match = /^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/.exec(text)
+  if (match === null) return null
+  const left = Number(match[1])
+  const top = Number(match[2])
+  const right = Number(match[3])
+  const bottom = Number(match[4])
+  if (right <= left || bottom <= top) return null
+  return { bottom, left, right, top }
+}
+
+export const arrangedMarks = (result: unknown): ScreenRect[] => {
+  if (typeof result === "string") {
+    try {
+      return arrangedMarks(JSON.parse(result) as unknown)
+    } catch {
+      return parseArrangedNodes(result)
+    }
+  }
+  if (result === null || typeof result !== "object" || Array.isArray(result)) return []
+  const nodes = (result as Record<string, unknown>)["nodes"]
+  return typeof nodes === "string" ? parseArrangedNodes(nodes) : []
+}
+
+export const parseArrangedNodes = (value: string): ScreenRect[] => {
+  const text = value.trim()
+  const rows: ScreenRect[] = []
+  if (text.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(text) as unknown
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (item === null || typeof item !== "object" || Array.isArray(item)) continue
+          const row = item as Record<string, unknown>
+          if (typeof row["index"] !== "number" || typeof row["bounds"] !== "string") continue
+          const bounds = boundsOf(row["bounds"])
+          if (bounds === null) continue
+          rows.push({ index: row["index"], ...bounds })
+        }
+        if (rows.length > 0) return rows
+      }
+    } catch {
+      // The agent stores this list as Go's printed slice, not JSON.
+    }
+  }
+  for (const item of text.matchAll(/\{(\d+)\s+(\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\])\}/g)) {
+    const bounds = boundsOf(item[2] ?? "")
+    if (bounds === null) continue
+    rows.push({ index: Number(item[1]), ...bounds })
+  }
+  return rows
+}
+
 export const devicePointFromEvent = (
   event: { clientX: number; clientY: number },
   image: HTMLImageElement,

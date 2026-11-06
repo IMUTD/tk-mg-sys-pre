@@ -1,8 +1,6 @@
 import {
   CloudServerOutlined,
-  DashboardOutlined,
   DatabaseOutlined,
-  FundOutlined,
   GiftOutlined,
   GlobalOutlined,
   InboxOutlined,
@@ -31,8 +29,6 @@ const shortcuts = [
   { icon: <DatabaseOutlined />, path: "/studio/registration", title: "注册池" },
   { icon: <CloudServerOutlined />, path: "/engineering/storage", title: "私有云储存" },
   { icon: <RobotOutlined />, path: "/engineering/robots", title: "运营机器人" },
-  { icon: <FundOutlined />, path: "/marketing/dashboard", title: "营销面板" },
-  { icon: <DashboardOutlined />, path: "/marketing/accounts", title: "账号市场" },
   { icon: <GiftOutlined />, path: "/mall/records", title: "积分记录" },
   { icon: <PlaySquareOutlined />, path: "/studio/video-pool", title: "视频数据" },
   { icon: <VideoCameraOutlined />, path: "/studio/video", title: "视频制作" },

@@ -19,6 +19,7 @@ import { createPostgresAuditRepository } from "./audit/service"
 import { createPostgresAuthRepository } from "./auth/postgres-repository"
 import { createAuthService } from "./auth/service"
 import { recoverBoxTasks, registerBoxLink } from "./box-link"
+import { markBoxesWithoutHeartbeat } from "./box-presence"
 import { applyInitializerSnapshot, InitializerConflictError } from "./initializer-sync/repository"
 import type { InitializerSnapshot } from "./initializer-sync/source"
 import { createPostgresMemberRepository } from "./members/repository"
@@ -420,8 +421,6 @@ describe("initializer and box software integration", () => {
       values (${env.first.groupId}, 'Proxy', '8.8.8.8:1080', '', array[${name}], 'note-only')`
       await env.sql`insert into operation_resource(group_id,name,category,tags,note)
       values (${env.first.groupId}, 'Resource', 'text', array[${name}], 'note-only')`
-      await env.sql`insert into registration_resource(group_id,identifier,fingerprint,kind,encrypted_secret,tags,note)
-      values (${env.first.groupId}, 'scope@example.test', 'scope-fingerprint', 'google-email', '', array[${name}], 'note-only')`
       const deviceLabel = await env.post("/api/box-groups", { name })
       expect(deviceLabel.status).toBe(201)
       const rows = await env.sql<{ id: string; scope: string }[]>`
@@ -431,10 +430,9 @@ describe("initializer and box software integration", () => {
         "account-tag",
         "device",
         "proxy",
-        "registration",
         "resource",
       ])
-      expect(new Set(rows.map((row) => row.id)).size).toBe(6)
+      expect(new Set(rows.map((row) => row.id)).size).toBe(5)
       expect([
         ...(await env.sql`select scope, kind from business_label
           where name = 'note-only' order by scope`),
@@ -448,7 +446,6 @@ describe("initializer and box software integration", () => {
         device: "/operations/tasks",
         proxy: "/operations/proxies",
         resource: "/studio/text-pool",
-        registration: "/studio/registration",
       }
       const remove = (row: { id: string; scope: string }, cookie = env.cookie) =>
         env.app.request(
@@ -467,13 +464,10 @@ describe("initializer and box software integration", () => {
         (row) => row.scope === "account" || row.scope === "account-tag",
       ))
         expect((await remove(row)).status).toBe(204)
-      expect(await env.sql`select id from business_label where name = ${name}`).toHaveLength(3)
+      expect(await env.sql`select id from business_label where name = ${name}`).toHaveLength(2)
       await env.sql`update operation_proxy set tags = '{}'`
       await env.sql`update operation_resource set tags = '{}'`
-      await env.sql`update registration_resource set tags = '{}'`
-      for (const row of rows.filter((row) =>
-        ["proxy", "resource", "registration"].includes(row.scope),
-      ))
+      for (const row of rows.filter((row) => ["proxy", "resource"].includes(row.scope)))
         expect((await remove(row)).status).toBe(204)
       expect(await env.sql`select id from business_label where name = ${name}`).toHaveLength(0)
     },
@@ -649,8 +643,24 @@ describe("initializer and box software integration", () => {
       expect((await sql`select status from device where id = ${device.id}`)[0]?.["status"]).toBe(
         "online",
       )
-      await sql`update device_agent set last_heartbeat_at = now() - interval '2 minutes'
+      await sql`update device_agent set last_heartbeat_at = now() - interval '100 seconds'
         where device_id = ${device.id}`
+      await applyInitializerSnapshot(sql, "fixture", snapshot)
+      expect((await sql`select status from device where id = ${device.id}`)[0]?.["status"]).toBe(
+        "online",
+      )
+      await markBoxesWithoutHeartbeat(sql)
+      expect((await sql`select status from device where id = ${device.id}`)[0]?.["status"]).toBe(
+        "online",
+      )
+      await sql`update device_agent set last_heartbeat_at = now() - interval '151 seconds'
+        where device_id = ${device.id}`
+      await sql`update device set status = 'online' where id = ${device.id}`
+      await markBoxesWithoutHeartbeat(sql)
+      expect((await sql`select status from device where id = ${device.id}`)[0]?.["status"]).toBe(
+        "offline",
+      )
+      await sql`update device set status = 'online' where id = ${device.id}`
       await applyInitializerSnapshot(sql, "fixture", snapshot)
       expect((await sql`select status from device where id = ${device.id}`)[0]?.["status"]).toBe(
         "offline",
@@ -790,6 +800,163 @@ describe("initializer and box software integration", () => {
         (await app.request(`/api/tasks/${task.taskId}`, { headers: { cookie: secondCookie } }))
           .status,
       ).toBe(404)
+    },
+  )
+
+  pgTest(
+    "isolates administrator data, tasks and work from another administrator",
+    async () => {
+      const { sql, app, cookie, secondCookie, first, second, device, enqueue } = await setup()
+      const scanId = crypto.randomUUID()
+      await sql`insert into box_share_scan(id, device_id, status) values (${scanId}, ${device.id}, 'complete')`
+      await sql`
+        insert into box_share_entry(
+          device_id, bucket, relative_path, parent_path, name, kind, category, last_scan_id
+        ) values (
+          ${device.id}, 'share', 'private.jpg', '', 'private.jpg', 'file', 'image', ${scanId}
+        )`
+      const created = z
+        .object({ taskId: z.string() })
+        .parse(await (await enqueue("admin-isolation")).json())
+      const otherId = crypto.randomUUID()
+      const otherToken = "second-administrator-agent-token"
+      await sql`
+        insert into device(id, group_id, external_id, host, name, model, assignee_user_id)
+        values (
+          ${otherId}, ${second.groupId}, 'box-two', '192.0.2.12', 'Second box', 'Q1', ${second.userId}
+        )`
+      await sql`
+        insert into device_agent(device_id, token_hash) values (${otherId}, ${hash(otherToken)})`
+      const ownFiles = await app.request("/api/share-files?category=image", {
+        headers: { cookie },
+      })
+      expect(JSON.stringify(await ownFiles.json())).toContain("private.jpg")
+      const otherFiles = await app.request("/api/share-files?category=image", {
+        headers: { cookie: secondCookie },
+      })
+      expect(JSON.stringify(await otherFiles.json())).not.toContain("private.jpg")
+      const deviceList = z.array(z.object({ externalId: z.string() }))
+      expect(
+        deviceList
+          .parse(await (await app.request("/api/devices", { headers: { cookie } })).json())
+          .map((item) => item.externalId),
+      ).toEqual(["box-one"])
+      expect(
+        deviceList
+          .parse(await (await app.request("/api/devices", { headers: { cookie: secondCookie } })).json())
+          .map((item) => item.externalId),
+      ).toEqual(["box-two"])
+      expect(
+        (await app.request(`/api/tasks/${created.taskId}`, { headers: { cookie: secondCookie } }))
+          .status,
+      ).toBe(404)
+      expect(
+        (
+          await app.request(`/api/groups/${first.groupId}/dispatches`, {
+            headers: { cookie: secondCookie },
+          })
+        ).status,
+      ).toBe(404)
+      const otherWork = await app.request("/api/operation-logs", { headers: { cookie: secondCookie } })
+      expect(JSON.stringify(await otherWork.json())).not.toContain("已下发")
+      const ownWork = await app.request("/api/operation-logs", { headers: { cookie } })
+      expect(JSON.stringify(await ownWork.json())).toContain("已下发")
+      const stolen = await app.request("/agent/tasks/claim?boxId=box-two&wait=0", {
+        method: "POST",
+        headers: { authorization: `Bearer ${otherToken}` },
+      })
+      expect(stolen.status).toBe(204)
+      expect(
+        (
+          await sql`select id from execution_task where id = ${created.taskId}::uuid and status = 'queued'`
+        ).length,
+      ).toBe(1)
+    },
+  )
+
+  pgTest("does not lock the device when the box has no open task", async () => {
+    const { sql, app, device } = await setup()
+    let release: () => void = () => undefined
+    let locked: () => void = () => undefined
+    const ready = new Promise<void>((resolve) => {
+      locked = resolve
+    })
+    const held = sql.begin(async (tx) => {
+      await tx`select id from device where id = ${device.id}::uuid for update`
+      locked()
+      await new Promise<void>((resolve) => {
+        release = resolve
+      })
+    })
+    await ready
+    const pending = app.request("/agent/tasks/claim?boxId=box-one&wait=0", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+    })
+    const result = await Promise.race([
+      pending.then((response) => response),
+      Bun.sleep(800).then(() => null),
+    ])
+    release()
+    await held
+    if (result === null) {
+      await pending
+      throw new Error("claim waited on the device lock")
+    }
+    expect(result.status).toBe(204)
+  })
+
+  pgTest("returns a task pointer when a queued task notifies a waiting claim", async () => {
+    const { app, enqueue } = await setup()
+    const pending = app.request("/agent/tasks/claim?boxId=box-one&wait=25s", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+    })
+    await Bun.sleep(100)
+    expect((await enqueue("wake-claim")).status).toBe(201)
+    const response = await pending
+    expect(response.status).toBe(200)
+    expect(Pointer.parse(await response.json()).task_id).toHaveLength(36)
+  })
+
+  pgTest(
+    "writes one heartbeat instant and leaves expired watches for the five second cleanup",
+    async () => {
+      const { sql, app, first, device } = await setup()
+      const scanId = crypto.randomUUID()
+      await sql`insert into box_share_scan(id, device_id, status) values (${scanId}, ${device.id}, 'complete')`
+      await sql`
+        insert into box_share_entry(
+          device_id, bucket, relative_path, parent_path, name, kind, category, last_scan_id, box_online
+        ) values (
+          ${device.id}, 'share', 'beat.jpg', '', 'beat.jpg', 'file', 'image', ${scanId}, false
+        )`
+      await sql`
+        insert into device_watch(device_id, instance_index, user_id, expires_at)
+        values (${device.id}, 1, ${first.userId}, now() - interval '1 second')`
+      const beat = await app.request("/agent/heartbeat", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ boxId: "box-one", box: { model: "Q1" } }),
+      })
+      expect(beat.status).toBe(200)
+      const row = (
+        await sql<
+          { boxOnline: boolean; same: boolean }[]
+        >`select a.last_heartbeat_at = d.last_seen_at as same, e.box_online as "boxOnline"
+          from device_agent a
+          join device d on d.id = a.device_id
+          join box_share_entry e on e.device_id = d.id
+          where d.id = ${device.id}`
+      )[0]
+      expect(row).toEqual({ boxOnline: true, same: true })
+      expect(
+        await sql`select device_id from device_watch where device_id = ${device.id}`,
+      ).toHaveLength(1)
+      await Bun.sleep(5500)
+      expect(
+        await sql`select device_id from device_watch where device_id = ${device.id}`,
+      ).toHaveLength(0)
     },
   )
 
@@ -1258,9 +1425,8 @@ describe("initializer and box software integration", () => {
       .parse(await (await claim()).json())
     expect(pointer.templateDoc.steps[0]).toMatchObject({
       skill: "JumpNodes",
-      input: { text: "Home", contentDesc: "" },
+      input: { text: "Home", contentDesc: "", steps: "1" },
     })
-    expect(pointer.templateDoc.steps[0]?.input?.["steps"]).toBeUndefined()
     expect(
       (
         await post(
@@ -1336,11 +1502,408 @@ describe("initializer and box software integration", () => {
       ).status,
     ).toBe(200)
     expect(
-      await sql`select sequence, status from execution_task_step
+      await sql`select sequence, status, error_code as "errorCode" from execution_task_step
         where task_id = ${missPointer.task_id}::uuid order by sequence`,
     ).toMatchObject([
-      { sequence: 0, status: "succeeded" },
-      { sequence: 1, status: "pending" },
+      { sequence: 0, status: "succeeded", errorCode: null },
+      { sequence: 1, status: "pending", errorCode: null },
     ])
+  })
+
+  pgTest("writes a jump tag onto the task account", async () => {
+    const { sql, post, claim, device } = await setup()
+    expect(
+      (
+        await post(
+          "/api/tasks",
+          {
+            deviceId: device.id,
+            indexNum: 1,
+            steps: [
+              {
+                skill: "JumpNodes",
+                input: { text: "Home", steps: "1", tagOnSuccess: "a".repeat(65) },
+              },
+            ],
+          },
+          false,
+          "jump-tag-long",
+        )
+      ).status,
+    ).toBe(400)
+    expect(
+      (
+        await post(
+          "/api/tasks",
+          {
+            deviceId: device.id,
+            indexNum: 1,
+            steps: [{ skill: "CheckLive", input: { tagOnFailure: "未登录" } }],
+          },
+          false,
+          "jump-tag-live",
+        )
+      ).status,
+    ).toBe(400)
+    expect(
+      (
+        await post(
+          "/api/tasks",
+          {
+            deviceId: device.id,
+            indexNum: 1,
+            steps: [
+              {
+                skill: "JumpNodes",
+                input: {
+                  text: "Home",
+                  steps: "1",
+                  writeOnSuccessField: "identifier",
+                  writeOnSuccessValue: "a",
+                },
+              },
+            ],
+          },
+          false,
+          "jump-write-field",
+        )
+      ).status,
+    ).toBe(400)
+    expect(
+      (
+        await post(
+          "/api/tasks",
+          {
+            deviceId: device.id,
+            indexNum: 1,
+            steps: [
+              {
+                skill: "JumpNodes",
+                input: {
+                  text: "Home",
+                  steps: "1",
+                  writeOnSuccessField: "follower",
+                  writeOnSuccessValue: "01",
+                },
+              },
+            ],
+          },
+          false,
+          "jump-write-number",
+        )
+      ).status,
+    ).toBe(400)
+    expect(
+      (
+        await post(
+          "/api/tasks",
+          {
+            deviceId: device.id,
+            indexNum: 1,
+            steps: [
+              {
+                skill: "CheckLive",
+                input: { writeOnSuccessField: "tags", writeOnSuccessValue: "已登录" },
+              },
+            ],
+          },
+          false,
+          "jump-write-live",
+        )
+      ).status,
+    ).toBe(400)
+    const accounts = await sql<{ id: string }[]>`
+      insert into operation_account(group_id, identifier, name, encrypted_secret, tags)
+      values (${device.groupId}::uuid, 'jump-user', 'jump-user', 'x', ${sql.array(["一组"])})
+      returning id::text as id
+    `
+    const accountId = accounts[0]?.id ?? ""
+    const created = await post(
+      "/api/tasks",
+      {
+        deviceId: device.id,
+        indexNum: 1,
+        steps: [
+          {
+            skill: "JumpNodes",
+            input: { text: "Home", steps: "1", tagOnFailure: "未登录", tagOnSuccess: "已登录" },
+          },
+        ],
+      },
+      false,
+      "jump-tag-hit",
+    )
+    expect(created.status).toBe(201)
+    const pointer = z
+      .object({
+        task_id: z.string().uuid(),
+        checkpoint: z.object({ step_id: z.string().uuid() }),
+        templateDoc: z.object({
+          steps: z.array(z.object({ input: z.record(z.string(), z.string()).optional() })),
+        }),
+      })
+      .parse(await (await claim()).json())
+    expect(pointer.templateDoc.steps[0]?.input?.["tagOnSuccess"]).toBe("已登录")
+    expect(pointer.templateDoc.steps[0]?.input?.["tagOnFailure"]).toBe("未登录")
+    expect(pointer.templateDoc.steps[0]?.input?.["steps"]).toBe("1")
+    expect(pointer.templateDoc.steps[0]?.input?.["jumpWhen"]).toBeUndefined()
+    await sql`update execution_task set account_id = ${accountId}::uuid where id = ${pointer.task_id}::uuid`
+    const report = (taskId: string, stepId: string, count: string, status = "succeeded") =>
+      post(
+        `/agent/tasks/${taskId}/status`,
+        { status, checkpoint: { step_id: stepId, outputs: { count } } },
+        true,
+      )
+    expect((await report(pointer.task_id, pointer.checkpoint.step_id, "2")).status).toBe(200)
+    expect((await report(pointer.task_id, pointer.checkpoint.step_id, "2")).status).toBe(200)
+    expect(
+      await sql`select tags from operation_account where id = ${accountId}::uuid`,
+    ).toEqual([{ tags: ["一组", "已登录"] }])
+    const missed = await post(
+      "/api/tasks",
+      {
+        deviceId: device.id,
+        indexNum: 1,
+        steps: [
+          {
+            skill: "JumpNodes",
+            input: { text: "Home", steps: "1", tagOnFailure: "未登录", tagOnSuccess: "已登录" },
+          },
+        ],
+      },
+      false,
+      "jump-tag-miss",
+    )
+    expect(missed.status).toBe(201)
+    const missPointer = z
+      .object({
+        task_id: z.string().uuid(),
+        checkpoint: z.object({ step_id: z.string().uuid() }),
+      })
+      .parse(await (await claim()).json())
+    await sql`update execution_task set account_id = ${accountId}::uuid where id = ${missPointer.task_id}::uuid`
+    expect((await report(missPointer.task_id, missPointer.checkpoint.step_id, "0")).status).toBe(200)
+    expect(
+      await sql`select tags from operation_account where id = ${accountId}::uuid`,
+    ).toEqual([{ tags: ["一组", "已登录", "未登录"] }])
+    const counted = await post(
+      "/api/tasks",
+      {
+        deviceId: device.id,
+        indexNum: 1,
+        steps: [
+          {
+            skill: "JumpNodes",
+            input: {
+              text: "Home",
+              steps: "1",
+              writeOnFailureField: "follower",
+              writeOnFailureValue: "8",
+              writeOnSuccessField: "follower",
+              writeOnSuccessValue: "1200",
+            },
+          },
+        ],
+      },
+      false,
+      "jump-write-follower",
+    )
+    expect(counted.status).toBe(201)
+    const countedPointer = z
+      .object({
+        task_id: z.string().uuid(),
+        checkpoint: z.object({ step_id: z.string().uuid() }),
+        templateDoc: z.object({
+          steps: z.array(z.object({ input: z.record(z.string(), z.string()).optional() })),
+        }),
+      })
+      .parse(await (await claim()).json())
+    expect(countedPointer.templateDoc.steps[0]?.input?.["writeOnSuccessField"]).toBe("follower")
+    expect(countedPointer.templateDoc.steps[0]?.input?.["writeOnSuccessValue"]).toBe("1200")
+    await sql`update execution_task set account_id = ${accountId}::uuid where id = ${countedPointer.task_id}::uuid`
+    expect(
+      (await report(countedPointer.task_id, countedPointer.checkpoint.step_id, "2")).status,
+    ).toBe(200)
+    expect(
+      await sql`select follower::text as follower, tags from operation_account where id = ${accountId}::uuid`,
+    ).toEqual([{ follower: "1200", tags: ["一组", "已登录", "未登录"] }])
+    const recounted = await post(
+      "/api/tasks",
+      {
+        deviceId: device.id,
+        indexNum: 1,
+        steps: [
+          {
+            skill: "JumpNodes",
+            input: {
+              text: "Home",
+              steps: "1",
+              writeOnFailureField: "follower",
+              writeOnFailureValue: "8",
+              writeOnSuccessField: "follower",
+              writeOnSuccessValue: "1200",
+            },
+          },
+        ],
+      },
+      false,
+      "jump-write-follower-miss",
+    )
+    expect(recounted.status).toBe(201)
+    const recountedPointer = z
+      .object({
+        task_id: z.string().uuid(),
+        checkpoint: z.object({ step_id: z.string().uuid() }),
+      })
+      .parse(await (await claim()).json())
+    await sql`update execution_task set account_id = ${accountId}::uuid where id = ${recountedPointer.task_id}::uuid`
+    expect(
+      (await report(recountedPointer.task_id, recountedPointer.checkpoint.step_id, "0")).status,
+    ).toBe(200)
+    expect(
+      await sql`select follower::text as follower, tags from operation_account where id = ${accountId}::uuid`,
+    ).toEqual([{ follower: "8", tags: ["一组", "已登录", "未登录"] }])
+    const alone = await post(
+      "/api/tasks",
+      {
+        deviceId: device.id,
+        indexNum: 1,
+        steps: [
+          { skill: "JumpNodes", input: { text: "Home", steps: "1", tagOnSuccess: "已登录" } },
+        ],
+      },
+      false,
+      "jump-tag-none",
+    )
+    expect(alone.status).toBe(201)
+    const alonePointer = z
+      .object({
+        task_id: z.string().uuid(),
+        checkpoint: z.object({ step_id: z.string().uuid() }),
+      })
+      .parse(await (await claim()).json())
+    expect((await report(alonePointer.task_id, alonePointer.checkpoint.step_id, "2")).status).toBe(
+      200,
+    )
+    await sql`update operation_account set deleted = true where id = ${accountId}::uuid`
+    const removed = await post(
+      "/api/tasks",
+      {
+        deviceId: device.id,
+        indexNum: 1,
+        steps: [
+          { skill: "JumpNodes", input: { text: "Home", steps: "1", tagOnSuccess: "已登录" } },
+        ],
+      },
+      false,
+      "jump-tag-deleted",
+    )
+    expect(removed.status).toBe(201)
+    const removedPointer = z
+      .object({
+        task_id: z.string().uuid(),
+        checkpoint: z.object({ step_id: z.string().uuid() }),
+      })
+      .parse(await (await claim()).json())
+    await sql`update execution_task set account_id = ${accountId}::uuid where id = ${removedPointer.task_id}::uuid`
+    expect(
+      (await report(removedPointer.task_id, removedPointer.checkpoint.step_id, "2")).status,
+    ).toBe(200)
+    const failed = await post(
+      "/api/tasks",
+      {
+        deviceId: device.id,
+        indexNum: 1,
+        steps: [
+          { skill: "JumpNodes", input: { text: "Home", steps: "1", tagOnFailure: "未登录" } },
+        ],
+      },
+      false,
+      "jump-tag-fail",
+    )
+    expect(failed.status).toBe(201)
+    const failedPointer = z
+      .object({
+        task_id: z.string().uuid(),
+        checkpoint: z.object({ step_id: z.string().uuid() }),
+      })
+      .parse(await (await claim()).json())
+    await sql`update execution_task set account_id = ${accountId}::uuid where id = ${failedPointer.task_id}::uuid`
+    expect(
+      (await report(failedPointer.task_id, failedPointer.checkpoint.step_id, "0", "failed")).status,
+    ).toBe(200)
+    expect(
+      await sql`select tags from operation_account where id = ${accountId}::uuid`,
+    ).toEqual([{ tags: ["一组", "已登录", "未登录"] }])
+    expect(
+      await sql<{ text: string }[]>`
+        select text from operation_log where text like '%节点跳跃%' order by id
+      `,
+    ).toEqual([
+      { text: "box-one 节点跳跃命中，账号写回标签 已登录" },
+      { text: "box-one 节点跳跃未命中，账号写回标签 未登录" },
+      { text: "box-one 节点跳跃命中，账号写回粉丝量 1200" },
+      { text: "box-one 节点跳跃未命中，账号写回粉丝量 8" },
+      { text: "box-one 节点跳跃命中，任务没有账号，未写回" },
+      { text: "box-one 节点跳跃命中，账号已删除，未写回" },
+    ])
+  }, 60000)
+
+  pgTest("keeps inventory until a fresh slot report and extends the lease to 90 seconds", async () => {
+    const { sql, post, device, enqueue, claim } = await setup()
+    await sql`
+      insert into device_instance (device_id, instance_index, label, status, container_id, api_port, rpa_port)
+      values (${device.id}::uuid, 1, 'keep', 'online', 'cid', 30001, 30002)`
+    expect(
+      (
+        await post(
+          "/agent/heartbeat",
+          { boxId: "box-one", slots: [{ indexNum: 1, name: "changed", apiPort: 111 }] },
+          true,
+        )
+      ).status,
+    ).toBe(200)
+    expect(
+      await sql`
+        select label, api_port as "apiPort"
+        from device_instance where device_id = ${device.id}::uuid and instance_index = 1`,
+    ).toEqual([{ label: "keep", apiPort: 30001 }])
+    expect(
+      (
+        await post(
+          "/agent/heartbeat",
+          {
+            boxId: "box-one",
+            slotsFresh: true,
+            slots: [{ indexNum: 1, name: "next", apiPort: 222, status: "running" }],
+          },
+          true,
+        )
+      ).status,
+    ).toBe(200)
+    expect(
+      await sql`
+        select label, api_port as "apiPort"
+        from device_instance where device_id = ${device.id}::uuid and instance_index = 1`,
+    ).toEqual([{ label: "next", apiPort: 222 }])
+    expect((await enqueue("lease-90")).status).toBe(201)
+    const pointer = Pointer.parse(await (await claim()).json())
+    const runLease = async () =>
+      (
+        await sql<{ ok: boolean }[]>`
+          select claim_expires_at > now() + interval '60 seconds' as ok
+          from execution_task_run where task_id = ${pointer.task_id}::uuid`
+      )[0]?.["ok"]
+    expect(await runLease()).toBe(true)
+    expect((await post("/agent/heartbeat", { boxId: "box-one" }, true)).status).toBe(200)
+    expect(await runLease()).toBe(true)
+    expect(
+      (
+        await sql<{ ok: boolean }[]>`
+          select expires_at > now() + interval '60 seconds' as ok
+          from execution_task_device_lease
+          where task_id = ${pointer.task_id}::uuid and released_at is null`
+      )[0]?.["ok"],
+    ).toBe(true)
   })
 })

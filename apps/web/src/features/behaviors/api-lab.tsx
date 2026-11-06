@@ -2,113 +2,89 @@ import { Button, Card, Form, Input, Select, Space } from "antd"
 import { type MutableRefObject, type ReactNode, useEffect, useState } from "react"
 
 import { useAuth } from "../auth/auth-provider"
-import { apiByCode, createStep, paramLabel, type SkillSpec, skillCatalog } from "./rpa-api"
+import { apiByCode, createStep, groupedSkillOptions, paramLabel, type SkillSpec, skillCatalog } from "./rpa-api"
 import { applyScreenToParams, type DevicePoint } from "./screen-map"
 
-type LabUse = {
+type LabRecord = {
   code: string
-  count: number
-  lastUsedAt: number
+  id: string
+  params: Record<string, string>
+  usedAt: number
 }
 
 const labUseKey = (userId: string): string => `tk-mg.lab-frequent.${userId}`
 
-const byUse = (left: LabUse, right: LabUse): number =>
-  right.count - left.count || right.lastUsedAt - left.lastUsedAt
+const readParams = (value: unknown): Record<string, string> => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return {}
+  const params: Record<string, string> = {}
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item === "string") params[key] = item
+  }
+  return params
+}
 
-const readLabUses = (userId: string): LabUse[] => {
+const readLabUses = (userId: string): LabRecord[] => {
   if (userId.length === 0) return []
   try {
     const raw = localStorage.getItem(labUseKey(userId))
     if (raw === null) return []
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((item) => {
-      if (item === null || typeof item !== "object") return []
-      const row = item as { code?: unknown; count?: unknown; lastUsedAt?: unknown }
-      if (typeof row.code !== "string" || row.code.length === 0) return []
-      if (typeof row.count !== "number" || !Number.isInteger(row.count) || row.count < 1) return []
-      if (typeof row.lastUsedAt !== "number" || !Number.isFinite(row.lastUsedAt)) return []
-      return [{ code: row.code, count: row.count, lastUsedAt: row.lastUsedAt }]
-    })
+    return parsed
+      .flatMap((item, index) => {
+        if (item === null || typeof item !== "object") return []
+        const row = item as {
+          code?: unknown
+          id?: unknown
+          lastUsedAt?: unknown
+          params?: unknown
+          usedAt?: unknown
+        }
+        if (typeof row.code !== "string" || row.code.length === 0) return []
+        const usedAt = typeof row.usedAt === "number" ? row.usedAt : row.lastUsedAt
+        if (typeof usedAt !== "number" || !Number.isFinite(usedAt)) return []
+        const id =
+          typeof row.id === "string" && row.id.length > 0
+            ? row.id
+            : `${usedAt}:${row.code}:${index}`
+        return [{ code: row.code, id, params: readParams(row.params), usedAt }]
+      })
+      .sort((left, right) => right.usedAt - left.usedAt)
+      .slice(0, 5)
   } catch {
     return []
   }
 }
 
-const rememberLabUse = (userId: string, code: string, known: ReadonlySet<string>): LabUse[] => {
-  const previous = readLabUses(userId).find((item) => item.code === code)
-  const next = readLabUses(userId)
-    .filter((item) => known.has(item.code) && item.code !== code)
-    .concat(
-      known.has(code) ? [{ code, count: (previous?.count ?? 0) + 1, lastUsedAt: Date.now() }] : [],
-    )
-    .sort(byUse)
-    .slice(0, 5)
+const rememberLabUse = (
+  userId: string,
+  code: string,
+  params: Record<string, string>,
+  known: ReadonlySet<string>,
+): LabRecord[] => {
+  const current = readLabUses(userId).filter((item) => known.has(item.code))
+  if (!known.has(code)) {
+    localStorage.setItem(labUseKey(userId), JSON.stringify(current))
+    return current
+  }
+  const usedAt = Date.now()
+  const next = [
+    {
+      code,
+      id: `${usedAt}-${Math.random().toString(36).slice(2, 8)}`,
+      params: { ...params },
+      usedAt,
+    },
+    ...current,
+  ].slice(0, 5)
   localStorage.setItem(labUseKey(userId), JSON.stringify(next))
   return next
 }
 
-const KEY_GROUP: Record<string, string> = {
-  "3": "系统",
-  "4": "系统",
-  "5": "系统",
-  "6": "系统",
-  "26": "系统",
-  "27": "系统",
-  "82": "系统",
-  "83": "系统",
-  "84": "系统",
-  "187": "系统",
-  "219": "系统",
-  "19": "导航",
-  "20": "导航",
-  "21": "导航",
-  "22": "导航",
-  "23": "导航",
-  "61": "导航",
-  "92": "导航",
-  "93": "导航",
-  "111": "导航",
-  "122": "导航",
-  "123": "导航",
-  "24": "音量/媒体",
-  "25": "音量/媒体",
-  "91": "音量/媒体",
-  "164": "音量/媒体",
-  "85": "音量/媒体",
-  "86": "音量/媒体",
-  "87": "音量/媒体",
-  "88": "音量/媒体",
-  "89": "音量/媒体",
-  "90": "音量/媒体",
-  "126": "音量/媒体",
-  "127": "音量/媒体",
-  "28": "编辑",
-  "62": "编辑",
-  "66": "编辑",
-  "67": "编辑",
-  "112": "编辑",
-  "124": "编辑",
-  "17": "符号",
-  "18": "符号",
-  "55": "符号",
-  "56": "符号",
-  "68": "符号",
-  "69": "符号",
-  "70": "符号",
-  "71": "符号",
-  "72": "符号",
-  "73": "符号",
-  "74": "符号",
-  "75": "符号",
-  "76": "符号",
-  "77": "符号",
-  "81": "符号",
-  "57": "修饰",
-  "58": "修饰",
-  "59": "修饰",
-  "60": "修饰",
+const recordTime = (usedAt: number): string => {
+  const date = new Date(usedAt)
+  const pad = (value: number): string => String(value).padStart(2, "0")
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 const PKG_OPTIONS = [
@@ -131,23 +107,6 @@ const COUNTRY_OPTIONS = [
   { label: "韩国 KR", value: "KR" },
 ]
 
-const groupedChoices = (
-  options: ReadonlyArray<{ group?: string; label: string; value: string }>,
-  fallbackGroup?: (value: string) => string,
-) => {
-  const groups: Array<{ label: string; options: Array<{ label: string; value: string }> }> = []
-  for (const item of options) {
-    const name = item.group || fallbackGroup?.(item.value) || "其他"
-    const bucket = groups.find((group) => group.label === name)
-    const choice = { label: item.label, value: item.value }
-    if (bucket === undefined) groups.push({ label: name, options: [choice] })
-    else bucket.options.push(choice)
-  }
-  return groups.length === 1 && groups[0]?.label === "其他"
-    ? options.map((item) => ({ label: item.label, value: item.value }))
-    : groups
-}
-
 type ApiLabProps = {
   readonly applyScreen: MutableRefObject<(start: DevicePoint, end: DevicePoint) => string | null>
   readonly onEnqueue: (
@@ -164,21 +123,28 @@ export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps)
   const list = skills.length > 0 ? skills : skillCatalog()
   const [code, setCode] = useState("TouchClick")
   const [groupName, setGroupName] = useState<string | null>(null)
-  const [frequent, setFrequent] = useState<LabUse[]>(() => readLabUses(userId))
+  const [openedId, setOpenedId] = useState<string | null>(null)
+  const [frequent, setFrequent] = useState<LabRecord[]>(() => readLabUses(userId))
   const spec = apiByCode(code)
   const known = new Set(list.map((item) => item.code))
-  const shortcuts = frequent
-    .filter((item) => known.has(item.code))
-    .sort(byUse)
-    .slice(0, 5)
+  const shortcuts = frequent.filter((item) => known.has(item.code)).slice(0, 5)
   const [params, setParams] = useState<Record<string, string>>({
     ...createStep("TouchClick", 1).params,
   })
 
   const pick = (next: string): void => {
+    setOpenedId(null)
     setCode(next)
     setParams({ ...createStep(next, 1).params })
     const group = list.find((item) => item.code === next)?.group
+    if (group !== undefined && group.length > 0) setGroupName(group)
+  }
+
+  const openRecord = (item: LabRecord): void => {
+    setOpenedId(item.id)
+    setCode(item.code)
+    setParams({ ...createStep(item.code, 1).params, ...item.params })
+    const group = list.find((specItem) => specItem.code === item.code)?.group
     if (group !== undefined && group.length > 0) setGroupName(group)
   }
 
@@ -230,16 +196,7 @@ export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps)
         >
           aria-label={key}
           onChange={(value) => setParams((current) => ({ ...current, [key]: value }))}
-          options={groupedChoices(
-            spec.options,
-            (value) =>
-              KEY_GROUP[value] ??
-              (Number(value) >= 7 && Number(value) <= 16
-                ? "数字"
-                : Number(value) >= 29 && Number(value) <= 54
-                  ? "字母"
-                  : "其他"),
-          )}
+          options={groupedSkillOptions(spec.options, params[key] ?? "")}
           showSearch
           value={params[key] ?? ""}
           virtual={false}
@@ -296,19 +253,21 @@ export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps)
   return (
     <div className="behaviors-pane api-lab">
       {shortcuts.length === 0 ? null : (
-        <section aria-label="常用接口" className="api-lab-frequent">
+        <section aria-label="使用记录" className="api-lab-frequent">
           {shortcuts.map((item) => {
             const skill = list.find((specItem) => specItem.code === item.code)
             if (skill === undefined) return null
             return (
               <button
-                className={item.code === code ? "api-lab-item active" : "api-lab-item"}
-                key={item.code}
-                onClick={() => pick(item.code)}
+                className={item.id === openedId ? "api-lab-item active" : "api-lab-item"}
+                key={item.id}
+                onClick={() => openRecord(item)}
                 type="button"
               >
                 <strong>{skill.name}</strong>
-                <span>{skill.code}</span>
+                <span>
+                  {skill.code} · {recordTime(item.usedAt)}
+                </span>
               </button>
             )
           })}
@@ -344,17 +303,37 @@ export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps)
         <Card size="small" title={spec === undefined ? "接口" : `${spec.name} · ${spec.code}`}>
           <Form layout="vertical" size="small">
             {spec?.hint ? <p className="behaviors-meta">{spec.hint}</p> : null}
-            {spec?.params.map((key) => (
-              <Form.Item key={key} label={paramLabel(spec, key)}>
-                {fieldControl(key)}
-              </Form.Item>
-            ))}
+            {spec === undefined
+              ? null
+              : spec.params.map((key) => {
+              const swipeRepeat = spec.code !== "SwipeNode" ? "" : params["repeatMode"] === "random" ? "random" : "fixed"
+              if (swipeRepeat === "fixed" && (key === "repeatMin" || key === "repeatMax")) return null
+              if (swipeRepeat === "random" && key === "repeatCount") return null
+              return (
+                <Form.Item key={key} label={paramLabel(spec, key)}>
+                  {spec.code === "SwipeNode" && key === "repeatMode" ? (
+                    <Select
+                      aria-label="次数"
+                      onChange={(value) => setParams((current) => ({ ...current, [key]: value }))}
+                      options={[
+                        { label: "固定次数", value: "fixed" },
+                        { label: "随机次数", value: "random" },
+                      ]}
+                      value={swipeRepeat}
+                      virtual={false}
+                    />
+                  ) : (
+                    fieldControl(key)
+                  )}
+                </Form.Item>
+              )
+            })}
           </Form>
           <Space>
             <Button
               loading={pending}
               onClick={() => {
-                if (userId.length > 0) setFrequent(rememberLabUse(userId, code, known))
+                if (userId.length > 0) setFrequent(rememberLabUse(userId, code, params, known))
                 void onEnqueue(code, [{ ...createStep(code, 1), params }])
               }}
               type="primary"

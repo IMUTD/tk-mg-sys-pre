@@ -2,6 +2,7 @@ import { z } from "zod"
 
 const Index = z.number().int().min(1).max(5)
 const Input = z.record(z.string(), z.string().max(20000))
+const StatusOutput = z.record(z.string(), z.string().max(2 * 1024 * 1024))
 export const EnqueueSchema = z.object({
   deviceId: z.string().uuid(),
   indexNum: z.number().int().min(0).max(5).default(0),
@@ -50,6 +51,8 @@ export const HeartbeatSchema = z.object({
           status: z.string().max(40).optional(),
           apiPort: z.number().int().min(0).max(65535).optional(),
           rpaPort: z.number().int().min(0).max(65535).optional(),
+          webrtcTcp: z.number().int().min(0).max(65535).optional(),
+          webrtcUdp: z.number().int().min(0).max(65535).optional(),
           width: z.string().max(20).optional(),
           height: z.string().max(20).optional(),
           stale: z.boolean().optional(),
@@ -77,7 +80,7 @@ export const StatusSchema = z.object({
     .object({
       step_id: z.union([z.string().uuid(), z.literal("")]).optional(),
       cursor: z.number().int().min(0).optional(),
-      outputs: Input.optional(),
+      outputs: StatusOutput.optional(),
     })
     .optional(),
 })

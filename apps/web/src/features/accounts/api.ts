@@ -25,6 +25,7 @@ const AccountSchema = z.object({
   app: OperationAccountAppSchema.nullable().optional().default(null),
   avatar: z.string().optional().default(""),
   backupKey: z.string().optional().default(""),
+  backupName: z.string().optional().default(""),
   backupSlot: z.string().optional().default(""),
   backupType: OperationAccountBackupTypeSchema.nullable().optional().default(null),
   createdAt: z.coerce

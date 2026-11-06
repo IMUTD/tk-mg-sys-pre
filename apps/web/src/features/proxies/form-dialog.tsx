@@ -1,4 +1,4 @@
-import { App, Button, Form, Input, Modal, Radio, Select, Switch } from "antd"
+import { App, Button, Form, Input, Modal, Radio, Select } from "antd"
 import { type ReactNode, useState } from "react"
 
 import { RemarkSelect } from "../labels/remark-tags"
@@ -34,8 +34,6 @@ export const ProxyFormDialog = ({
   const [port, setPort] = useState(record.port)
   const [proxyType, setProxyType] = useState(record.proxyType)
   const [remark, setRemark] = useState(record.remark)
-  const [safe, setSafe] = useState(record.safe)
-  const [tun, setTun] = useState(record.tun)
   const [turboNode, setTurboNode] = useState<number | null>(record.turboNode)
   const [type, setType] = useState(record.type)
   const [username, setUsername] = useState(record.username)
@@ -80,8 +78,8 @@ export const ProxyFormDialog = ({
       port: port.trim(),
       proxyType: showProxyKind ? proxyType : "static",
       remark,
-      safe,
-      tun,
+      safe: record.safe,
+      tun: record.tun,
       turbo: isV2 || record.turbo,
       turboNode: showSaveTurbo ? turboNode : null,
       type,
@@ -213,16 +211,6 @@ export const ProxyFormDialog = ({
             />
           </Form.Item>
         ) : null}
-        <Form.Item label="TUN模式">
-          <Switch checked={tun} onChange={setTun} />
-          <span className="form-hint form-hint-warn">全局接管模式</span>
-        </Form.Item>
-        <Form.Item label="强力安全模式">
-          <Switch checked={safe} onChange={setSafe} />
-          <span className="form-hint form-hint-danger">
-            配合TUN模式打开,强隐私,使用前请联系客服确认
-          </span>
-        </Form.Item>
       </Form>
     </Modal>
   )

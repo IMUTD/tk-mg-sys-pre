@@ -18,7 +18,6 @@ import {
 import type { ColumnsType } from "antd/es/table"
 import { HTTPError } from "ky"
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
-import { useNavigate } from "react-router-dom"
 import { type BoxLabel, createDevicesApi, type DevicesApi, type OwnedBox } from "./api"
 import { hideMiddle, shortDate } from "./myt-device"
 import "./devices.css"
@@ -69,6 +68,19 @@ const catalogError = async (error: unknown): Promise<string> => {
     if (body.error === "label_in_use") return "仍被盒子使用的备注或分组不能删除"
   }
   return displayError(error)
+}
+
+const agentLogUrl = (host: string): string => {
+  const trimmed = host.trim()
+  if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(trimmed) || trimmed.startsWith("127.")) return ""
+  const parts = trimmed.split(".")
+  if (parts.some((part) => Number(part) > 255)) return ""
+  return `http://${trimmed}:18790/`
+}
+
+const agentControlUrl = (host: string): string => {
+  const log = agentLogUrl(host)
+  return log.length === 0 ? "" : `${log}control`
 }
 
 const modelLabel = (model: string): string => {
@@ -227,7 +239,6 @@ export const DeviceListPage = ({
   canWrite,
   isAdministrator,
 }: DeviceListPageProps): ReactNode => {
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { message, modal } = App.useApp()
   const [keyword, setKeyword] = useState("")
@@ -670,16 +681,30 @@ export const DeviceListPage = ({
     {
       align: "center",
       title: "操作",
-      width: 90,
-      render: (_value, box) => (
-        <Button
-          onClick={() => navigate(`/operations/devices/${box.id}/control`)}
-          size="small"
-          type="primary"
-        >
-          中控
-        </Button>
-      ),
+      width: 148,
+      render: (_value, box) => {
+        const logUrl = agentLogUrl(box.host)
+        const controlUrl = agentControlUrl(box.host)
+        return (
+          <Space size={4}>
+            <Button
+              disabled={controlUrl.length === 0}
+              onClick={() => window.open(controlUrl, "_blank", "noopener")}
+              size="small"
+              type="primary"
+            >
+              中控
+            </Button>
+            <Button
+              disabled={logUrl.length === 0}
+              onClick={() => window.open(logUrl, "_blank", "noopener")}
+              size="small"
+            >
+              日志
+            </Button>
+          </Space>
+        )
+      },
     },
   ]
 

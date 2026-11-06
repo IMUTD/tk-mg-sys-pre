@@ -1,3 +1,4 @@
+export { combineChecks, type FilterMode } from "./combine-checks"
 export {
   type ExecutableCommand,
   ForbiddenInputTextError,

@@ -264,8 +264,7 @@ export const businessGroupInUse = async (
       select group_id, tags[1:1] as tags, 'account' as scope from operation_account union all
       select group_id, tags[2:] as tags, 'account-tag' as scope from operation_account union all
       select group_id, tags, 'proxy' as scope from operation_proxy union all
-      select group_id, tags, 'resource' as scope from operation_resource union all
-      select group_id, tags, 'registration' as scope from registration_resource
+      select group_id, tags, 'resource' as scope from operation_resource
     ) r join user_group ug on ug.group_id = r.group_id
     where ug.user_id = ${administratorId}::uuid and r.scope = ${scope}
       and ${name} = any(r.tags) limit 1`

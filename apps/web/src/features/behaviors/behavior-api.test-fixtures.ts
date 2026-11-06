@@ -16,20 +16,27 @@ export const cloudDevice: CloudDevice = {
   width: 720,
 }
 
+const ChainStepSchema = z.object({
+  api: z.string(),
+  delayMs: z.number(),
+  guards: z.array(z.string()),
+  params: z.record(z.string(), z.string()),
+  remark: z.string().optional(),
+  scopes: z.record(z.string(), z.string()),
+  sources: z.record(z.string(), z.string()),
+})
+
 const SaveChainSchema = z.object({
   anchor: z.null(),
   name: z.string(),
   origin: z.enum(["ai", "rpa"]),
-  steps: z.array(
-    z.object({
-      api: z.string(),
-      delayMs: z.number(),
-      guards: z.array(z.string()),
-      params: z.record(z.string(), z.string()),
-      scopes: z.record(z.string(), z.string()),
-      sources: z.record(z.string(), z.string()),
-    }),
-  ),
+  steps: z.array(ChainStepSchema),
+})
+
+const UpdateChainSchema = z.object({
+  anchor: z.null(),
+  name: z.string(),
+  steps: z.array(ChainStepSchema),
 })
 
 export const mockBehaviorApi = () => {
@@ -52,6 +59,20 @@ export const mockBehaviorApi = () => {
         ...payload,
         id: "saved-chain",
         lastTestedAt: timestamp,
+        updatedAt: timestamp,
+      })
+    }
+    if (init?.method === "PUT" && path.startsWith("/api/behavior-chains/")) {
+      const payload = UpdateChainSchema.parse(JSON.parse(String(init.body)))
+      const id = path.slice("/api/behavior-chains/".length)
+      const current = chains.find((item) => item.id === id)
+      return Response.json({
+        anchor: payload.anchor,
+        id,
+        lastTestedAt: current?.lastTestedAt ?? null,
+        name: payload.name,
+        origin: current?.origin ?? "rpa",
+        steps: payload.steps,
         updatedAt: timestamp,
       })
     }
@@ -86,7 +107,24 @@ export const mockBehaviorApi = () => {
       return new Response(null, { status: 204 })
     }
     if (path === "/api/tasks" && init?.method === "POST") {
-      return Response.json({ taskId: "test-task" }, { status: 202 })
+      const arrange = String(init.body).includes('"skill":"ArrangeNodes"')
+      return Response.json({ taskId: arrange ? "arrange-task" : "test-task" }, { status: 202 })
+    }
+    if (path === "/api/tasks/arrange-task") {
+      return Response.json({
+        errorCode: null,
+        name: "节点整理",
+        status: "succeeded",
+        steps: [
+          {
+            errorCode: null,
+            kind: "ArrangeNodes",
+            result: { count: 1, nodes: "[{1 [8,10][40,80]}]" },
+            sequence: 0,
+            status: "succeeded",
+          },
+        ],
+      })
     }
     if (path === "/api/tasks/test-task") {
       return Response.json({

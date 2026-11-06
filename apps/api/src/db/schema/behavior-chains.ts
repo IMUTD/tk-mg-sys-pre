@@ -26,6 +26,7 @@ export const behaviorChains = pgTable(
     name: text("name").notNull(),
     origin: text("origin").notNull(),
     parameters: jsonb("parameters").notNull(),
+    remarks: text("remarks").array().notNull().default(sql`'{}'::text[]`),
     paramScopes: jsonb("param_scopes").notNull().default(sql`'[]'::jsonb`),
     paramSources: jsonb("param_sources").notNull().default(sql`'[]'::jsonb`),
     updatedAt: timestamp("updated_at", { mode: "date", withTimezone: true }).defaultNow().notNull(),

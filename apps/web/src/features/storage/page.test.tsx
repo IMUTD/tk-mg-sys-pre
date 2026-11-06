@@ -18,62 +18,46 @@ const renderPage = (canWrite = true): void => {
 }
 
 describe("StoragePage", () => {
-  it("renders NAS and SQL pages as selectable card lists without secrets", async () => {
+  it("renders NAS cards and keeps the SQL card list", async () => {
+    const user = userEvent.setup()
     renderPage()
 
-    expect(await screen.findByText("主 NAS")).toBeVisible()
+    expect(await screen.findByText("暂无 NAS 配置")).toBeVisible()
     expect(screen.getByText("配置NAS")).toBeVisible()
-    expect(screen.getByText("配置SQL类型数据库")).toBeVisible()
     expect(screen.getByRole("button", { name: "新增" })).toBeVisible()
-    expect(screen.getAllByRole("button", { name: "全量备份" }).length).toBeGreaterThan(0)
-    expect(screen.getAllByRole("button", { name: "定时备份" }).length).toBeGreaterThan(0)
-    expect(screen.getByText(/nas.internal:445/)).toBeVisible()
-    expect(screen.queryByText("nas-secret")).not.toBeInTheDocument()
-    expect(screen.queryByText("私有云储存尚未配置")).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "新增" }))
+    expect(await screen.findByLabelText("地址")).toBeVisible()
+    expect(screen.getByLabelText("用户名")).toBeVisible()
+    expect(screen.getByLabelText("密码")).toBeVisible()
+    expect(screen.queryByLabelText("S3 地址")).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "取消" }))
 
-    await userEvent.setup().click(screen.getByText("配置SQL类型数据库"))
+    await user.click(screen.getByText("配置SQL类型数据库"))
     expect(await screen.findByText("运营库")).toBeVisible()
     expect(screen.getByText(/127.0.0.1:5432/)).toBeVisible()
     expect(screen.queryByText("sql-ops-secret")).not.toBeInTheDocument()
-    expect(screen.queryByText("主 NAS")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "新增" })).toBeVisible()
   })
 
   it("hides write actions when canWrite is false", async () => {
     renderPage(false)
-    await screen.findByText("主 NAS")
+    expect(await screen.findByText("暂无 NAS 配置")).toBeVisible()
+    expect(screen.queryByRole("button", { name: "新增" })).not.toBeInTheDocument()
 
+    await userEvent.setup().click(screen.getByText("配置SQL类型数据库"))
+    await screen.findByText("运营库")
     expect(screen.queryByRole("button", { name: "新增" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "全量备份" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "编辑" })).not.toBeInTheDocument()
   })
 
-  it("creates a NAS target after a successful connection test", async () => {
-    const user = userEvent.setup()
-    renderPage()
-    await screen.findByText("主 NAS")
-
-    await user.click(screen.getByRole("button", { name: "新增" }))
-    const dialog = await screen.findByRole("dialog")
-    await user.type(within(dialog).getByLabelText("名称"), "热备 NAS")
-    await user.type(within(dialog).getByLabelText("主机"), "nas-hot.internal")
-    await user.clear(within(dialog).getByLabelText("根目录"))
-    await user.type(within(dialog).getByLabelText("根目录"), "/hot")
-    await user.type(within(dialog).getByLabelText("密码"), "hot-nas-secret")
-    await user.click(within(dialog).getByRole("button", { name: "测试连接" }))
-    expect(await screen.findByText("连接成功")).toBeVisible()
-    await user.click(within(dialog).getByRole("button", { name: "确认" }))
-
-    expect(await screen.findByText("新增成功")).toBeVisible()
-    expect(screen.getByText("热备 NAS")).toBeVisible()
-    expect(screen.queryByText("hot-nas-secret")).not.toBeInTheDocument()
-  })
-
   it("shows backup progress after 全量备份", async () => {
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("主 NAS")
+    await user.click(screen.getByText("配置SQL类型数据库"))
+    await screen.findByText("运营库")
 
-    const card = screen.getByText("主 NAS").closest(".storage-card")
+    const card = screen.getByText("运营库").closest(".storage-card")
     if (!(card instanceof HTMLElement)) throw new Error("missing card")
     await user.click(within(card).getByRole("button", { name: "全量备份" }))
 
@@ -87,4 +71,8 @@ afterEach(() => vi.restoreAllMocks())
 
 beforeEach(() => {
   vi.spyOn(fixturesSource, "createSeedTargets").mockImplementation(createTestTargets)
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
+  )
 })
