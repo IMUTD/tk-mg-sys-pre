@@ -14,6 +14,8 @@ import { registerDeviceCommandRoutes } from "./modules/device-commands/routes"
 import type { DeviceCommandService } from "./modules/device-commands/service"
 import { registerDeviceRoutes } from "./modules/devices/routes"
 import type { DeviceService } from "./modules/devices/service"
+import { registerMallRoutes } from "./modules/mall/routes"
+import type { MallService } from "./modules/mall/service"
 import type { MemberRepository } from "./modules/members/repository"
 import { registerMemberRoutes } from "./modules/members/routes"
 import type { MemberService } from "./modules/members/service"
@@ -39,6 +41,7 @@ type AppOptions = {
   readonly accountService?: AccountService
   readonly deviceService?: DeviceService
   readonly deviceCommandService?: DeviceCommandService
+  readonly mallService?: MallService
   readonly memberService?: MemberService
   readonly proxyService?: ProxyService
   readonly resourceService?: ResourceService
@@ -124,6 +127,9 @@ export const createApp = (options: AppOptions = {}): Hono => {
     }
     if (options.poolService !== undefined) {
       registerPoolRoutes(app, options.authService, options.auditRepository, options.poolService)
+    }
+    if (options.mallService !== undefined) {
+      registerMallRoutes(app, options.authService, options.auditRepository, options.mallService)
     }
     if (options.proxyService !== undefined) {
       registerProxyRoutes(app, options.authService, options.auditRepository, options.proxyService)

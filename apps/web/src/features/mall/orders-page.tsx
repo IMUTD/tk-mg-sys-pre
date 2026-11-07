@@ -1,16 +1,31 @@
-import { App, Button, Card, Input, Select, Space, Table, type TableColumnsType, Tag } from "antd"
-import { type ReactNode, useMemo, useState } from "react"
-
+import { useQuery } from "@tanstack/react-query"
 import {
-  createSeedOrders,
-  filterOrders,
+  Alert,
+  App,
+  Button,
+  Card,
+  Input,
+  Select,
+  Space,
+  Table,
+  type TableColumnsType,
+  Tag,
+} from "antd"
+import { type ReactNode, useState } from "react"
+
+import { createMallApi, type MallApi, type OrderQuery } from "./api"
+import {
   money,
   ORDER_STATUS_OPTIONS,
   ORDER_TYPE_OPTIONS,
   orderStatusLabel,
   type ShopOrder,
 } from "./catalog"
+import { MallGroupBar, useMallGroup } from "./group-wallet"
 import "./mall.css"
+
+const defaultApi = createMallApi()
+const PAGE_SIZE = 20
 
 const columns: TableColumnsType<ShopOrder> = [
   { dataIndex: "title", title: "订单标题", width: 110 },
@@ -47,19 +62,31 @@ const columns: TableColumnsType<ShopOrder> = [
   },
 ]
 
-export const MallOrdersPage = (): ReactNode => {
+export const MallOrdersPage = ({ api = defaultApi }: { readonly api?: MallApi }): ReactNode => {
   const { message } = App.useApp()
+  const group = useMallGroup(api)
+  const groupId = group.selected?.groupId ?? null
   const [type, setType] = useState("")
   const [status, setStatus] = useState("")
   const [keyword, setKeyword] = useState("")
   const [applied, setApplied] = useState({ keyword: "", status: "", type: "" })
-  const rows = useMemo(
-    () => filterOrders(createSeedOrders(), applied.type, applied.status, applied.keyword),
-    [applied],
-  )
+  const [page, setPage] = useState(1)
+  const query: OrderQuery = {
+    page,
+    pageSize: PAGE_SIZE,
+    ...(applied.keyword.length > 0 ? { keyword: applied.keyword } : {}),
+    ...(applied.status.length > 0 ? { status: applied.status } : {}),
+    ...(applied.type.length > 0 ? { type: applied.type } : {}),
+  }
+  const orders = useQuery({
+    enabled: groupId !== null,
+    queryFn: () => api.orders(groupId ?? "", query),
+    queryKey: ["mall", "orders", groupId, query],
+  })
 
   return (
     <section className="module-page mall-page">
+      <MallGroupBar state={group} />
       <Card size="small">
         <Space wrap>
           <Select
@@ -90,7 +117,13 @@ export const MallOrdersPage = (): ReactNode => {
             value={status.length === 0 ? null : status}
             virtual={false}
           />
-          <Button onClick={() => setApplied({ keyword, status, type })} type="primary">
+          <Button
+            onClick={() => {
+              setPage(1)
+              setApplied({ keyword: keyword.trim(), status, type })
+            }}
+            type="primary"
+          >
             搜索
           </Button>
           <Button
@@ -98,6 +131,7 @@ export const MallOrdersPage = (): ReactNode => {
               setKeyword("")
               setStatus("")
               setType("")
+              setPage(1)
               setApplied({ keyword: "", status: "", type: "" })
             }}
           >
@@ -106,10 +140,18 @@ export const MallOrdersPage = (): ReactNode => {
           <Button onClick={() => message.success("导出成功")}>导出</Button>
         </Space>
       </Card>
+      {orders.isError ? <Alert title="订单加载失败，请稍后重试" type="error" /> : null}
       <Table
         columns={columns}
-        dataSource={rows}
-        pagination={false}
+        dataSource={[...(orders.data?.items ?? [])]}
+        loading={orders.isFetching}
+        pagination={{
+          current: page,
+          onChange: setPage,
+          pageSize: PAGE_SIZE,
+          showSizeChanger: false,
+          total: orders.data?.total ?? 0,
+        }}
         rowKey="id"
         scroll={{ x: "max-content" }}
         size="small"

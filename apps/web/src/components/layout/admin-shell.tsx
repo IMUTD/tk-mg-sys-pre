@@ -39,7 +39,7 @@ import { APP_NAME, APP_OVERVIEW_LABEL, layoutBackgroundImages } from "../../app/
 import { useUiPreferences } from "../../app/ui-preferences"
 import brandLogo from "../../assets/brand-logo.png"
 import { memberDisplayName, type SessionUser } from "../../lib/api/auth-api"
-import { canViewPage } from "../../lib/pages"
+import { canViewScopedPage } from "../../lib/pages"
 import { AccountMenu } from "./account-menu"
 import { AppFooter } from "./app-footer"
 
@@ -68,6 +68,7 @@ const navigation: readonly NavigationItem[] = [
     label: "商家中心",
     path: "/merchant",
     children: [
+      { icon: <AccountBookOutlined aria-hidden />, label: "积分充值", path: "/merchant/recharges" },
       { icon: <SwapOutlined aria-hidden />, label: "账号转移", path: "/merchant/accounts" },
       { icon: <SwapOutlined aria-hidden />, label: "代理转移", path: "/merchant/proxies" },
       { icon: <ProfileOutlined aria-hidden />, label: "订单管理", path: "/merchant/orders" },
@@ -149,7 +150,7 @@ const navigation: readonly NavigationItem[] = [
 
 const canSeeItem = (item: NavigationItem, user: SessionUser): boolean => {
   if (item.children !== undefined) return true
-  return canViewPage(user.scope.role, item.path, user.scope.pages)
+  return canViewScopedPage(user.scope, item.path)
 }
 
 const visibleItems = (

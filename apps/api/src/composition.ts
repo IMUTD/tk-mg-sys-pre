@@ -22,6 +22,8 @@ import { createPostgresDeviceRepository } from "./modules/devices/postgres-repos
 import { createDeviceService } from "./modules/devices/service"
 import { createDispatchRepository } from "./modules/dispatch/repository"
 import { registerDispatchRoutes } from "./modules/dispatch/routes"
+import { createPostgresMallRepository } from "./modules/mall/repository"
+import { createMallService } from "./modules/mall/service"
 import { createPostgresPagePermissionRepository } from "./modules/members/page-permission-repository"
 import { createPostgresMemberRepository } from "./modules/members/repository"
 import { createMemberService } from "./modules/members/service"
@@ -108,6 +110,10 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
     pagePermissions: createPostgresPagePermissionRepository(client),
     repository: memberRepository,
   })
+  const mallService = createMallService({
+    auditRepository,
+    repository: createPostgresMallRepository(client),
+  })
   const taskExecutionService = createTaskExecutionService({
     deviceRepository,
     repository: createPostgresExecutionTaskRepository(client, {
@@ -125,6 +131,7 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
     authService,
     deviceService,
     deviceCommandService,
+    mallService,
     memberService,
     accountPoolService,
     poolService,

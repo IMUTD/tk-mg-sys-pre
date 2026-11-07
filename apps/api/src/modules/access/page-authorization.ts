@@ -19,6 +19,14 @@ const tokenFrom = (request: Request): string | null => {
   return token === undefined || token.length === 0 ? null : token
 }
 
+export const sessionPrincipal = async (
+  context: Context,
+  authService: AuthService,
+): Promise<SessionPrincipal | null> => {
+  const token = tokenFrom(context.req.raw)
+  return token === null ? null : authService.session(token)
+}
+
 export const authorizePageViewRequest = async (
   context: Context,
   authService: AuthService,
@@ -27,8 +35,7 @@ export const authorizePageViewRequest = async (
   target: string,
   pageKey: string,
 ): Promise<AuthorizedPageRequest | PageAuthorizationFailure> => {
-  const token = tokenFrom(context.req.raw)
-  const principal = token === null ? null : await authService.session(token)
+  const principal = await sessionPrincipal(context, authService)
   if (principal === null)
     return { response: context.json({ error: "authentication_required" }, 401) }
   if (!canViewPage(principal.scope, pageKey)) {

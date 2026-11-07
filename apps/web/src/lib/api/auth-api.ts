@@ -22,6 +22,7 @@ const ScopeSchema = z.object({
   groupIds: z.array(z.string().uuid()),
   pages: z.array(PageAccessSchema),
   permissions: z.array(z.string()),
+  restrictGroups: z.boolean().optional(),
   role: RoleSchema,
 })
 

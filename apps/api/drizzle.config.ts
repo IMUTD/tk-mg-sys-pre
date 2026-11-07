@@ -14,6 +14,7 @@ const config = {
     "./src/db/schema/devices.ts",
     "./src/db/schema/execution-tasks.ts",
     "./src/db/schema/initializer-sync.ts",
+    "./src/db/schema/mall.ts",
     "./src/db/schema/operations.ts",
     "./src/db/schema/stage-replay.ts",
     "./src/db/schema/storage.ts",

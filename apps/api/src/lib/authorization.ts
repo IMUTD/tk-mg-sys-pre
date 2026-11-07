@@ -99,6 +99,10 @@ export const hasPermission = (scope: AccessScope, permission: Permission): boole
 export const canAccessGroup = (scope: AccessScope, groupId: GroupId): boolean =>
   (scope.role === Role.Administrator && !scope.restrictGroups) || scope.groupIds.includes(groupId)
 
+/** 平台方是部署时创建的系统管理员；init-tool 同步来的管理员是受分组限制的租户。 */
+export const isPlatformScope = (scope: AccessScope): boolean =>
+  scope.role === Role.Administrator && !scope.restrictGroups
+
 export const canViewPage = (scope: AccessScope, path: string): boolean => {
   if (isAdminOnlyPath(path)) return scope.role === Role.Administrator
   if (scope.role === Role.Administrator) return true

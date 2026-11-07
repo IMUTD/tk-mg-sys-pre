@@ -215,6 +215,25 @@ export const matchPageAccess = (
       undefined,
     )
 
+/** 平台方是部署时创建的系统管理员；受分组限制的管理员是租户，不能进入商家中心。 */
+export const isPlatformUser = (scope: {
+  readonly restrictGroups?: boolean | undefined
+  readonly role: string
+}): boolean => scope.role === "administrator" && scope.restrictGroups !== true
+
+export const isPlatformOnlyPath = (path: string): boolean =>
+  path === "/merchant" || path.startsWith("/merchant/")
+
+export const canViewScopedPage = (
+  scope: {
+    readonly pages?: readonly PageAccess[]
+    readonly restrictGroups?: boolean | undefined
+    readonly role: string
+  },
+  path: string,
+): boolean =>
+  isPlatformOnlyPath(path) ? isPlatformUser(scope) : canViewPage(scope.role, path, scope.pages)
+
 export const canViewPage = (role: string, path: string, pages?: readonly PageAccess[]): boolean => {
   if (isAdminOnlyPath(path)) return role === "administrator"
   if (role === "administrator") return true

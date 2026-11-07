@@ -5,7 +5,7 @@ import { Navigate, useLocation } from "react-router-dom"
 import brandLogo from "../../assets/brand-logo.png"
 import { useAuth } from "../../features/auth/auth-provider"
 import { assertNever } from "../../lib/assert-never"
-import { canViewPage, firstAccessiblePath } from "../../lib/pages"
+import { canViewScopedPage, firstAccessiblePath } from "../../lib/pages"
 import { AdminShell } from "./admin-shell"
 
 const ServiceUnavailablePage = (): ReactNode => (
@@ -65,7 +65,7 @@ export const PageGuard = ({
     case "unavailable":
       return null
     case "authenticated":
-      return canViewPage(session.user.scope.role, page, session.user.scope.pages) ? (
+      return canViewScopedPage(session.user.scope, page) ? (
         children
       ) : (
         <Navigate

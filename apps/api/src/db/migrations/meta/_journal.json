@@ -540,6 +540,13 @@
       "when": 1797676800000,
       "tag": "0076_drop_marketing_pages",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1797763200000,
+      "tag": "0077_mall_wallet",
+      "breakpoints": true
     }
   ]
 }

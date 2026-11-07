@@ -10,7 +10,11 @@ import {
 } from "antd"
 import { type ReactNode, useState } from "react"
 
+import { createMallApi, type MallApi } from "./api"
+import { MallGroupBar, useMallGroup } from "./group-wallet"
 import "./mall.css"
+
+const defaultApi = createMallApi()
 
 type OfferKind = "账号" | "代理"
 
@@ -76,8 +80,9 @@ const STARTING_OFFERS: readonly Offer[] = [
 
 const money = (value: number): string => `¥${value.toLocaleString("zh-CN")}`
 
-export const MallRedeemPage = (): ReactNode => {
+export const MallRedeemPage = ({ api = defaultApi }: { readonly api?: MallApi }): ReactNode => {
   const { message } = App.useApp()
+  const group = useMallGroup(api)
   const [offers, setOffers] = useState<Offer[]>(() => STARTING_OFFERS.map((item) => ({ ...item })))
   const [buying, setBuying] = useState<Offer | null>(null)
   const [count, setCount] = useState(1)
@@ -99,9 +104,12 @@ export const MallRedeemPage = (): ReactNode => {
 
   return (
     <section className="module-page mall-page">
+      <MallGroupBar state={group} />
       <Card size="small">
         <Typography.Text type="secondary">积分余额</Typography.Text>
-        <div className="purchase-balance">59,900</div>
+        <div className="purchase-balance">
+          {group.selected === null ? "-" : group.selected.balance.toLocaleString("zh-CN")}
+        </div>
       </Card>
       <div className="purchase-grid">
         <OfferCard kind="账号" offers={offers} onBuy={openBuy} title="购买账号" />

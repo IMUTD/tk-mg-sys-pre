@@ -81,6 +81,16 @@
   `feat/account-pool-persistence`, based on the verified business-integration
   branch. This one-time authorization excludes unrelated workspace changes,
   modifying or pushing `main`, opening a PR, merging, and future commits.
+- On 2026-11-07 the user authorized implementing the points mall and merchant
+  center backend and wiring these pages to it: wallet, append-only ledger, manual
+  recharge and adjustment, products, purchases, shipping, account and proxy
+  transfer, and invoice review. Decided rules: points belong to an `access_group`,
+  1 yuan = 100 points, products are priced in points, company invoices require a
+  tax number, Alipay and per-task point charges are out of scope for now. The
+  platform is `role=administrator` and not `restrictGroups`; `/merchant/*` and its
+  APIs are platform-only and return 404 to anyone else. This exception covers the
+  necessary pages, API, additive migrations and tests only. It does not permit
+  commits, pushes or PRs without a subsequent explicit request.
 - Deliver `docs/后端完善与联调说明.md` with compatibility, configuration,
   migrations, verification, rollback, and honestly reported remaining gaps.
 

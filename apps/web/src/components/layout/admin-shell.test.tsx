@@ -4,13 +4,10 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { type AuthApi, WebApp } from "../../app/router"
-import { createPointFixtures } from "../../features/mall/catalog.test-fixtures"
+import type { SessionUser } from "../../lib/api/auth-api"
 import { defaultPagesForRole } from "../../lib/pages"
 
-vi.mock("../../features/mall/catalog", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../features/mall/catalog")>()),
-  createSeedPoints: () => createPointFixtures(),
-}))
+const mallGroup = "11111111-1111-4111-8111-111111111111"
 
 beforeEach(() => {
   vi.stubGlobal(
@@ -24,7 +21,30 @@ beforeEach(() => {
         "/api/devices",
         "/api/behavior-chains",
       ]
-      return Response.json(arrayRoutes.includes(path) ? [] : { items: [] })
+      if (path === "/api/mall/wallets") {
+        return Response.json({
+          items: [{ balance: 59900, groupId: mallGroup, name: "一组" }],
+        })
+      }
+      if (path === `/api/groups/${mallGroup}/mall/ledger`) {
+        return Response.json({
+          items: [
+            {
+              balance: 59900,
+              createdAt: "2026-09-17T04:00:00.000Z",
+              delta: -100,
+              groupId: mallGroup,
+              groupName: "一组",
+              id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+              orderNo: "",
+              remark: "注册GG",
+              type: "spend",
+            },
+          ],
+          total: 1,
+        })
+      }
+      return Response.json(arrayRoutes.includes(path) ? [] : { items: [], total: 0 })
     }),
   )
 })
@@ -92,6 +112,7 @@ const operationsDirector = {
 
 const createAuthenticatedApi = (
   user:
+    | SessionUser
     | typeof administrator
     | typeof operator
     | typeof salesperson
@@ -250,6 +271,22 @@ describe("WebApp route protection", () => {
     expect(screen.getByRole("link", { name: "兑换中心" })).toBeVisible()
     expect(screen.queryByText("商家中心")).not.toBeInTheDocument()
     expect(await screen.findByText("注册GG")).toBeVisible()
+  })
+
+  it("shows the merchant center to the platform administrator", async () => {
+    renderApplication(createAuthenticatedApi(administrator), "/merchant/recharges")
+    expect(await pageCrumb("积分充值")).toBeVisible()
+    expect(screen.getByText("商家中心")).toBeVisible()
+  })
+
+  it("hides the merchant center from a tenant administrator", async () => {
+    const tenant = {
+      ...administrator,
+      scope: { ...administrator.scope, groupIds: [mallGroup], restrictGroups: true },
+    }
+    renderApplication(createAuthenticatedApi(tenant), "/merchant/recharges")
+    expect(await pageCrumb("运营概览")).toBeVisible()
+    expect(screen.queryByText("商家中心")).not.toBeInTheDocument()
   })
 
   it("opens behavior center under Engineering Center", async () => {

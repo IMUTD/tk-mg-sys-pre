@@ -1,14 +1,14 @@
-import { Button, Card, Input, Select, Space, Table, type TableColumnsType, Tag } from "antd"
-import { type ReactNode, useMemo, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
+import { Alert, Button, Card, Input, Select, Space, Table, type TableColumnsType, Tag } from "antd"
+import { type ReactNode, useState } from "react"
 
-import {
-  createSeedPoints,
-  filterPoints,
-  POINT_TYPE_OPTIONS,
-  type PointRecord,
-  pointTypeLabel,
-} from "./catalog"
+import { createMallApi, type LedgerQuery, type MallApi } from "./api"
+import { POINT_TYPE_OPTIONS, type PointRecord, pointTypeLabel } from "./catalog"
+import { MallGroupBar, useMallGroup } from "./group-wallet"
 import "./mall.css"
+
+const defaultApi = createMallApi()
+const PAGE_SIZE = 20
 
 const columns: TableColumnsType<PointRecord> = [
   {
@@ -31,17 +31,28 @@ const columns: TableColumnsType<PointRecord> = [
   { dataIndex: "taskId", title: "任务ID", width: 100 },
 ]
 
-export const MallRecordsPage = (): ReactNode => {
+export const MallRecordsPage = ({ api = defaultApi }: { readonly api?: MallApi }): ReactNode => {
+  const group = useMallGroup(api)
+  const groupId = group.selected?.groupId ?? null
   const [type, setType] = useState("")
   const [keyword, setKeyword] = useState("")
   const [applied, setApplied] = useState({ keyword: "", type: "" })
-  const rows = useMemo(
-    () => filterPoints(createSeedPoints(), applied.type, applied.keyword),
-    [applied],
-  )
+  const [page, setPage] = useState(1)
+  const query: LedgerQuery = {
+    page,
+    pageSize: PAGE_SIZE,
+    ...(applied.keyword.length > 0 ? { keyword: applied.keyword } : {}),
+    ...(applied.type.length > 0 ? { type: applied.type } : {}),
+  }
+  const ledger = useQuery({
+    enabled: groupId !== null,
+    queryFn: () => api.ledger(groupId ?? "", query),
+    queryKey: ["mall", "ledger", groupId, query],
+  })
 
   return (
     <section className="module-page mall-page">
+      <MallGroupBar state={group} />
       <Card size="small">
         <Space wrap>
           <Select
@@ -58,17 +69,24 @@ export const MallRecordsPage = (): ReactNode => {
             allowClear
             aria-label="备注"
             onChange={(event) => setKeyword(event.target.value)}
-            placeholder="备注 / 任务ID"
+            placeholder="备注"
             style={{ width: 220 }}
             value={keyword}
           />
-          <Button onClick={() => setApplied({ keyword, type })} type="primary">
+          <Button
+            onClick={() => {
+              setPage(1)
+              setApplied({ keyword: keyword.trim(), type })
+            }}
+            type="primary"
+          >
             搜索
           </Button>
           <Button
             onClick={() => {
               setType("")
               setKeyword("")
+              setPage(1)
               setApplied({ keyword: "", type: "" })
             }}
           >
@@ -76,10 +94,18 @@ export const MallRecordsPage = (): ReactNode => {
           </Button>
         </Space>
       </Card>
+      {ledger.isError ? <Alert title="积分记录加载失败，请稍后重试" type="error" /> : null}
       <Table
         columns={columns}
-        dataSource={rows}
-        pagination={false}
+        dataSource={[...(ledger.data?.items ?? [])]}
+        loading={ledger.isFetching}
+        pagination={{
+          current: page,
+          onChange: setPage,
+          pageSize: PAGE_SIZE,
+          showSizeChanger: false,
+          total: ledger.data?.total ?? 0,
+        }}
         rowKey="id"
         scroll={{ x: "max-content" }}
         size="small"
