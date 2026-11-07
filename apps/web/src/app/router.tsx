@@ -30,6 +30,7 @@ import { MallRedeemPage } from "../features/mall/redeem-page"
 import { MemberPage } from "../features/members/page"
 import { AccountTransferPage } from "../features/merchant/accounts-page"
 import { MerchantOrdersPage } from "../features/merchant/orders-page"
+import { MerchantProductsPage } from "../features/merchant/products-page"
 import { ProxyTransferPage } from "../features/merchant/proxies-page"
 import { MerchantRechargePage } from "../features/merchant/recharge-page"
 import { OverviewPage } from "../features/overview/page"
@@ -266,6 +267,10 @@ const AuthenticatedRoutes = (): ReactNode => (
       <Route path="/mall/invoices" element={guarded(PageKey.MallInvoices, <MallInvoicesPage />)} />
       <Route path="/mall/redeem" element={guarded(PageKey.MallRedeem, <MallRedeemPage />)} />
       <Route path="/merchant" element={<Navigate replace to="/merchant/recharges" />} />
+      <Route
+        path="/merchant/products"
+        element={guarded("/merchant/products", <MerchantProductsPage />)}
+      />
       <Route
         path="/merchant/recharges"
         element={guarded("/merchant/recharges", <MerchantRechargePage />)}

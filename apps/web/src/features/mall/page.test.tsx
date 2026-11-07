@@ -1,12 +1,20 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { HTTPError } from "ky"
 import type { ReactElement } from "react"
 import { MemoryRouter } from "react-router-dom"
 import { describe, expect, it, vi } from "vitest"
 
 import { AntdApp } from "../../app/antd-app"
-import { createMallApiFixture, mallGroupId } from "./catalog.test-fixtures"
+import type { MallApi } from "./api"
+import type { ShopOrder } from "./catalog"
+import {
+  createMallApiFixture,
+  createOrderFixtures,
+  createProductFixtures,
+  mallGroupId,
+} from "./catalog.test-fixtures"
 import { MallInvoicesPage } from "./invoices-page"
 import { MallOrdersPage } from "./orders-page"
 import { MallRecordsPage } from "./records-page"
@@ -52,17 +60,97 @@ describe("mall pages", () => {
 
   it("offers account and proxy purchases", async () => {
     const user = userEvent.setup()
-    wrap(<MallRedeemPage api={createMallApiFixture()} />)
+    const purchase = vi.fn(createMallApiFixture().purchase)
+    wrap(<MallRedeemPage api={createMallApiFixture({ purchase })} />)
     expect(screen.getByText("积分余额")).toBeVisible()
     expect(await screen.findByText("59,900")).toBeVisible()
     expect(screen.getByText("购买账号")).toBeVisible()
     expect(screen.getByText("购买代理")).toBeVisible()
-    expect(screen.getByText("日本满季度白号")).toBeVisible()
+    expect(await screen.findByText("日本满季度白号")).toBeVisible()
     expect(screen.getByText("全球动态住宅")).toBeVisible()
     await user.click(screen.getByRole("button", { name: "购买日本满季度白号" }))
     const dialog = await screen.findByRole("dialog")
+    await waitFor(() => expect(within(dialog).getByText("10,000 积分")).toBeVisible())
     await user.click(within(dialog).getByRole("button", { name: "确认购买" }))
     expect(await screen.findByText("购买已提交，等待商家发货")).toBeVisible()
+    expect(purchase).toHaveBeenCalledWith(mallGroupId, {
+      expectedUnitPoints: 5000,
+      idempotencyKey: expect.any(String),
+      productId: "aaaaaaaa-0000-4000-8000-000000000001",
+      quantity: 2,
+    })
+  })
+
+  it("blocks a purchase the balance cannot cover and disables sold-out products", async () => {
+    const user = userEvent.setup()
+    const purchase = vi.fn(createMallApiFixture().purchase)
+    const api = createMallApiFixture({
+      purchase,
+      wallets: async () => [{ balance: 100, groupId: mallGroupId, name: "一组" }],
+    })
+    wrap(<MallRedeemPage api={api} />)
+    expect(await screen.findByRole("button", { name: "购买售罄代理" })).toBeDisabled()
+    await user.click(screen.getByRole("button", { name: "购买全球动态住宅" }))
+    const dialog = within(await screen.findByRole("dialog"))
+    await waitFor(() => expect(dialog.getByText("积分余额不足")).toBeVisible())
+    expect(dialog.getByRole("button", { name: "确认购买" })).toBeDisabled()
+    expect(purchase).not.toHaveBeenCalled()
+  })
+
+  it("keeps the idempotency key on retry and shows the new price after a change", async () => {
+    const user = userEvent.setup()
+    const repriced = createProductFixtures().map((item) =>
+      item.name === "全球动态住宅" ? { ...item, pricePoints: 30000 } : item,
+    )
+    const products = vi
+      .fn<MallApi["products"]>()
+      .mockResolvedValueOnce(createProductFixtures())
+      .mockResolvedValue(repriced)
+    const purchase = vi
+      .fn<MallApi["purchase"]>()
+      .mockRejectedValueOnce(
+        new HTTPError(
+          Response.json({ error: "price_changed" }, { status: 409 }),
+          new Request("http://localhost/api"),
+          {} as never,
+        ),
+      )
+      .mockResolvedValueOnce({ balance: 29900, orderNo: "M2", points: 30000 })
+    wrap(<MallRedeemPage api={createMallApiFixture({ products, purchase })} />)
+    await user.click(await screen.findByRole("button", { name: "购买全球动态住宅" }))
+    const dialog = within(await screen.findByRole("dialog"))
+    await user.click(dialog.getByRole("button", { name: "确认购买" }))
+
+    expect(await screen.findByText("商品价格已变化，请确认新价格后再购买")).toBeVisible()
+    expect((await dialog.findAllByText("30,000 积分")).length).toBeGreaterThan(0)
+
+    await user.click(dialog.getByRole("button", { name: "确认购买" }))
+    await waitFor(() => expect(purchase).toHaveBeenCalledTimes(2))
+    expect(purchase.mock.calls[1]?.[1].expectedUnitPoints).toBe(30000)
+    expect(purchase.mock.calls[1]?.[1].idempotencyKey).toBe(
+      purchase.mock.calls[0]?.[1].idempotencyKey,
+    )
+  })
+
+  it("shows the state of a points order", async () => {
+    const api = createMallApiFixture({
+      orders: async () => ({
+        items: [
+          {
+            ...createOrderFixtures()[0],
+            deduction: "1,000 积分",
+            delivery: "已取消，积分已退回：缺货",
+            id: "order-3",
+            orderNo: "M3",
+            status: "cancelled" as const,
+          } as ShopOrder,
+        ],
+        total: 1,
+      }),
+    })
+    wrap(<MallOrdersPage api={api} />)
+    expect(await screen.findByText("已取消，积分已退回：缺货")).toBeVisible()
+    expect(screen.getByText("已取消")).toBeVisible()
   })
 
   it("sends trimmed filters to the server and resets to page one", async () => {

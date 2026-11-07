@@ -1,4 +1,6 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  Alert,
   App,
   Button,
   Card,
@@ -8,99 +10,23 @@ import {
   type TableColumnsType,
   Typography,
 } from "antd"
-import { type ReactNode, useState } from "react"
+import { type ReactNode, useEffect, useState } from "react"
 
-import { createMallApi, type MallApi } from "./api"
+import { createMallApi, type MallApi, type MallProduct, mallRequestError } from "./api"
+import { type ProductKind, pointsText } from "./catalog"
 import { MallGroupBar, useMallGroup } from "./group-wallet"
 import "./mall.css"
 
 const defaultApi = createMallApi()
 
-type OfferKind = "账号" | "代理"
-
-type Offer = {
-  readonly detail: string
-  readonly id: string
-  readonly kind: OfferKind
-  readonly name: string
-  readonly price: number
-  stock: number
-}
-
-const STARTING_OFFERS: readonly Offer[] = [
-  {
-    detail: "100 个起售",
-    id: "account-jp",
-    kind: "账号",
-    name: "日本满季度白号",
-    price: 50,
-    stock: 100,
-  },
-  {
-    detail: "50 个起售",
-    id: "account-us",
-    kind: "账号",
-    name: "美区新注册号",
-    price: 30,
-    stock: 80,
-  },
-  {
-    detail: "20 个起售",
-    id: "account-mail",
-    kind: "账号",
-    name: "邮箱验证号",
-    price: 80,
-    stock: 20,
-  },
-  {
-    detail: "200G / 30 天",
-    id: "proxy-global",
-    kind: "代理",
-    name: "全球动态住宅",
-    price: 200,
-    stock: 12,
-  },
-  {
-    detail: "1 条 / 30 天",
-    id: "proxy-us",
-    kind: "代理",
-    name: "美国静态住宅",
-    price: 80,
-    stock: 30,
-  },
-  {
-    detail: "5 条 / 30 天",
-    id: "proxy-jp",
-    kind: "代理",
-    name: "日本机房代理",
-    price: 40,
-    stock: 18,
-  },
-]
-
-const money = (value: number): string => `¥${value.toLocaleString("zh-CN")}`
+const canBuy = (product: MallProduct): boolean => product.stock >= product.minQuantity
 
 export const MallRedeemPage = ({ api = defaultApi }: { readonly api?: MallApi }): ReactNode => {
-  const { message } = App.useApp()
   const group = useMallGroup(api)
-  const [offers, setOffers] = useState<Offer[]>(() => STARTING_OFFERS.map((item) => ({ ...item })))
-  const [buying, setBuying] = useState<Offer | null>(null)
-  const [count, setCount] = useState(1)
-
-  const openBuy = (offer: Offer): void => {
-    setBuying(offer)
-    setCount(1)
-  }
-
-  const confirmBuy = (): void => {
-    if (buying === null) return
-    const next = Math.min(Math.max(1, count), buying.stock)
-    setOffers((current) =>
-      current.map((item) => (item.id === buying.id ? { ...item, stock: item.stock - next } : item)),
-    )
-    setBuying(null)
-    message.success("购买已提交，等待商家发货")
-  }
+  const products = useQuery({ queryFn: () => api.products(), queryKey: ["mall", "products"] })
+  const [buyingId, setBuyingId] = useState<string | null>(null)
+  const rows = products.data ?? []
+  const buying = rows.find((item) => item.id === buyingId) ?? null
 
   return (
     <section className="module-page mall-page">
@@ -111,72 +37,162 @@ export const MallRedeemPage = ({ api = defaultApi }: { readonly api?: MallApi })
           {group.selected === null ? "-" : group.selected.balance.toLocaleString("zh-CN")}
         </div>
       </Card>
+      {products.isError ? <Alert title="商品加载失败，请稍后重试" type="error" /> : null}
       <div className="purchase-grid">
-        <OfferCard kind="账号" offers={offers} onBuy={openBuy} title="购买账号" />
-        <OfferCard kind="代理" offers={offers} onBuy={openBuy} title="购买代理" />
+        <OfferCard
+          kind="account"
+          loading={products.isPending}
+          onBuy={setBuyingId}
+          rows={rows}
+          title="购买账号"
+        />
+        <OfferCard
+          kind="proxy"
+          loading={products.isPending}
+          onBuy={setBuyingId}
+          rows={rows}
+          title="购买代理"
+        />
       </div>
-      <Modal
-        cancelText="取消"
-        okButtonProps={{ disabled: buying === null || buying.stock < 1 }}
-        okText="确认购买"
-        onCancel={() => setBuying(null)}
-        onOk={confirmBuy}
-        open={buying !== null}
-        title={buying === null ? "购买" : `购买${buying.kind}`}
-      >
-        {buying === null ? null : (
-          <div className="purchase-form">
-            <div>
-              <span>商品</span>
-              <strong>{buying.name}</strong>
-            </div>
-            <div>
-              <span>单价</span>
-              <strong>{money(buying.price)}</strong>
-            </div>
-            <div>
-              <span>数量</span>
-              <InputNumber
-                aria-label="购买数量"
-                max={buying.stock}
-                min={1}
-                onChange={(value) => setCount(value ?? 1)}
-                value={count}
-              />
-            </div>
-            <div>
-              <span>合计</span>
-              <strong>{money(buying.price * count)}</strong>
-            </div>
-          </div>
-        )}
-      </Modal>
+      {buyingId !== null && buying !== null && group.selected !== null ? (
+        <PurchaseDialog
+          api={api}
+          balance={group.selected.balance}
+          groupId={group.selected.groupId}
+          key={buyingId}
+          onClose={() => setBuyingId(null)}
+          product={buying}
+        />
+      ) : null}
     </section>
+  )
+}
+
+const PurchaseDialog = ({
+  api,
+  balance,
+  groupId,
+  onClose,
+  product,
+}: {
+  readonly api: MallApi
+  readonly balance: number
+  readonly groupId: string
+  readonly onClose: () => void
+  readonly product: MallProduct
+}): ReactNode => {
+  const { message } = App.useApp()
+  const client = useQueryClient()
+  // 弹窗打开期间固定一个幂等键：网络失败后重试不会重复扣积分。
+  const [idempotencyKey] = useState(() => crypto.randomUUID())
+  const [quantity, setQuantity] = useState(product.minQuantity)
+  const refresh = () => client.invalidateQueries({ queryKey: ["mall"] })
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.purchase(groupId, {
+        expectedUnitPoints: product.pricePoints,
+        idempotencyKey,
+        productId: product.id,
+        quantity,
+      }),
+    onError: async (error) => {
+      message.error(await mallRequestError(error))
+      await refresh()
+    },
+    onSuccess: async () => {
+      message.success("购买已提交，等待商家发货")
+      onClose()
+      await refresh()
+    },
+  })
+
+  // 重新加载后库存可能变少，已选数量不能超过当前库存。
+  useEffect(() => {
+    setQuantity((current) =>
+      Math.max(product.minQuantity, Math.min(current, Math.max(product.stock, 1))),
+    )
+  }, [product.minQuantity, product.stock])
+
+  const total = product.pricePoints * quantity
+  const insufficient = total > balance
+  const available = canBuy(product) && quantity <= product.stock
+
+  return (
+    <Modal
+      cancelText="取消"
+      confirmLoading={mutation.isPending}
+      mask={{ closable: false }}
+      okButtonProps={{ disabled: insufficient || !available }}
+      okText="确认购买"
+      onCancel={onClose}
+      onOk={() => mutation.mutate()}
+      open
+      title={`购买${product.kind === "account" ? "账号" : "代理"}`}
+    >
+      <div className="purchase-form">
+        <div>
+          <span>商品</span>
+          <strong>{product.name}</strong>
+        </div>
+        <div>
+          <span>单价</span>
+          <strong>{pointsText(product.pricePoints)}</strong>
+        </div>
+        <div>
+          <span>数量</span>
+          <InputNumber
+            aria-label="购买数量"
+            max={Math.max(product.stock, product.minQuantity)}
+            min={product.minQuantity}
+            onChange={(value) => setQuantity(value ?? product.minQuantity)}
+            precision={0}
+            value={quantity}
+          />
+        </div>
+        <div>
+          <span>合计</span>
+          <strong>{pointsText(total)}</strong>
+        </div>
+        <div>
+          <span>购买后余额</span>
+          <strong>{insufficient ? "-" : pointsText(balance - total)}</strong>
+        </div>
+        {insufficient ? <Alert title="积分余额不足" type="warning" /> : null}
+        {canBuy(product) ? null : <Alert title="库存不足" type="warning" />}
+      </div>
+    </Modal>
   )
 }
 
 const OfferCard = ({
   kind,
-  offers,
+  loading,
   onBuy,
+  rows,
   title,
 }: {
-  readonly kind: OfferKind
-  readonly offers: readonly Offer[]
-  readonly onBuy: (offer: Offer) => void
+  readonly kind: ProductKind
+  readonly loading: boolean
+  readonly onBuy: (productId: string) => void
+  readonly rows: readonly MallProduct[]
   readonly title: string
 }): ReactNode => {
-  const columns: TableColumnsType<Offer> = [
+  const columns: TableColumnsType<MallProduct> = [
     { dataIndex: "name", title: "商品" },
-    { dataIndex: "detail", title: "规格" },
-    { dataIndex: "price", render: (value: number) => money(value), title: "单价", width: 90 },
+    { dataIndex: "spec", title: "规格" },
+    {
+      dataIndex: "pricePoints",
+      render: (value: number) => pointsText(value),
+      title: "单价",
+      width: 130,
+    },
     { dataIndex: "stock", title: "库存", width: 70 },
     {
-      render: (_value, offer) => (
+      render: (_value, product) => (
         <Button
-          aria-label={`购买${offer.name}`}
-          disabled={offer.stock < 1}
-          onClick={() => onBuy(offer)}
+          aria-label={`购买${product.name}`}
+          disabled={!canBuy(product)}
+          onClick={() => onBuy(product.id)}
           size="small"
           type="primary"
         >
@@ -191,7 +207,8 @@ const OfferCard = ({
     <Card size="small" title={title}>
       <Table
         columns={columns}
-        dataSource={offers.filter((item) => item.kind === kind)}
+        dataSource={rows.filter((item) => item.kind === kind)}
+        loading={loading}
         pagination={false}
         rowKey="id"
         size="small"

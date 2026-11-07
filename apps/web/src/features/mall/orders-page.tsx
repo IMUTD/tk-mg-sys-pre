@@ -15,9 +15,9 @@ import { type ReactNode, useState } from "react"
 
 import { createMallApi, type MallApi, type OrderQuery } from "./api"
 import {
-  money,
   ORDER_STATUS_OPTIONS,
   ORDER_TYPE_OPTIONS,
+  orderStatusColor,
   orderStatusLabel,
   type ShopOrder,
 } from "./catalog"
@@ -31,31 +31,16 @@ const columns: TableColumnsType<ShopOrder> = [
   { dataIndex: "title", title: "订单标题", width: 110 },
   { dataIndex: "description", title: "订单描述" },
   { dataIndex: "product", title: "商品名" },
-  {
-    dataIndex: "total",
-    render: (value: number) => money(value),
-    title: "总价",
-    width: 90,
-  },
-  {
-    dataIndex: "deduction",
-    render: (value: number) => money(value),
-    title: "积分抵扣",
-    width: 100,
-  },
-  {
-    dataIndex: "finalPrice",
-    render: (value: number) => money(value),
-    title: "最终价格",
-    width: 100,
-  },
+  { dataIndex: "total", title: "总价", width: 120 },
+  { dataIndex: "deduction", title: "积分抵扣", width: 120 },
+  { dataIndex: "finalPrice", title: "最终价格", width: 100 },
   { dataIndex: "delivery", title: "发货内容" },
   { dataIndex: "paidAt", title: "支付时间", width: 170 },
   { dataIndex: "createdAt", title: "创建时间", width: 170 },
   {
     dataIndex: "status",
     render: (value: ShopOrder["status"]) => (
-      <Tag color={value === "paid" ? "success" : "warning"}>{orderStatusLabel(value)}</Tag>
+      <Tag color={orderStatusColor(value)}>{orderStatusLabel(value)}</Tag>
     ),
     title: "状态",
     width: 90,

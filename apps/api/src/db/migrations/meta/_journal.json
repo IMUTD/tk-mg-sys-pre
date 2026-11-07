@@ -547,6 +547,13 @@
       "when": 1797763200000,
       "tag": "0077_mall_wallet",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1797849600000,
+      "tag": "0078_mall_product",
+      "breakpoints": true
     }
   ]
 }

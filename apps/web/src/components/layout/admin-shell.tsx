@@ -69,6 +69,7 @@ const navigation: readonly NavigationItem[] = [
     path: "/merchant",
     children: [
       { icon: <AccountBookOutlined aria-hidden />, label: "积分充值", path: "/merchant/recharges" },
+      { icon: <ShoppingOutlined aria-hidden />, label: "商品管理", path: "/merchant/products" },
       { icon: <SwapOutlined aria-hidden />, label: "账号转移", path: "/merchant/accounts" },
       { icon: <SwapOutlined aria-hidden />, label: "代理转移", path: "/merchant/proxies" },
       { icon: <ProfileOutlined aria-hidden />, label: "订单管理", path: "/merchant/orders" },

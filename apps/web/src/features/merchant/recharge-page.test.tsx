@@ -12,6 +12,15 @@ const groupId = "11111111-1111-4111-8111-111111111111"
 
 const createApi = (overrides: Partial<MerchantApi> = {}): MerchantApi => ({
   adjust: vi.fn(async () => ({ balance: 95 })),
+  cancelOrder: vi.fn(async () => undefined),
+  createProduct: vi.fn(async () => {
+    throw new Error("not used")
+  }),
+  orders: vi.fn(async () => ({ items: [], total: 0 })),
+  products: vi.fn(async () => ({ items: [], total: 0 })),
+  updateProduct: vi.fn(async () => {
+    throw new Error("not used")
+  }),
   ledger: vi.fn(async () => ({
     items: [
       {
@@ -149,7 +158,7 @@ describe("merchant recharge page", () => {
     await user.type(dialog.getByLabelText("备注"), "冲正")
     await user.click(dialog.getByRole("button", { name: "确认调账" }))
 
-    expect(await screen.findByText("积分余额不足，调账后余额不能为负")).toBeVisible()
+    expect(await screen.findByText("积分余额不足")).toBeVisible()
     expect(adjust).toHaveBeenCalledWith(expect.objectContaining({ delta: -500 }))
     expect(screen.getByRole("dialog")).toBeVisible()
   })

@@ -13,6 +13,14 @@ export const ORDER_TYPE_OPTIONS = [
 export const ORDER_STATUS_OPTIONS = [
   { label: "待支付", value: "unpaid" },
   { label: "已支付", value: "paid" },
+  { label: "待发货", value: "pending_ship" },
+  { label: "已发货", value: "shipped" },
+  { label: "已取消", value: "cancelled" },
+] as const
+
+export const PRODUCT_KIND_OPTIONS = [
+  { label: "账号", value: "account" },
+  { label: "代理", value: "proxy" },
 ] as const
 
 export const INVOICE_STATUS_OPTIONS = [
@@ -34,6 +42,7 @@ export const INVOICE_TITLE_OPTIONS = [
 export type PointType = (typeof POINT_TYPE_OPTIONS)[number]["value"]
 export type OrderType = (typeof ORDER_TYPE_OPTIONS)[number]["value"]
 export type OrderStatus = (typeof ORDER_STATUS_OPTIONS)[number]["value"]
+export type ProductKind = (typeof PRODUCT_KIND_OPTIONS)[number]["value"]
 export type InvoiceStatus = (typeof INVOICE_STATUS_OPTIONS)[number]["value"]
 export type InvoiceKind = (typeof INVOICE_TYPE_OPTIONS)[number]["value"]
 export type InvoiceTitleKind = (typeof INVOICE_TITLE_OPTIONS)[number]["value"]
@@ -50,17 +59,17 @@ export type PointRecord = {
 
 export type ShopOrder = {
   createdAt: string
-  deduction: number
+  deduction: string
   delivery: string
   description: string
-  finalPrice: number
+  finalPrice: string
   id: string
   orderNo: string
   paidAt: string
   product: string
   status: OrderStatus
   title: string
-  total: number
+  total: string
   type: OrderType
 }
 
@@ -86,6 +95,24 @@ export const orderTypeLabel = (value: OrderType): string =>
 
 export const orderStatusLabel = (value: OrderStatus): string =>
   ORDER_STATUS_OPTIONS.find((item) => item.value === value)?.label ?? value
+
+export const orderStatusColor = (value: OrderStatus): string => {
+  switch (value) {
+    case "paid":
+    case "shipped":
+      return "success"
+    case "unpaid":
+    case "pending_ship":
+      return "warning"
+    case "cancelled":
+      return "default"
+  }
+}
+
+export const productKindLabel = (value: ProductKind): string =>
+  PRODUCT_KIND_OPTIONS.find((item) => item.value === value)?.label ?? value
+
+export const pointsText = (value: number): string => `${value.toLocaleString("zh-CN")} 积分`
 
 export const invoiceStatusLabel = (value: InvoiceStatus): string =>
   INVOICE_STATUS_OPTIONS.find((item) => item.value === value)?.label ?? value

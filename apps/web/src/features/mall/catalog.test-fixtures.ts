@@ -1,4 +1,4 @@
-import type { MallApi } from "./api"
+import type { MallApi, MallProduct } from "./api"
 import type { PointRecord, ShopOrder } from "./catalog"
 
 export const createPointFixtures = (): PointRecord[] => [
@@ -25,37 +25,76 @@ export const createPointFixtures = (): PointRecord[] => [
 export const createOrderFixtures = (): ShopOrder[] => [
   {
     createdAt: "2026-09-17 11:00:00",
-    deduction: 0,
+    deduction: "¥0",
     delivery: "待交付",
     description: "全球动态200G30天",
-    finalPrice: 200,
+    finalPrice: "¥200",
     id: "order-1",
     orderNo: "ORDER-001",
     paidAt: "",
     product: "全球动态200G30天",
     status: "unpaid",
     title: "资源购买",
-    total: 200,
+    total: "¥200",
     type: "resource",
   },
   {
     createdAt: "2026-09-17 10:00:00",
-    deduction: 0,
+    deduction: "¥0",
     delivery: "已到账",
     description: "积分充值6W",
-    finalPrice: 600,
+    finalPrice: "¥600",
     id: "order-2",
     orderNo: "ORDER-002",
     paidAt: "2026-09-17 10:01:00",
     product: "积分充值6W",
     status: "paid",
     title: "积分充值",
-    total: 600,
+    total: "¥600",
     type: "points",
   },
 ]
 
 export const mallGroupId = "11111111-1111-4111-8111-111111111111"
+
+export const createProductFixtures = (): MallProduct[] => [
+  {
+    createdAt: "2026-09-17T00:00:00.000Z",
+    enabled: true,
+    id: "aaaaaaaa-0000-4000-8000-000000000001",
+    kind: "account",
+    minQuantity: 2,
+    name: "日本满季度白号",
+    pricePoints: 5000,
+    spec: "100 个起售",
+    stock: 100,
+    updatedAt: "2026-09-17T00:00:00.000Z",
+  },
+  {
+    createdAt: "2026-09-17T00:00:00.000Z",
+    enabled: true,
+    id: "aaaaaaaa-0000-4000-8000-000000000002",
+    kind: "proxy",
+    minQuantity: 1,
+    name: "全球动态住宅",
+    pricePoints: 20000,
+    spec: "200G / 30 天",
+    stock: 12,
+    updatedAt: "2026-09-17T00:00:00.000Z",
+  },
+  {
+    createdAt: "2026-09-17T00:00:00.000Z",
+    enabled: true,
+    id: "aaaaaaaa-0000-4000-8000-000000000003",
+    kind: "proxy",
+    minQuantity: 1,
+    name: "售罄代理",
+    pricePoints: 100,
+    spec: "",
+    stock: 0,
+    updatedAt: "2026-09-17T00:00:00.000Z",
+  },
+]
 
 export const createMallApiFixture = (overrides: Partial<MallApi> = {}): MallApi => ({
   ledger: async () => {
@@ -66,6 +105,8 @@ export const createMallApiFixture = (overrides: Partial<MallApi> = {}): MallApi 
     const items = createOrderFixtures()
     return { items, total: items.length }
   },
+  products: async () => createProductFixtures(),
+  purchase: async () => ({ balance: 49900, orderNo: "M1", points: 10000 }),
   wallets: async () => [{ balance: 59900, groupId: mallGroupId, name: "一组" }],
   ...overrides,
 })

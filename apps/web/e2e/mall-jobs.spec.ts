@@ -31,6 +31,29 @@ const registerSession = async (page: Page): Promise<void> => {
       })
       return
     }
+    if (pathname === "/api/mall/products") {
+      await route.fulfill({
+        body: JSON.stringify({
+          items: [
+            {
+              createdAt: "2026-09-17T04:00:00.000Z",
+              enabled: true,
+              id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+              kind: "account",
+              minQuantity: 1,
+              name: "日本满季度白号",
+              pricePoints: 5000,
+              spec: "100 个起售",
+              stock: 100,
+              updatedAt: "2026-09-17T04:00:00.000Z",
+            },
+          ],
+          total: 1,
+        }),
+        contentType: "application/json",
+      })
+      return
+    }
     if (pathname === `/api/groups/${mallGroup}/mall/ledger`) {
       await route.fulfill({
         body: JSON.stringify({
