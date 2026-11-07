@@ -73,6 +73,7 @@ const navigation: readonly NavigationItem[] = [
       { icon: <SwapOutlined aria-hidden />, label: "账号转移", path: "/merchant/accounts" },
       { icon: <SwapOutlined aria-hidden />, label: "代理转移", path: "/merchant/proxies" },
       { icon: <ProfileOutlined aria-hidden />, label: "订单管理", path: "/merchant/orders" },
+      { icon: <FileProtectOutlined aria-hidden />, label: "发票审核", path: "/merchant/invoices" },
     ],
   },
   {

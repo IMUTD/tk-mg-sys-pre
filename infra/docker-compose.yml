@@ -53,6 +53,12 @@ services:
       PROXY_PROBE_BINARY: ${PROXY_PROBE_BINARY:-/usr/local/bin/sing-box}
       MIHOMO_BINARY: ${MIHOMO_BINARY:-/usr/local/bin/mihomo}
       TK_MG_SYSTEM_ACTOR_ID: ${TK_MG_SYSTEM_ACTOR_ID}
+      ALIPAY_APP_ID: ${ALIPAY_APP_ID:-}
+      ALIPAY_PRIVATE_KEY: ${ALIPAY_PRIVATE_KEY:-}
+      ALIPAY_PUBLIC_KEY: ${ALIPAY_PUBLIC_KEY:-}
+      ALIPAY_NOTIFY_URL: ${ALIPAY_NOTIFY_URL:-}
+      ALIPAY_RETURN_URL: ${ALIPAY_RETURN_URL:-}
+      ALIPAY_GATEWAY: ${ALIPAY_GATEWAY:-}
       PORT: "3000"
     depends_on:
       postgres:

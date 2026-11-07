@@ -25,6 +25,7 @@ import {
   productKindLabel,
 } from "../mall/catalog"
 import { createMerchantApi, type MerchantApi } from "./api"
+import { GroupPicker, type PickedGroup } from "./group-picker"
 import "../mall/mall.css"
 
 const defaultApi = createMerchantApi()
@@ -84,6 +85,21 @@ export const MerchantProductsPage = ({
     },
     { dataIndex: "minQuantity", title: "起售", width: 70 },
     { dataIndex: "stock", title: "库存", width: 90 },
+    {
+      render: (_value, product) =>
+        product.available === null || product.available === undefined ? (
+          <span className="muted">未绑定</span>
+        ) : (
+          <Space size={4}>
+            <span>
+              {product.inventoryGroupName}：{Math.max(product.available, 0)}
+            </span>
+            {product.available < product.stock ? <Tag color="warning">不足</Tag> : null}
+          </Space>
+        ),
+      title: "库存分组可发",
+      width: 200,
+    },
     {
       dataIndex: "enabled",
       render: (value: boolean) => (
@@ -187,12 +203,18 @@ const ProductDialog = ({
   const [minQuantity, setMinQuantity] = useState<number | null>(product?.minQuantity ?? 1)
   const [stock, setStock] = useState<number | null>(0)
   const [enabled, setEnabled] = useState(product?.enabled ?? true)
+  const [inventory, setInventory] = useState<PickedGroup | null>(
+    product?.inventoryGroupId === null || product?.inventoryGroupId === undefined
+      ? null
+      : { groupId: product.inventoryGroupId, name: product.inventoryGroupName ?? "" },
+  )
   const isEdit = product !== null
 
   const mutation = useMutation({
     mutationFn: async () => {
       const common = {
         enabled,
+        inventoryGroupId: inventory?.groupId ?? null,
         minQuantity: minQuantity ?? 1,
         name: name.trim(),
         pricePoints: pricePoints ?? 0,
@@ -252,6 +274,12 @@ const ProductDialog = ({
             value={name}
           />
         </Form.Item>
+        <Form.Item
+          extra="绑定后只能从这个分组发货，可售数量也不会超过分组里实际能发的数量"
+          label="库存分组"
+        >
+          <GroupPicker api={api} label="库存分组" onChange={setInventory} value={inventory} />
+        </Form.Item>
         <Form.Item label="规格">
           <Input
             aria-label="规格"
@@ -274,6 +302,7 @@ const ProductDialog = ({
         <Form.Item label="起售数量" required>
           <InputNumber
             aria-label="起售数量"
+            max={1000}
             min={1}
             onChange={setMinQuantity}
             precision={0}

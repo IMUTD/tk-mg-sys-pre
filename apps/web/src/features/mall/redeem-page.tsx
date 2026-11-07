@@ -18,6 +18,8 @@ import { MallGroupBar, useMallGroup } from "./group-wallet"
 import "./mall.css"
 
 const defaultApi = createMallApi()
+/** 和后端一致：发货要逐个选，单笔最多 1000 个。 */
+const MAX_ORDER_QUANTITY = 1000
 
 const canBuy = (product: MallProduct): boolean => product.stock >= product.minQuantity
 
@@ -142,7 +144,7 @@ const PurchaseDialog = ({
           <span>数量</span>
           <InputNumber
             aria-label="购买数量"
-            max={Math.max(product.stock, product.minQuantity)}
+            max={Math.min(MAX_ORDER_QUANTITY, Math.max(product.stock, product.minQuantity))}
             min={product.minQuantity}
             onChange={(value) => setQuantity(value ?? product.minQuantity)}
             precision={0}

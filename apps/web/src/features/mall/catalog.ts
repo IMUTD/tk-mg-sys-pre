@@ -15,6 +15,8 @@ export const ORDER_STATUS_OPTIONS = [
   { label: "已支付", value: "paid" },
   { label: "待发货", value: "pending_ship" },
   { label: "已发货", value: "shipped" },
+  { label: "已退款", value: "refunded" },
+  { label: "已关闭", value: "closed" },
   { label: "已取消", value: "cancelled" },
 ] as const
 
@@ -73,18 +75,6 @@ export type ShopOrder = {
   type: OrderType
 }
 
-export type InvoiceRow = {
-  amount: number
-  file: string
-  id: number
-  remark: string
-  status: InvoiceStatus
-  title: string
-  titleType: InvoiceTitleKind
-  type: InvoiceKind
-  updatedAt: string
-}
-
 export const money = (value: number): string => `¥${value.toLocaleString("zh-CN")}`
 
 export const pointTypeLabel = (value: PointType): string =>
@@ -105,6 +95,8 @@ export const orderStatusColor = (value: OrderStatus): string => {
     case "pending_ship":
       return "warning"
     case "cancelled":
+    case "closed":
+    case "refunded":
       return "default"
   }
 }
@@ -113,6 +105,20 @@ export const productKindLabel = (value: ProductKind): string =>
   PRODUCT_KIND_OPTIONS.find((item) => item.value === value)?.label ?? value
 
 export const pointsText = (value: number): string => `${value.toLocaleString("zh-CN")} 积分`
+
+export const invoiceStatusColor = (value: InvoiceStatus): string => {
+  switch (value) {
+    case "issued":
+      return "success"
+    case "pending":
+      return "warning"
+    case "rejected":
+      return "default"
+  }
+}
+
+export const invoiceTypeLabel = (value: InvoiceKind): string =>
+  INVOICE_TYPE_OPTIONS.find((item) => item.value === value)?.label ?? value
 
 export const invoiceStatusLabel = (value: InvoiceStatus): string =>
   INVOICE_STATUS_OPTIONS.find((item) => item.value === value)?.label ?? value
@@ -126,22 +132,4 @@ export const formatTime = (value: string | null): string => {
     `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
     `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
   )
-}
-
-export const emptyInvoice = (id: number, stamp: string): InvoiceRow => ({
-  amount: 0,
-  file: "",
-  id,
-  remark: "",
-  status: "pending",
-  title: "",
-  titleType: "company",
-  type: "normal",
-  updatedAt: stamp,
-})
-
-export const validateInvoice = (row: InvoiceRow): string | null => {
-  if (row.title.trim().length === 0) return "请填写发票抬头"
-  if (!Number.isFinite(row.amount) || row.amount <= 0) return "请填写申请余额"
-  return null
 }

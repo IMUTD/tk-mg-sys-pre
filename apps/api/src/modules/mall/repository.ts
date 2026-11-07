@@ -1,6 +1,5 @@
-import { randomBytes } from "node:crypto"
 import type { Sql, TransactionSql } from "postgres"
-
+import { createPostgresInvoiceRepository, type InvoiceRepository } from "./invoice-repository"
 import {
   type AdjustInput,
   type AdjustResult,
@@ -26,20 +25,29 @@ import {
   type WalletFilter,
   yuanToCents,
 } from "./model"
+import { createPostgresRechargeRepository, type RechargeRepository } from "./recharge-repository"
+import {
+  availableInventory,
+  createPostgresTransferRepository,
+  type TransferRepository,
+} from "./transfer-repository"
+import { applyDelta, createOrderNo, lockWallet, UNASSIGNED_GROUP_ID } from "./wallet-lock"
 
-export type MallRepository = {
-  adjust(actorId: string, input: AdjustInput): Promise<AdjustResult>
-  cancelOrder(actorId: string, orderId: string, reason: string): Promise<CancelOrderResult>
-  createProduct(actorId: string, input: ProductCreateInput): Promise<MallProduct>
-  listAllWallets(filter: WalletFilter): Promise<Page<GroupWallet>>
-  listLedger(filter: LedgerFilter): Promise<Page<LedgerEntry>>
-  listOrders(filter: OrderFilter): Promise<Page<MallOrder>>
-  listProducts(filter: ProductFilter): Promise<Page<MallProduct>>
-  listWallets(groupIds: readonly string[]): Promise<readonly GroupWallet[]>
-  purchase(actorId: string, groupId: string, input: PurchaseInput): Promise<PurchaseResult>
-  recharge(actorId: string, input: RechargeInput): Promise<RechargeResult>
-  updateProduct(productId: string, input: ProductUpdateInput): Promise<MallProduct>
-}
+export type MallRepository = InvoiceRepository &
+  RechargeRepository &
+  TransferRepository & {
+    adjust(actorId: string, input: AdjustInput): Promise<AdjustResult>
+    cancelOrder(actorId: string, orderId: string, reason: string): Promise<CancelOrderResult>
+    createProduct(actorId: string, input: ProductCreateInput): Promise<MallProduct>
+    listAllWallets(filter: WalletFilter): Promise<Page<GroupWallet>>
+    listLedger(filter: LedgerFilter): Promise<Page<LedgerEntry>>
+    listOrders(filter: OrderFilter): Promise<Page<MallOrder>>
+    listProducts(filter: ProductFilter): Promise<Page<MallProduct>>
+    listWallets(groupIds: readonly string[]): Promise<readonly GroupWallet[]>
+    purchase(actorId: string, groupId: string, input: PurchaseInput): Promise<PurchaseResult>
+    recharge(actorId: string, input: RechargeInput): Promise<RechargeResult>
+    updateProduct(productId: string, input: ProductUpdateInput): Promise<MallProduct>
+  }
 
 type WalletRow = {
   readonly balance: string
@@ -75,7 +83,11 @@ type OrderRow = {
   readonly points: string
   readonly product: string
   readonly productKind: ProductKind | null
+  readonly inventoryGroupId: string | null
+  readonly inventoryGroupName: string | null
   readonly quantity: number | null
+  readonly refundedAt: Date | null
+  readonly shippedAt: Date | null
   readonly status: MallOrder["status"]
   readonly title: string
   readonly type: MallOrder["type"]
@@ -86,6 +98,8 @@ type ProductRow = {
   readonly createdAt: Date
   readonly enabled: boolean
   readonly id: string
+  readonly inventoryGroupId: string | null
+  readonly inventoryGroupName: string | null
   readonly kind: ProductKind
   readonly minQuantity: number
   readonly name: string
@@ -105,9 +119,6 @@ type ReplayRow = {
   readonly quantity: number | null
   readonly type: PointType
 }
-
-/** 系统预置的“未分配”分组不属于任何租户，不能持有积分。 */
-const UNASSIGNED_GROUP_ID = "00000000-0000-4000-8000-000000000001"
 
 const likePattern = (value: string): string => `%${value.replace(/[\\%_]/g, "\\$&")}%`
 
@@ -145,17 +156,24 @@ const toOrder = (row: OrderRow): MallOrder => ({
   points: Number(row.points),
   product: row.product,
   productKind: row.productKind,
+  inventoryGroupId: row.inventoryGroupId,
+  inventoryGroupName: row.inventoryGroupName,
   quantity: row.quantity,
+  refundedAt: row.refundedAt?.toISOString() ?? null,
+  shippedAt: row.shippedAt?.toISOString() ?? null,
   status: row.status,
   title: row.title,
   type: row.type,
   unitPoints: row.unitPoints === null ? null : Number(row.unitPoints),
 })
 
-const toProduct = (row: ProductRow): MallProduct => ({
+const toProduct = (row: ProductRow, available: number | null): MallProduct => ({
+  available,
   createdAt: row.createdAt.toISOString(),
   enabled: row.enabled,
   id: row.id,
+  inventoryGroupId: row.inventoryGroupId,
+  inventoryGroupName: row.inventoryGroupName,
   kind: row.kind,
   minQuantity: row.minQuantity,
   name: row.name,
@@ -167,29 +185,30 @@ const toProduct = (row: ProductRow): MallProduct => ({
 
 const PRODUCT_COLUMNS = (client: Sql) => client`
   id, kind, name, spec, price_points as "pricePoints", stock, min_quantity as "minQuantity",
-  enabled, created_at as "createdAt", updated_at as "updatedAt"
+  enabled, created_at as "createdAt", updated_at as "updatedAt",
+  inventory_group_id as "inventoryGroupId",
+  (select g.name from access_group g where g.id = inventory_group_id) as "inventoryGroupName"
 `
 
-const createOrderNo = (prefix: "M" | "P"): string => {
-  const day = new Date().toISOString().slice(0, 10).replaceAll("-", "")
-  return `${prefix}${day}${randomBytes(5).toString("hex").toUpperCase()}`
+const assertInventoryGroup = async (
+  client: Sql | TransactionSql,
+  groupId: string | null | undefined,
+): Promise<void> => {
+  if (groupId === null || groupId === undefined) return
+  const rows = await client`select id from access_group where id = ${groupId}`
+  if (rows[0] === undefined) throw new MallError("group_not_found")
 }
 
-/**
- * 锁住钱包行，让同一分组的入账串行执行；幂等检查也必须在这把锁之后做。
- * 所有写操作都按“钱包 → 订单 → 商品”的顺序加锁，避免购买和取消互相死锁。
- */
-const lockWallet = async (transaction: TransactionSql, groupId: string): Promise<number> => {
-  const groups = await transaction`
-    select id from access_group where id = ${groupId} and id <> ${UNASSIGNED_GROUP_ID}
-  `
-  if (groups[0] === undefined) throw new MallError("group_not_found")
-  await transaction`insert into mall_wallet (group_id) values (${groupId}) on conflict do nothing`
-  const rows = await transaction<{ readonly balance: string }[]>`
-    select balance from mall_wallet where group_id = ${groupId} for update
-  `
-  return Number(rows[0]?.balance ?? 0)
-}
+const productWithInventory = async (
+  client: Sql | TransactionSql,
+  row: ProductRow,
+): Promise<MallProduct> =>
+  toProduct(
+    row,
+    row.inventoryGroupId === null
+      ? null
+      : await availableInventory(client, row.kind, row.inventoryGroupId),
+  )
 
 const findReplay = async (
   transaction: TransactionSql,
@@ -207,21 +226,10 @@ const findReplay = async (
   return rows[0]
 }
 
-const applyDelta = async (
-  transaction: TransactionSql,
-  groupId: string,
-  balance: number,
-  delta: number,
-): Promise<number> => {
-  const next = balance + delta
-  if (next < 0) throw new MallError("insufficient_balance")
-  await transaction`
-    update mall_wallet set balance = ${next}, updated_at = now() where group_id = ${groupId}
-  `
-  return next
-}
-
 export const createPostgresMallRepository = (client: Sql): MallRepository => ({
+  ...createPostgresTransferRepository(client),
+  ...createPostgresInvoiceRepository(client),
+  ...createPostgresRechargeRepository(client),
   cancelOrder: (actorId, orderId, reason) =>
     client.begin(async (transaction) => {
       const owners = await transaction<{ readonly groupId: string }[]>`
@@ -274,17 +282,18 @@ export const createPostgresMallRepository = (client: Sql): MallRepository => ({
       return { balance: next, groupId, orderNo: order.orderNo, points, replayed: false }
     }),
   createProduct: async (actorId, input) => {
+    await assertInventoryGroup(client, input.inventoryGroupId)
     const rows = await client<ProductRow[]>`
       insert into mall_product
-        (kind, name, spec, price_points, stock, min_quantity, enabled, created_by)
+        (kind, name, spec, price_points, stock, min_quantity, enabled, created_by, inventory_group_id)
       values
         (${input.kind}, ${input.name}, ${input.spec}, ${input.pricePoints}, ${input.stock},
-         ${input.minQuantity}, ${input.enabled}, ${actorId})
+         ${input.minQuantity}, ${input.enabled}, ${actorId}, ${input.inventoryGroupId})
       returning ${PRODUCT_COLUMNS(client)}
     `
     const row = rows[0]
     if (row === undefined) throw new MallError("product_not_found")
-    return toProduct(row)
+    return productWithInventory(client, row)
   },
   purchase: (actorId, groupId, input) =>
     client.begin(async (transaction) => {
@@ -317,6 +326,22 @@ export const createPostgresMallRepository = (client: Sql): MallRepository => ({
       if (unitPoints !== input.expectedUnitPoints) throw new MallError("price_changed")
       if (input.quantity < product.minQuantity) throw new MallError("invalid_quantity")
       if (Number(product.stock) < input.quantity) throw new MallError("insufficient_stock")
+      if (product.inventoryGroupId !== null) {
+        // 货就在买家自己的分组里，发货时无处可发，积分会一直被占着。
+        if (product.inventoryGroupId === groupId) throw new MallError("product_unavailable")
+        // 同一个分组可能绑了多个商品，商品行锁挡不住它们一起超卖。
+        await transaction`
+          select pg_advisory_xact_lock(
+            hashtextextended(${`mall-inventory:${product.kind}:${product.inventoryGroupId}`}, 0)
+          )
+        `
+        const available = await availableInventory(
+          transaction,
+          product.kind,
+          product.inventoryGroupId,
+        )
+        if (available < input.quantity) throw new MallError("insufficient_stock")
+      }
       const points = unitPoints * input.quantity
       const next = await applyDelta(transaction, groupId, balance, -points)
       await transaction`
@@ -356,6 +381,9 @@ export const createPostgresMallRepository = (client: Sql): MallRepository => ({
       if (current === undefined) throw new MallError("product_not_found")
       const stock = Number(current.stock) + (input.stockDelta ?? 0)
       if (stock < 0) throw new MallError("insufficient_stock")
+      await assertInventoryGroup(transaction, input.inventoryGroupId)
+      const inventoryGroupId =
+        input.inventoryGroupId === undefined ? current.inventoryGroupId : input.inventoryGroupId
       const updated = await transaction<ProductRow[]>`
         update mall_product set
           name = ${input.name ?? current.name},
@@ -364,13 +392,14 @@ export const createPostgresMallRepository = (client: Sql): MallRepository => ({
           min_quantity = ${input.minQuantity ?? current.minQuantity},
           enabled = ${input.enabled ?? current.enabled},
           stock = ${stock},
+          inventory_group_id = ${inventoryGroupId},
           updated_at = now()
         where id = ${productId}
         returning ${PRODUCT_COLUMNS(client)}
       `
       const row = updated[0]
       if (row === undefined) throw new MallError("product_not_found")
-      return toProduct(row)
+      return productWithInventory(transaction, row)
     }),
   adjust: (actorId, input) =>
     client.begin(async (transaction) => {
@@ -470,11 +499,15 @@ export const createPostgresMallRepository = (client: Sql): MallRepository => ({
           o.type, o.status, o.title, o.description, o.product, o.product_kind as "productKind",
           o.quantity, o.unit_points as "unitPoints", o.amount_cents as "amountCents", o.points,
           o.paid_at as "paidAt", o.created_at as "createdAt", o.cancelled_at as "cancelledAt",
-          o.cancel_reason as "cancelReason",
+          o.cancel_reason as "cancelReason", o.shipped_at as "shippedAt",
+          o.refunded_at as "refundedAt", p.inventory_group_id as "inventoryGroupId",
+          inventory.name as "inventoryGroupName",
           coalesce(nullif(u.display_name, ''), u.email) as "buyerName"
         from mall_order o
         join access_group g on g.id = o.group_id
         join app_user u on u.id = o.created_by
+        left join mall_product p on p.id = o.product_id
+        left join access_group inventory on inventory.id = p.inventory_group_id
         ${conditions}
         order by o.created_at desc, o.id desc
         limit ${filter.pageSize} offset ${(filter.page - 1) * filter.pageSize}
@@ -507,7 +540,20 @@ export const createPostgresMallRepository = (client: Sql): MallRepository => ({
         select count(*) as total from mall_product ${conditions}
       `,
     ])
-    return { items: rows.map(toProduct), total: Number(totals[0]?.total ?? 0) }
+    const available = new Map<string, number>()
+    const items: MallProduct[] = []
+    for (const row of rows) {
+      const group = row.inventoryGroupId
+      if (group === null) {
+        items.push(toProduct(row, null))
+        continue
+      }
+      const key = `${row.kind}:${group}`
+      const count = available.get(key) ?? (await availableInventory(client, row.kind, group))
+      available.set(key, count)
+      items.push(toProduct(row, count))
+    }
+    return { items, total: Number(totals[0]?.total ?? 0) }
   },
   listWallets: async (groupIds) => {
     if (groupIds.length === 0) return []

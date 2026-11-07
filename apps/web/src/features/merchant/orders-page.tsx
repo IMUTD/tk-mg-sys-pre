@@ -4,6 +4,7 @@ import {
   App,
   Button,
   Card,
+  Checkbox,
   Form,
   Input,
   Modal,
@@ -12,7 +13,6 @@ import {
   Table,
   type TableColumnsType,
   Tag,
-  Tooltip,
 } from "antd"
 import { type ReactNode, useState } from "react"
 
@@ -26,12 +26,13 @@ import {
   productKindLabel,
 } from "../mall/catalog"
 import { createMerchantApi, type MerchantApi } from "./api"
+import { ShipDialog, ShipmentRecordsDialog } from "./ship-dialog"
 import "../mall/mall.css"
 
 const defaultApi = createMerchantApi()
 const PAGE_SIZE = 20
 const STATUS_OPTIONS = ORDER_STATUS_OPTIONS.filter((item) =>
-  ["pending_ship", "shipped", "cancelled"].includes(item.value),
+  ["pending_ship", "shipped", "refunded", "cancelled"].includes(item.value),
 )
 
 export const MerchantOrdersPage = ({
@@ -44,6 +45,9 @@ export const MerchantOrdersPage = ({
   const [applied, setApplied] = useState({ keyword: "", status: "" })
   const [page, setPage] = useState(1)
   const [cancelling, setCancelling] = useState<MallOrderRecord | null>(null)
+  const [shipping, setShipping] = useState<MallOrderRecord | null>(null)
+  const [viewing, setViewing] = useState<MallOrderRecord | null>(null)
+  const [refunding, setRefunding] = useState<MallOrderRecord | null>(null)
   const query = {
     page,
     pageSize: PAGE_SIZE,
@@ -95,11 +99,14 @@ export const MerchantOrdersPage = ({
       render: (_value, order) =>
         order.status === "pending_ship" ? (
           <Space>
-            <Tooltip title="账号和代理过户上线后开放">
-              <Button disabled size="small" type="primary">
-                确认发货
-              </Button>
-            </Tooltip>
+            <Button
+              aria-label={`发货${order.orderNo}`}
+              onClick={() => setShipping(order)}
+              size="small"
+              type="primary"
+            >
+              确认发货
+            </Button>
             <Button
               aria-label={`取消订单${order.orderNo}`}
               danger
@@ -108,6 +115,29 @@ export const MerchantOrdersPage = ({
             >
               取消订单
             </Button>
+          </Space>
+        ) : order.status === "shipped" || order.status === "refunded" ? (
+          <Space>
+            <Button
+              aria-label={`发货明细${order.orderNo}`}
+              onClick={() => setViewing(order)}
+              size="small"
+              type="link"
+            >
+              发货明细
+            </Button>
+            {order.status === "shipped" ? (
+              <Button
+                aria-label={`退款${order.orderNo}`}
+                danger
+                onClick={() => setRefunding(order)}
+                size="small"
+              >
+                退款
+              </Button>
+            ) : (
+              <span className="muted">{order.cancelReason}</span>
+            )}
           </Space>
         ) : (
           <span className="muted">{order.status === "cancelled" ? order.cancelReason : "-"}</span>
@@ -169,7 +199,83 @@ export const MerchantOrdersPage = ({
       {cancelling === null ? null : (
         <CancelDialog api={api} onClose={() => setCancelling(null)} order={cancelling} />
       )}
+      {shipping === null ? null : (
+        <ShipDialog api={api} onClose={() => setShipping(null)} order={shipping} />
+      )}
+      {refunding === null ? null : (
+        <RefundDialog api={api} onClose={() => setRefunding(null)} order={refunding} />
+      )}
+      {viewing === null ? null : (
+        <ShipmentRecordsDialog api={api} onClose={() => setViewing(null)} order={viewing} />
+      )}
     </section>
+  )
+}
+
+const RefundDialog = ({
+  api,
+  onClose,
+  order,
+}: {
+  readonly api: MerchantApi
+  readonly onClose: () => void
+  readonly order: MallOrderRecord
+}): ReactNode => {
+  const { message } = App.useApp()
+  const client = useQueryClient()
+  const [reason, setReason] = useState("")
+  const [reclaim, setReclaim] = useState(true)
+  const mutation = useMutation({
+    mutationFn: () => api.refundOrder(order.id, { reason: reason.trim(), reclaim }),
+    onError: async (error) => {
+      message.error(await mallRequestError(error))
+      await client.invalidateQueries({ queryKey: ["merchant", "orders"] })
+    },
+    onSuccess: async (result) => {
+      message.success(
+        `已退回 ${pointsText(result.points)}${
+          result.reclaimed > 0 ? `，收回 ${result.reclaimed} 个` : ""
+        }`,
+      )
+      onClose()
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ["merchant"] }),
+        client.invalidateQueries({ queryKey: ["mall"] }),
+      ])
+    },
+  })
+  return (
+    <Modal
+      cancelText="返回"
+      confirmLoading={mutation.isPending}
+      mask={{ closable: false }}
+      okButtonProps={{ danger: true, disabled: reason.trim().length === 0 }}
+      okText="确认退款"
+      onCancel={onClose}
+      onOk={() => mutation.mutate()}
+      open
+      title="订单退款"
+    >
+      <p>
+        给「{order.groupName}」退回 {pointsText(order.points)}
+        。退的是积分，不退现金，商品库存也不会自动增加。
+      </p>
+      <Form layout="vertical" size="small">
+        <Form.Item label="退款原因" required>
+          <Input.TextArea
+            aria-label="退款原因"
+            maxLength={500}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="买家可以看到这条原因"
+            rows={2}
+            value={reason}
+          />
+        </Form.Item>
+        <Checkbox checked={reclaim} onChange={(event) => setReclaim(event.target.checked)}>
+          把发出的{order.productKind === "proxy" ? "代理" : "账号"}收回到原来的分组
+        </Checkbox>
+      </Form>
+    </Modal>
   )
 }
 

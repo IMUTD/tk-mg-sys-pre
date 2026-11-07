@@ -86,11 +86,15 @@
   recharge and adjustment, products, purchases, shipping, account and proxy
   transfer, and invoice review. Decided rules: points belong to an `access_group`,
   1 yuan = 100 points, products are priced in points, company invoices require a
-  tax number, Alipay and per-task point charges are out of scope for now. The
+  tax number, per-task point charges are out of scope for now. The
   platform is `role=administrator` and not `restrictGroups`; `/merchant/*` and its
   APIs are platform-only and return 404 to anyone else. This exception covers the
   necessary pages, API, additive migrations and tests only. It does not permit
-  commits, pushes or PRs without a subsequent explicit request.
+  commits, pushes or PRs without a subsequent explicit request. Later the same
+  day the user also asked to finish the remaining items: Alipay recharge, order
+  export, refunds of shipped orders and linking stock to real inventory. Alipay
+  stays off until `ALIPAY_*` is configured; its keys belong in the deployment
+  environment only.
 - Deliver `docs/后端完善与联调说明.md` with compatibility, configuration,
   migrations, verification, rollback, and honestly reported remaining gaps.
 

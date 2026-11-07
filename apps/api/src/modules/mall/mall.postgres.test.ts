@@ -258,6 +258,7 @@ describe("mall purchase PostgreSQL", () => {
   ) =>
     repository.createProduct(actor, {
       enabled: patch.enabled ?? true,
+      inventoryGroupId: null,
       kind: "account",
       minQuantity: patch.minQuantity ?? 1,
       name: "日本满季度白号",
@@ -485,7 +486,7 @@ describe("mall purchase PostgreSQL", () => {
 
     const { id } = await product(repository)
     const { orderId } = await buy(repository, id)
-    await sql`update mall_order set status = 'shipped' where id = ${orderId}`
+    await sql`update mall_order set status = 'shipped', shipped_at = now() where id = ${orderId}`
     await expectMallError(repository.cancelOrder(actor, orderId, "x"), "order_not_cancellable")
     expect(await balanceOf(repository)).toBe(900)
   })
@@ -514,6 +515,7 @@ describe("mall purchase PostgreSQL", () => {
     await product(repository, { enabled: false })
     await repository.createProduct(actor, {
       enabled: true,
+      inventoryGroupId: null,
       kind: "proxy",
       minQuantity: 1,
       name: "全球动态住宅",

@@ -40,6 +40,8 @@ const order: MallOrderRecord = {
   product: "日本满季度白号",
   productKind: "account",
   quantity: 2,
+  refundedAt: null,
+  shippedAt: null,
   status: "pending_ship",
   title: "资源购买",
   type: "resource",
@@ -53,7 +55,20 @@ const createApi = (overrides: Partial<MerchantApi> = {}): MerchantApi => ({
   ledger: vi.fn(async () => ({ items: [], total: 0 })),
   orders: vi.fn(async () => ({ items: [order], total: 1 })),
   products: vi.fn(async () => ({ items: [product], total: 1 })),
+  invoiceFileUrl: vi.fn(() => "/api/file"),
+  invoices: vi.fn(async () => ({ items: [], total: 0 })),
+  issueInvoice: vi.fn(async () => {
+    throw new Error("not used")
+  }),
+  refundOrder: vi.fn(async () => ({ points: 0, reclaimed: 0 })),
+  rejectInvoice: vi.fn(async () => {
+    throw new Error("not used")
+  }),
   recharge: vi.fn(async () => ({ balance: 0, points: 0 })),
+  shipOrder: vi.fn(async () => ({ moved: 2, replayed: false })),
+  transfer: vi.fn(async () => ({ moved: 1, replayed: false })),
+  transferable: vi.fn(async () => ({ items: [], total: 0 })),
+  transfers: vi.fn(async () => ({ items: [], total: 0 })),
   updateProduct: vi.fn(async () => product),
   wallets: vi.fn(async () => ({ items: [], total: 0 })),
   ...overrides,
@@ -88,6 +103,7 @@ describe("merchant products page", () => {
 
     await waitFor(() => expect(api.createProduct).toHaveBeenCalledTimes(1))
     expect(api.createProduct).toHaveBeenCalledWith({
+      inventoryGroupId: null,
       enabled: true,
       kind: "account",
       minQuantity: 1,
@@ -97,6 +113,41 @@ describe("merchant products page", () => {
       stock: 50,
     })
     expect(await screen.findByText("商品已新增")).toBeVisible()
+  }, 60_000)
+
+  it("binds a product to an inventory group and flags a shortfall", async () => {
+    const user = userEvent.setup()
+    const groupId = "33333333-3333-4333-8333-333333333333"
+    const api = createApi({
+      products: vi.fn(async () => ({
+        items: [
+          {
+            ...product,
+            available: 3,
+            inventoryGroupId: groupId,
+            inventoryGroupName: "平台库存",
+          },
+        ],
+        total: 1,
+      })),
+      wallets: vi.fn(async () => ({
+        items: [{ balance: 0, groupId, name: "平台库存" }],
+        total: 1,
+      })),
+    })
+    renderPage(<MerchantProductsPage api={api} />)
+    expect(await screen.findByText(/平台库存：3/)).toBeVisible()
+    expect(screen.getByText("不足")).toBeVisible()
+
+    await user.click(screen.getByRole("button", { name: "编辑日本满季度白号" }))
+    const dialog = within(await screen.findByRole("dialog"))
+    await user.click(dialog.getByRole("button", { name: "保存" }))
+    await waitFor(() =>
+      expect(api.updateProduct).toHaveBeenCalledWith(
+        product.id,
+        expect.objectContaining({ inventoryGroupId: groupId }),
+      ),
+    )
   }, 60_000)
 
   it("edits a product and sends stock only as a delta", async () => {
@@ -151,11 +202,6 @@ describe("merchant orders page", () => {
     expect(screen.getByText("一组（一组管理员）")).toBeVisible()
     expect(screen.getByText("10,000 积分")).toBeVisible()
     expect(api.orders).toHaveBeenCalledWith({ page: 1, pageSize: 20, type: "resource" })
-  })
-
-  it("does not offer shipping until asset transfer exists", async () => {
-    renderPage(<MerchantOrdersPage api={createApi()} />)
-    expect(await screen.findByRole("button", { name: "确认发货" })).toBeDisabled()
   })
 
   it("requires a reason and cancels with a refund message", async () => {

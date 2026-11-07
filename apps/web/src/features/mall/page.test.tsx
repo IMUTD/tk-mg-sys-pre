@@ -15,7 +15,6 @@ import {
   createProductFixtures,
   mallGroupId,
 } from "./catalog.test-fixtures"
-import { MallInvoicesPage } from "./invoices-page"
 import { MallOrdersPage } from "./orders-page"
 import { MallRecordsPage } from "./records-page"
 import { MallRedeemPage } from "./redeem-page"
@@ -44,18 +43,6 @@ describe("mall pages", () => {
     expect((await screen.findAllByText("全球动态200G30天")).length).toBeGreaterThan(0)
     expect(screen.getAllByText("积分充值6W").length).toBeGreaterThan(0)
     expect(screen.getByText("待支付")).toBeVisible()
-  })
-
-  it("opens invoice create with title, type and amount only", async () => {
-    const user = userEvent.setup()
-    wrap(<MallInvoicesPage />)
-    expect(screen.getByText("暂无数据")).toBeVisible()
-    await user.click(screen.getByRole("button", { name: "新增" }))
-    const dialog = await screen.findByRole("dialog")
-    expect(within(dialog).getByLabelText("发票抬头")).toBeInTheDocument()
-    expect(within(dialog).getByLabelText("申请余额")).toBeInTheDocument()
-    expect(within(dialog).getByLabelText("发票类型")).toBeInTheDocument()
-    expect(within(dialog).queryByLabelText("税号")).not.toBeInTheDocument()
   })
 
   it("offers account and proxy purchases", async () => {
@@ -151,6 +138,33 @@ describe("mall pages", () => {
     wrap(<MallOrdersPage api={api} />)
     expect(await screen.findByText("已取消，积分已退回：缺货")).toBeVisible()
     expect(screen.getByText("已取消")).toBeVisible()
+  })
+
+  it("lets the buyer see what a shipped order delivered", async () => {
+    const user = userEvent.setup()
+    const orderItems = vi.fn<MallApi["orderItems"]>(async () => [
+      { id: "dddddddd-0000-4000-8000-000000000001", kind: "account", name: "jp_white_001" },
+    ])
+    const api = createMallApiFixture({
+      orderItems,
+      orders: async () => ({
+        items: [
+          {
+            ...createOrderFixtures()[0],
+            delivery: "已发货 1 个",
+            id: "order-4",
+            orderNo: "M4",
+            status: "shipped" as const,
+          } as ShopOrder,
+        ],
+        total: 1,
+      }),
+    })
+    wrap(<MallOrdersPage api={api} />)
+    await user.click(await screen.findByRole("button", { name: "查看明细M4" }))
+    const dialog = within(await screen.findByRole("dialog"))
+    await waitFor(() => expect(dialog.getByText("jp_white_001")).toBeVisible())
+    expect(orderItems).toHaveBeenCalledWith(expect.any(String), "order-4")
   })
 
   it("sends trimmed filters to the server and resets to page one", async () => {

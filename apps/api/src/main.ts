@@ -44,6 +44,8 @@ export const createApiRequestHandler =
     )
   }
 
+const rechargeSweepMs = 5 * 60 * 1000
+
 export const parseApiRuntimeConfig = (
   environment: Record<string, string | undefined>,
 ): ApiRuntimeConfig => {
@@ -68,6 +70,12 @@ export const startApiServer = (environment: Record<string, string | undefined>) 
   }
   purge()
   const retentionTimer = setInterval(purge, retentionMs)
+  // 支付宝回调可能丢失，定期补查。没配支付宝时什么也不做。
+  const rechargeSweepTimer = setInterval(() => {
+    void productionApp.sweepRecharges().catch((error: unknown) => {
+      console.error("alipay sweep failed", error)
+    })
+  }, rechargeSweepMs)
   const server = Bun.serve({
     fetch: createApiRequestHandler({
       appFetch: productionApp.app.fetch,
@@ -84,6 +92,7 @@ export const startApiServer = (environment: Record<string, string | undefined>) 
       if (stopped) return
       stopped = true
       clearInterval(retentionTimer)
+      clearInterval(rechargeSweepTimer)
       server.stop(true)
       await productionApp.close()
     },

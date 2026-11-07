@@ -97,7 +97,7 @@ const assertTransferIdle = async (
   if (tasks[0] !== undefined) throw new OperationDeleteConflictError()
 }
 
-const detachAccounts = async (
+export const detachAccounts = async (
   transaction: TransactionSql,
   accountIds: readonly string[],
 ): Promise<void> => {
@@ -174,6 +174,7 @@ const accountsForCodes = async (
       and transfer.status = 'active'
       and transfer.code_hash = any(${hashes})
       and a.deleted = false
+      and a.group_id = ${groupId}
     order by transfer.code_hash, item.position
     for update of a
   `
@@ -368,6 +369,7 @@ export const createAccountDesk = (client: Sql): AccountDesk => ({
         from operation_account_transfer_item item
         join operation_account a on a.id = item.account_id
         where item.transfer_id = ${transfer.id} and a.deleted = false
+          and a.group_id = ${transfer.groupId}
         for update of a
       `
       const accountIds = accounts.map((row) => row.id)
@@ -479,6 +481,7 @@ export const createAccountDesk = (client: Sql): AccountDesk => ({
           and transfer.status = 'active'
           and transfer.code_hash = ${hash}
           and a.deleted = false
+          and a.group_id = ${groupId}
         order by item.position
         for update of a
       `

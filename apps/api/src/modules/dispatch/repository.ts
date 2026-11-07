@@ -1303,6 +1303,22 @@ export const createDispatchRepository = (
       for update of i`
     const first = rows[0]
     if (first === undefined) return { kind: "invalid_replay_request" as const }
+    // 账号或代理可能已经转给别的分组，这时不能再用存下来的凭据跑一次。
+    // 这里带锁读，归属只能在本事务结束后才变。
+    if (first.accountId !== null) {
+      const owned = await tx`
+        select id from operation_account
+        where id = ${first.accountId}::uuid and group_id = ${groupId}::uuid
+        for key share`
+      if (owned.length === 0) return { kind: "invalid_replay_request" as const }
+    }
+    if (first.proxyId !== null) {
+      const owned = await tx`
+        select id from operation_proxy
+        where id = ${first.proxyId}::uuid and group_id = ${groupId}::uuid
+        for key share`
+      if (owned.length === 0) return { kind: "invalid_replay_request" as const }
+    }
     const active = await tx<{ id: string }[]>`
       select id::text as id from execution_task
       where dispatch_item_id = ${head.dispatchItemId}::uuid
@@ -2159,8 +2175,8 @@ export const createDispatchRepository = (
         left join app_user u on u.id = d.requester_id
         join operation_dispatch_item i on i.dispatch_id = d.id
         left join device dev on dev.id = i.device_id
-        left join operation_proxy p on p.id = i.proxy_id
-        left join operation_account a on a.id = i.account_id
+        left join operation_proxy p on p.id = i.proxy_id and p.group_id = i.group_id
+        left join operation_account a on a.id = i.account_id and a.group_id = i.group_id
         where d.group_id = ${groupId}::uuid
         order by d.created_at desc, i.instance_index nulls last, i.id`
       const itemIds = rows.map((row) => row.itemId)
@@ -2989,7 +3005,7 @@ export const createDispatchRepository = (
           ) as "replayActive"
         from operation_dispatch_item i
         join operation_dispatch d on d.id = i.dispatch_id
-        left join operation_account a on a.id = i.account_id
+        left join operation_account a on a.id = i.account_id and a.group_id = i.group_id
         join operation_dispatch_step s on s.item_id = i.id
         left join device dev on dev.id = i.device_id
         left join lateral (
@@ -3026,7 +3042,7 @@ export const createDispatchRepository = (
         from execution_task t
         join execution_task_step s on s.task_id = t.id
         left join device dev on dev.id = t.device_id
-        left join operation_account a on a.id = t.account_id
+        left join operation_account a on a.id = t.account_id and a.group_id = t.group_id
         where t.group_id = ${groupId}::uuid
           and t.dispatch_item_id is null
         order by dev.host, t.created_at, s.sequence`

@@ -60,7 +60,11 @@ const ledgerEntry = {
 
 const productId = "44444444-4444-4444-8444-444444444444"
 const orderId = "55555555-5555-4555-8555-555555555555"
+const resourceRecordId = "88888888-8888-4888-8888-888888888888"
 const product = {
+  available: null,
+  inventoryGroupId: null,
+  inventoryGroupName: null,
   createdAt: "2026-11-07T00:00:00.000Z",
   enabled: true,
   id: productId,
@@ -87,12 +91,36 @@ const orderRow = {
   points: 100,
   product: "日本满季度白号",
   productKind: "account" as const,
+  inventoryGroupId: null,
+  inventoryGroupName: null,
   quantity: 1,
+  refundedAt: null,
+  shippedAt: null,
   status: "pending_ship" as const,
   title: "资源购买",
   type: "resource" as const,
   unitPoints: 100,
 }
+const invoiceRow = {
+  amountCents: 100,
+  applicantName: "一组管理员",
+  createdAt: "2026-11-07T00:00:00.000Z",
+  groupId: ownGroup,
+  groupName: "一组",
+  hasFile: false,
+  id: "99999999-1111-4111-8111-111111111111",
+  invoiceNumber: "",
+  invoiceType: "normal" as const,
+  rejectReason: "",
+  remark: "",
+  reviewedAt: null,
+  status: "pending" as const,
+  taxNumber: "91310000MA1K123456",
+  title: "上海某公司",
+  titleType: "company" as const,
+  updatedAt: "2026-11-07T00:00:00.000Z",
+}
+
 const purchaseBody = { expectedUnitPoints: 100, idempotencyKey: key, productId, quantity: 1 }
 
 const setup = (overrides: Partial<MallRepository> = {}) => {
@@ -111,6 +139,66 @@ const setup = (overrides: Partial<MallRepository> = {}) => {
       return { ...product, ...input }
     },
     listAllWallets: async () => ({ items: [], total: 0 }),
+    closeRecharge: async () => undefined,
+    createInvoice: async (_actor, groupId, input) => {
+      calls.push({ args: { groupId, input }, method: "createInvoice" })
+      return { invoice: invoiceRow, replayed: false }
+    },
+    createRecharge: async (_actor, groupId, input) => {
+      calls.push({ args: { groupId, input }, method: "createRecharge" })
+      return { amountCents: 100, orderNo: "A1", points: 100, replayed: false, status: "unpaid" }
+    },
+    findRecharge: async () => ({ amountCents: 100, orderNo: "A1", points: 100, status: "unpaid" }),
+    invoiceFile: async (invoiceId, groupId) => {
+      calls.push({ args: { groupId, invoiceId }, method: "invoiceFile" })
+      return { content: new TextEncoder().encode("%PDF-1"), fileName: "发票-1.pdf" }
+    },
+    invoiceQuota: async () => ({ availableCents: 100, invoicedCents: 0, paidCents: 100 }),
+    issueInvoice: async (_actor, invoiceId, input) => {
+      calls.push({ args: { input, invoiceId }, method: "issueInvoice" })
+      return { invoice: invoiceRow, replayed: false }
+    },
+    listInvoices: async (filter) => {
+      calls.push({ args: filter, method: "listInvoices" })
+      return { items: [invoiceRow], total: 1 }
+    },
+    refundOrder: async (_actor, requestedOrder, input) => {
+      calls.push({ args: { input, requestedOrder }, method: "refundOrder" })
+      return {
+        balance: 500,
+        groupId: ownGroup,
+        orderNo: "M1",
+        points: 500,
+        reclaimed: 1,
+        replayed: false,
+      }
+    },
+    rejectInvoice: async (_actor, invoiceId, reason) => {
+      calls.push({ args: { invoiceId, reason }, method: "rejectInvoice" })
+      return { invoice: invoiceRow, replayed: false }
+    },
+    settleRecharge: async () => ({ result: "already" }),
+    staleRecharges: async () => [],
+    listShipment: async (groupId, requestedOrder) => {
+      calls.push({ args: { groupId, requestedOrder }, method: "listShipment" })
+      return [{ id: resourceRecordId, kind: "account", name: "jp_001" }]
+    },
+    listTransferable: async (kind, filter) => {
+      calls.push({ args: { filter, kind }, method: "listTransferable" })
+      return { items: [], total: 0 }
+    },
+    listTransfers: async (filter) => {
+      calls.push({ args: filter, method: "listTransfers" })
+      return { items: [], total: 0 }
+    },
+    shipOrder: async (_actor, requestedOrder, input) => {
+      calls.push({ args: { input, requestedOrder }, method: "shipOrder" })
+      return { groupId: ownGroup, moved: 1, orderNo: "M1", replayed: false }
+    },
+    transfer: async (_actor, input) => {
+      calls.push({ args: input, method: "transfer" })
+      return { moved: input.ids.length, replayed: false }
+    },
     listProducts: async (filter) => {
       calls.push({ args: filter, method: "listProducts" })
       return { items: [product], total: 1 }
@@ -155,7 +243,17 @@ const setup = (overrides: Partial<MallRepository> = {}) => {
         ...(token === null ? {} : { cookie: `tk_mg_session=${token}` }),
       },
     })
-  return { auditRepository, calls, send }
+  const raw = (
+    path: string,
+    body: FormData | URLSearchParams,
+    headers: Record<string, string> = {},
+  ) =>
+    app.request(path, {
+      body,
+      headers: { cookie: "tk_mg_session=platform", ...headers },
+      method: "POST",
+    })
+  return { auditRepository, calls, raw, send }
 }
 
 const rechargeBody = { amountYuan: "1", groupId: ownGroup, idempotencyKey: key, remark: "打款" }
@@ -414,5 +512,315 @@ describe("product and purchase routes", () => {
       (await send("/api/merchant/products/x", "platform", { stockDelta: 1 }, "PATCH")).status,
     ).toBe(404)
     expect(calls).toEqual([])
+  })
+})
+
+describe("transfer and shipping routes", () => {
+  const sourceGroup = "66666666-6666-4666-8666-666666666666"
+  const resourceId = "77777777-7777-4777-8777-777777777777"
+  const shipBody = { ids: [resourceId], sourceGroupId: sourceGroup }
+  const transferBody = { ...shipBody, kind: "account", targetGroupId: ownGroup }
+  const shipPath = `/api/merchant/orders/${orderId}/ship`
+
+  it("hides the merchant endpoints from non-platform users", async () => {
+    for (const token of ["operator", "sales", "tenant"]) {
+      const { auditRepository, calls, send } = setup()
+      const list = `/api/merchant/transferable/accounts?groupId=${sourceGroup}`
+      expect((await send(shipPath, token, shipBody)).status).toBe(404)
+      expect((await send("/api/merchant/transfers", token, transferBody)).status).toBe(404)
+      expect((await send(list, token, undefined, "GET")).status).toBe(404)
+      expect((await send("/api/merchant/transfers", token, undefined, "GET")).status).toBe(404)
+      expect(calls).toEqual([])
+      expect(auditRepository.all().map((event) => event.outcome)).toEqual([
+        "denied",
+        "denied",
+        "denied",
+        "denied",
+      ])
+    }
+  })
+
+  it("requires a login", async () => {
+    const { calls, send } = setup()
+    expect((await send(shipPath, null, shipBody)).status).toBe(401)
+    expect((await send("/api/merchant/transfers", null, transferBody)).status).toBe(401)
+    expect(calls).toEqual([])
+  })
+
+  it("ships an order and audits it once, not on a retry", async () => {
+    const { auditRepository, calls, send } = setup()
+    expect((await send(shipPath, "platform", shipBody)).status).toBe(200)
+    expect(calls).toEqual([
+      { args: { input: shipBody, requestedOrder: orderId }, method: "shipOrder" },
+    ])
+    const events = auditRepository.all().filter((event) => event.action === "mall.order.ship")
+    expect(events).toHaveLength(1)
+    expect(events[0]?.metadata).toMatchObject({ groupId: ownGroup, sourceGroupId: sourceGroup })
+
+    const replay = setup({
+      shipOrder: async () => ({ groupId: ownGroup, moved: 0, orderNo: "M1", replayed: true }),
+    })
+    expect((await replay.send(shipPath, "platform", shipBody)).status).toBe(200)
+    expect(replay.auditRepository.all()).toEqual([])
+  })
+
+  it("transfers resources and audits the target group", async () => {
+    const { auditRepository, calls, send } = setup()
+    expect((await send("/api/merchant/transfers", "platform", transferBody)).status).toBe(200)
+    expect(calls).toEqual([{ args: transferBody, method: "transfer" }])
+    const events = auditRepository
+      .all()
+      .filter((event) => event.action === "mall.resource.transfer")
+    expect(events[0]?.metadata).toMatchObject({ count: "1", groupId: ownGroup, kind: "account" })
+  })
+
+  it.each([
+    { ...shipBody, ids: [] },
+    { ...shipBody, ids: [resourceId, resourceId] },
+    { ...shipBody, ids: ["x"] },
+    { ...shipBody, ids: Array.from({ length: 1001 }, () => crypto.randomUUID()) },
+    { ids: [resourceId] },
+  ])("rejects an invalid shipment %#", async (body) => {
+    const { calls, send } = setup()
+    expect((await send(shipPath, "platform", body)).status).toBe(400)
+    expect(calls).toEqual([])
+  })
+
+  it("rejects a malformed transfer and requires a source group to list", async () => {
+    const { calls, send } = setup()
+    const bad = { ...transferBody, kind: "device" }
+    expect((await send("/api/merchant/transfers", "platform", bad)).status).toBe(400)
+    expect(
+      (await send("/api/merchant/transferable/accounts", "platform", undefined, "GET")).status,
+    ).toBe(400)
+    expect((await send("/api/merchant/orders/x/ship", "platform", shipBody)).status).toBe(404)
+    expect(calls).toEqual([])
+  })
+
+  it("lists each kind from its own path", async () => {
+    const { calls, send } = setup()
+    const query = `?groupId=${sourceGroup}&shippableOnly=true`
+    for (const path of ["accounts", "proxies"]) {
+      const response = await send(
+        `/api/merchant/transferable/${path}${query}`,
+        "platform",
+        undefined,
+        "GET",
+      )
+      expect(response.status).toBe(200)
+    }
+    expect(calls.map((call) => (call.args as { kind: string }).kind)).toEqual(["account", "proxy"])
+    expect(calls[0]?.args).toMatchObject({ filter: { groupId: sourceGroup, shippableOnly: true } })
+  })
+
+  it("returns which items blocked the move", async () => {
+    const { send } = setup({
+      transfer: async () => {
+        throw new MallError("resource_in_use", ["jp_001"])
+      },
+    })
+    const response = await send("/api/merchant/transfers", "platform", transferBody)
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({ error: "resource_in_use", items: ["jp_001"] })
+  })
+
+  it("tells the operator to retry after a deadlock", async () => {
+    const { send } = setup({
+      shipOrder: async () => {
+        throw Object.assign(new Error("deadlock detected"), { code: "40P01" })
+      },
+    })
+    const response = await send(shipPath, "platform", shipBody)
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({ error: "resource_busy" })
+  })
+
+  it("shows buyers their shipped items only inside their own group", async () => {
+    const { calls, send } = setup()
+    const path = (group: string) => `/api/groups/${group}/mall/orders/${orderId}/items`
+    const response = await send(path(ownGroup), "tenant", undefined, "GET")
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      items: [{ id: resourceRecordId, kind: "account", name: "jp_001" }],
+    })
+    expect(calls).toEqual([
+      { args: { groupId: ownGroup, requestedOrder: orderId }, method: "listShipment" },
+    ])
+    expect((await send(path(otherGroup), "tenant", undefined, "GET")).status).toBe(404)
+  })
+})
+
+describe("invoice, refund and payment routes", () => {
+  const invoiceId = invoiceRow.id
+  const company = {
+    amountYuan: "1.00",
+    idempotencyKey: key,
+    invoiceType: "normal",
+    taxNumber: "91310000ma1k123456",
+    title: "上海某公司",
+    titleType: "company",
+  }
+  const invoicesPath = `/api/groups/${ownGroup}/mall/invoices`
+
+  it("requires a valid tax number for a company and normalises its case", async () => {
+    const { calls, send } = setup()
+    expect((await send(invoicesPath, "tenant", { ...company, taxNumber: "" })).status).toBe(400)
+    expect((await send(invoicesPath, "tenant", { ...company, taxNumber: "abc" })).status).toBe(400)
+    // 只有 15、17、18、20 位是真实存在的长度。
+    expect(
+      (await send(invoicesPath, "tenant", { ...company, taxNumber: "1234567890123456" })).status,
+    ).toBe(400)
+    expect(calls).toEqual([])
+    expect((await send(invoicesPath, "tenant", company)).status).toBe(201)
+    expect(calls[0]?.args).toMatchObject({ input: { taxNumber: "91310000MA1K123456" } })
+  })
+
+  it("does not let a person request a tax number or a special invoice", async () => {
+    const { calls, send } = setup()
+    const person = { ...company, taxNumber: "", titleType: "personal" }
+    expect((await send(invoicesPath, "tenant", { ...person, invoiceType: "special" })).status).toBe(
+      400,
+    )
+    expect(
+      (await send(invoicesPath, "tenant", { ...person, taxNumber: "91310000MA1K123456" })).status,
+    ).toBe(400)
+    expect(calls).toEqual([])
+    expect((await send(invoicesPath, "tenant", person)).status).toBe(201)
+  })
+
+  it("lets only group members apply, and hides review from everyone but the platform", async () => {
+    const { auditRepository, calls, send } = setup()
+    expect((await send(invoicesPath, "platform", company)).status).toBe(404)
+    for (const token of ["sales", "tenant"]) {
+      const list = await send("/api/merchant/invoices", token, undefined, "GET")
+      expect(list.status).toBe(404)
+      const reject = `/api/merchant/invoices/${invoiceId}/reject`
+      expect((await send(reject, token, { reason: "x" })).status).toBe(404)
+      const refund = `/api/merchant/orders/${orderId}/refund`
+      expect((await send(refund, token, { reason: "x", reclaim: true })).status).toBe(404)
+      const file = `/api/merchant/invoices/${invoiceId}/file`
+      expect((await send(file, token, undefined, "GET")).status).toBe(404)
+    }
+    expect(calls).toEqual([])
+    expect(auditRepository.all().every((event) => event.outcome === "denied")).toBe(true)
+  })
+
+  const issue = (
+    app: ReturnType<typeof setup>,
+    fields: Record<string, string | File>,
+    headers: Record<string, string> = {},
+  ) => {
+    const form = new FormData()
+    for (const [name, value] of Object.entries(fields)) form.append(name, value)
+    return app.raw(`/api/merchant/invoices/${invoiceId}/issue`, form, headers)
+  }
+
+  it("issues with a number and an optional PDF only", async () => {
+    const app = setup()
+    expect((await issue(app, {})).status).toBe(400)
+    const fake = new File(["not a pdf"], "a.pdf", { type: "application/pdf" })
+    expect((await issue(app, { file: fake, invoiceNumber: "N1" })).status).toBe(400)
+    const big = new File(["%PDF-", "x".repeat(5 * 1024 * 1024)], "a.pdf")
+    expect((await issue(app, { file: big, invoiceNumber: "N1" })).status).toBe(413)
+    expect(app.calls).toEqual([])
+
+    const pdf = new File(["%PDF-1.7"], "../../etc/passwd.pdf", { type: "application/pdf" })
+    expect((await issue(app, { file: pdf, invoiceNumber: "N1" })).status).toBe(200)
+    const args = app.calls[0]?.args as { input: { file: { fileName: string } } }
+    // 文件名由服务端生成，不信任上传的名字。
+    expect(args.input.file.fileName).toBe("发票-N1.pdf")
+    expect(app.auditRepository.all().map((event) => event.action)).toContain("mall.invoice.issue")
+  })
+
+  it("refuses an oversized upload before reading it", async () => {
+    const app = setup()
+    const response = await issue(
+      app,
+      { invoiceNumber: "N1" },
+      { "content-length": String(6 * 1024 * 1024) },
+    )
+    expect(response.status).toBe(413)
+    expect(app.calls).toEqual([])
+  })
+
+  it("serves the file as a download scoped to the group", async () => {
+    const { calls, send } = setup()
+    const path = `/api/groups/${ownGroup}/mall/invoices/${invoiceId}/file`
+    const response = await send(path, "tenant", undefined, "GET")
+    expect(response.status).toBe(200)
+    expect(response.headers.get("content-type")).toBe("application/pdf")
+    expect(response.headers.get("content-disposition")).toContain("attachment")
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff")
+    expect(calls).toEqual([{ args: { groupId: ownGroup, invoiceId }, method: "invoiceFile" }])
+    const other = `/api/groups/${otherGroup}/mall/invoices/${invoiceId}/file`
+    expect((await send(other, "tenant", undefined, "GET")).status).toBe(404)
+  })
+
+  it("requires a reason to refund and audits it once", async () => {
+    const { auditRepository, calls, send } = setup()
+    const path = `/api/merchant/orders/${orderId}/refund`
+    expect((await send(path, "platform", { reason: " ", reclaim: true })).status).toBe(400)
+    expect((await send(path, "platform", { reason: "退货" })).status).toBe(400)
+    expect(calls).toEqual([])
+    expect((await send(path, "platform", { reason: "退货", reclaim: false })).status).toBe(200)
+    const events = auditRepository.all().filter((event) => event.action === "mall.order.refund")
+    expect(events).toHaveLength(1)
+  })
+
+  it("hides stock locations from buyers and caps stock at what can ship", async () => {
+    const { send } = setup({
+      listProducts: async () => ({
+        items: [
+          {
+            ...product,
+            available: 2,
+            inventoryGroupId: otherGroup,
+            inventoryGroupName: "平台库存",
+            stock: 5,
+          },
+        ],
+        total: 1,
+      }),
+    })
+    const buyer = await send("/api/mall/products", "tenant", undefined, "GET")
+    const items = ((await buyer.json()) as { items: Record<string, unknown>[] }).items
+    expect(items[0]?.["stock"]).toBe(2)
+    expect(items[0]).not.toHaveProperty("inventoryGroupName")
+    expect(items[0]).not.toHaveProperty("available")
+    const merchant = await send("/api/merchant/products", "platform", undefined, "GET")
+    const raw = ((await merchant.json()) as { items: Record<string, unknown>[] }).items
+    expect(raw[0]).toMatchObject({ available: 2, inventoryGroupName: "平台库存", stock: 5 })
+  })
+
+  it("reports payment as unavailable until Alipay is configured", async () => {
+    const { calls, send } = setup()
+    const config = await send("/api/mall/payment-config", "tenant", undefined, "GET")
+    expect(await config.json()).toEqual({ alipay: false })
+    const path = `/api/groups/${ownGroup}/mall/recharges`
+    const response = await send(path, "tenant", { amountYuan: "1", idempotencyKey: key })
+    expect(response.status).toBe(503)
+    expect(await response.json()).toEqual({ error: "alipay_unavailable" })
+    expect(calls).toEqual([])
+  })
+
+  it("does not let a non-member recharge a group", async () => {
+    const { send } = setup()
+    const path = `/api/groups/${ownGroup}/mall/recharges`
+    expect((await send(path, "platform", { amountYuan: "1", idempotencyKey: key })).status).toBe(
+      404,
+    )
+  })
+
+  it("answers an unsigned notify with failure, without logging in", async () => {
+    const { raw } = setup()
+    const form = new URLSearchParams({
+      out_trade_no: "A1",
+      total_amount: "1.00",
+      trade_status: "TRADE_SUCCESS",
+    })
+    const response = await raw("/api/pay/alipay/mall/notify", form, {
+      "content-type": "application/x-www-form-urlencoded",
+    })
+    expect(await response.text()).toBe("failure")
   })
 })

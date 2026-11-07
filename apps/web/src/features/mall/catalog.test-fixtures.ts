@@ -97,10 +97,33 @@ export const createProductFixtures = (): MallProduct[] => [
 ]
 
 export const createMallApiFixture = (overrides: Partial<MallApi> = {}): MallApi => ({
+  createInvoice: async () => {
+    throw new Error("not used")
+  },
+  createRecharge: async () => ({
+    amountCents: 10000,
+    orderNo: "A1",
+    payUrl: "https://gateway.invalid/pay",
+    points: 10000,
+    status: "unpaid",
+  }),
+  invoiceFileUrl: () => "/api/file",
+  invoiceQuota: async () => ({ availableCents: 10000, invoicedCents: 0, paidCents: 10000 }),
+  invoices: async () => ({ items: [], total: 0 }),
+  paymentConfig: async () => ({ alipay: false }),
+  rechargeStatus: async () => ({
+    amountCents: 10000,
+    orderNo: "A1",
+    points: 10000,
+    status: "paid",
+  }),
   ledger: async () => {
     const items = createPointFixtures()
     return { items, total: items.length }
   },
+  orderItems: async () => [
+    { id: "dddddddd-0000-4000-8000-000000000001", kind: "account", name: "jp_white_001" },
+  ],
   orders: async () => {
     const items = createOrderFixtures()
     return { items, total: items.length }

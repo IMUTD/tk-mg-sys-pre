@@ -5,6 +5,7 @@ import { type ReactNode, useState } from "react"
 import { createMallApi, type LedgerQuery, type MallApi } from "./api"
 import { POINT_TYPE_OPTIONS, type PointRecord, pointTypeLabel } from "./catalog"
 import { MallGroupBar, useMallGroup } from "./group-wallet"
+import { RechargeDialog } from "./recharge-dialog"
 import "./mall.css"
 
 const defaultApi = createMallApi()
@@ -38,6 +39,11 @@ export const MallRecordsPage = ({ api = defaultApi }: { readonly api?: MallApi }
   const [keyword, setKeyword] = useState("")
   const [applied, setApplied] = useState({ keyword: "", type: "" })
   const [page, setPage] = useState(1)
+  const [recharging, setRecharging] = useState(false)
+  const payment = useQuery({
+    queryFn: () => api.paymentConfig(),
+    queryKey: ["mall", "payment-config"],
+  })
   const query: LedgerQuery = {
     page,
     pageSize: PAGE_SIZE,
@@ -92,6 +98,11 @@ export const MallRecordsPage = ({ api = defaultApi }: { readonly api?: MallApi }
           >
             重置
           </Button>
+          {payment.data?.alipay === true && group.selected !== null ? (
+            <Button onClick={() => setRecharging(true)} type="primary">
+              充值
+            </Button>
+          ) : null}
         </Space>
       </Card>
       {ledger.isError ? <Alert title="积分记录加载失败，请稍后重试" type="error" /> : null}
@@ -110,6 +121,14 @@ export const MallRecordsPage = ({ api = defaultApi }: { readonly api?: MallApi }
         scroll={{ x: "max-content" }}
         size="small"
       />
+      {recharging && group.selected !== null ? (
+        <RechargeDialog
+          api={api}
+          groupId={group.selected.groupId}
+          groupName={group.selected.name}
+          onClose={() => setRecharging(false)}
+        />
+      ) : null}
     </section>
   )
 }

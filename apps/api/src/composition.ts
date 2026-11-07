@@ -22,6 +22,7 @@ import { createPostgresDeviceRepository } from "./modules/devices/postgres-repos
 import { createDeviceService } from "./modules/devices/service"
 import { createDispatchRepository } from "./modules/dispatch/repository"
 import { registerDispatchRoutes } from "./modules/dispatch/routes"
+import { alipayConfigFromEnvironment, createAlipayGateway } from "./modules/mall/alipay"
 import { createPostgresMallRepository } from "./modules/mall/repository"
 import { createMallService } from "./modules/mall/service"
 import { createPostgresPagePermissionRepository } from "./modules/members/page-permission-repository"
@@ -52,6 +53,7 @@ export type ProductionApp = {
   readonly app: Hono
   readonly checkReadiness: () => Promise<void>
   readonly close: () => Promise<void>
+  readonly sweepRecharges: () => Promise<void>
   readonly purgeExpiredRows: () => Promise<void>
 }
 export const createProductionApp = (config: ProductionAppConfig): ProductionApp => {
@@ -110,7 +112,9 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
     pagePermissions: createPostgresPagePermissionRepository(client),
     repository: memberRepository,
   })
+  const alipayConfig = alipayConfigFromEnvironment(process.env)
   const mallService = createMallService({
+    alipay: alipayConfig === null ? null : createAlipayGateway(alipayConfig),
     auditRepository,
     repository: createPostgresMallRepository(client),
   })
@@ -168,5 +172,6 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
       await client.end()
     },
     purgeExpiredRows: () => purgeExpiredOperationalRows(client),
+    sweepRecharges: () => mallService.sweepRecharges(),
   }
 }

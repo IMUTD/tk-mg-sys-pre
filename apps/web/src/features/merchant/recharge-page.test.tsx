@@ -38,6 +38,19 @@ const createApi = (overrides: Partial<MerchantApi> = {}): MerchantApi => ({
     ],
     total: 1,
   })),
+  shipOrder: vi.fn(async () => ({ moved: 0, replayed: false })),
+  transfer: vi.fn(async () => ({ moved: 0, replayed: false })),
+  transferable: vi.fn(async () => ({ items: [], total: 0 })),
+  transfers: vi.fn(async () => ({ items: [], total: 0 })),
+  invoiceFileUrl: vi.fn(() => "/api/file"),
+  invoices: vi.fn(async () => ({ items: [], total: 0 })),
+  issueInvoice: vi.fn(async () => {
+    throw new Error("not used")
+  }),
+  refundOrder: vi.fn(async () => ({ points: 0, reclaimed: 0 })),
+  rejectInvoice: vi.fn(async () => {
+    throw new Error("not used")
+  }),
   recharge: vi.fn(async () => ({ balance: 60100, points: 60000 })),
   wallets: vi.fn(async () => ({
     items: [{ balance: 100, groupId, name: "一组" }],

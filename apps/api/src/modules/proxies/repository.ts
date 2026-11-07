@@ -159,7 +159,7 @@ export class ProxyConflictError extends Error {
     this.name = "ProxyConflictError"
   }
 }
-const lockGroup = async (tx: TransactionSql, groupId: string): Promise<void> => {
+export const lockGroup = async (tx: TransactionSql, groupId: string): Promise<void> => {
   await tx`select pg_advisory_xact_lock(hashtextextended(${`proxy:${groupId}`}, 0))`
 }
 const loadGroup = async (tx: Sql | TransactionSql, groupId: string): Promise<StoredProxy[]> => {

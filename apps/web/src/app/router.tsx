@@ -29,6 +29,7 @@ import { MallRecordsPage } from "../features/mall/records-page"
 import { MallRedeemPage } from "../features/mall/redeem-page"
 import { MemberPage } from "../features/members/page"
 import { AccountTransferPage } from "../features/merchant/accounts-page"
+import { MerchantInvoicesPage } from "../features/merchant/invoices-page"
 import { MerchantOrdersPage } from "../features/merchant/orders-page"
 import { MerchantProductsPage } from "../features/merchant/products-page"
 import { ProxyTransferPage } from "../features/merchant/proxies-page"
@@ -286,6 +287,10 @@ const AuthenticatedRoutes = (): ReactNode => (
       <Route
         path="/merchant/orders"
         element={guarded("/merchant/orders", <MerchantOrdersPage />)}
+      />
+      <Route
+        path="/merchant/invoices"
+        element={guarded("/merchant/invoices", <MerchantInvoicesPage />)}
       />
       <Route path="/studio" element={<Navigate replace to="/studio/video" />} />
       <Route

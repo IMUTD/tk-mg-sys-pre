@@ -6,6 +6,7 @@ import {
   assertNoActiveAccountLeases,
   assertNoActiveAccountResourceAllocations,
   assertNoActiveTaskClaims,
+  OperationDeleteConflictError,
 } from "../../lib/operation-claim-guard"
 import { type AccountDesk, createAccountDesk } from "./desk"
 
@@ -499,6 +500,9 @@ const fetchAccount = async (
   return row === undefined ? null : toStored(row)
 }
 
+const isForeignKeyViolation = (error: unknown): boolean =>
+  typeof error === "object" && error !== null && "code" in error && error.code === "23503"
+
 export const createPostgresAccountRepository = (client: Sql): AccountRepository => {
   const list = async (filter: AccountListFilter): Promise<AccountPage> => {
     const from = filteredFrom(client, filter)
@@ -566,10 +570,16 @@ export const createPostgresAccountRepository = (client: Sql): AccountRepository 
         await assertNoActiveTaskClaims(transaction, groupId, "account", entityIds)
         await assertNoActiveAccountLeases(transaction, groupId, entityIds)
         await assertNoActiveAccountResourceAllocations(transaction, groupId, entityIds)
-        const rows = await transaction<{ readonly id: string }[]>`
-        delete from operation_account where group_id = ${groupId} and id = any(${entityIds}) and deleted = true returning id
-      `
-        return rows.length
+        try {
+          const rows = await transaction<{ readonly id: string }[]>`
+          delete from operation_account where group_id = ${groupId} and id = any(${entityIds}) and deleted = true returning id
+        `
+          return rows.length
+        } catch (error) {
+          // 派发记录还指向这个账号，比如转入前在来源分组跑过的旧任务。
+          if (isForeignKeyViolation(error)) throw new OperationDeleteConflictError()
+          throw error
+        }
       })
     },
     find: async (groupId, accountId) => fetchAccount(client, groupId, accountId),
