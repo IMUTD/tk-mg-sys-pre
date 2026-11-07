@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { Alert, Button, Card, Checkbox, Descriptions, Space, Spin, Tag, Typography } from "antd"
+import { Alert, Button, Card, Checkbox, Space, Spin, Tag, Typography } from "antd"
 import { useEffect, useRef, useState } from "react"
 import { type IdentityApi, IdentityRequestError, identityApi } from "./api"
 import { identityErrorText, statusLabels } from "./status"
@@ -19,6 +19,7 @@ export const IdentityVerificationPage = ({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
   const key = useRef<string | null>(null)
+  const synchronizedVersion = useRef<number | null>(null)
   const state = useQuery({
     queryKey: ["identity", userId],
     queryFn: api.me,
@@ -32,6 +33,14 @@ export const IdentityVerificationPage = ({
   useEffect(() => {
     if (completedAttempt !== null) key.current = null
   }, [completedAttempt])
+  const verifiedVersion = state.data?.status === "verified" ? state.data.version : null
+  useEffect(() => {
+    if (verifiedVersion === null || verifiedVersion === synchronizedVersion.current) return
+    synchronizedVersion.current = verifiedVersion
+    setFile(null)
+    setConsent(false)
+    void onVerified()
+  }, [verifiedVersion, onVerified])
   useEffect(() => {
     if (file === null || typeof URL.createObjectURL !== "function") {
       setPreview("")
@@ -65,10 +74,7 @@ export const IdentityVerificationPage = ({
       const attempt = await api.submit(file, state.data.consentVersion, requestKey)
       if (attempt.status !== "verifying") key.current = null
       await state.refetch()
-      if (attempt.status === "verified") {
-        setFile(null)
-        await onVerified()
-      } else if (attempt.errorCode !== null)
+      if (attempt.status !== "verified" && attempt.errorCode !== null)
         setError(identityErrorText(new IdentityRequestError(attempt.errorCode)))
     } catch (failure) {
       setError(identityErrorText(failure))
@@ -96,36 +102,12 @@ export const IdentityVerificationPage = ({
   const data = state.data
   const processing = submitting || data.status === "verifying"
   return (
-    <Card title="管理员实名认证" style={{ maxWidth: 760, margin: "0 auto" }}>
+    <Card title="实名认证">
       <Space orientation="vertical" size="large" style={{ width: "100%" }}>
         <Tag color={data.status === "verified" ? "success" : "processing"}>
           {statusLabels[data.status]}
         </Tag>
-        {data.status === "verified" ? (
-          <>
-            <Descriptions
-              column={1}
-              items={[
-                { key: "name", label: "姓名", children: data.maskedName },
-                { key: "number", label: "身份证号", children: data.maskedNumber },
-                {
-                  key: "time",
-                  label: "认证时间",
-                  children:
-                    data.verifiedAt === null
-                      ? "—"
-                      : new Date(data.verifiedAt).toLocaleString("zh-CN"),
-                },
-              ]}
-            />
-            <Typography.Paragraph type="secondary">
-              需要更换实名信息时，请联系平台管理员解除绑定，然后重新认证。
-            </Typography.Paragraph>
-            <Button type="primary" onClick={() => void onVerified()}>
-              进入系统
-            </Button>
-          </>
-        ) : !data.canVerify ? (
+        {data.status === "verified" ? null : !data.canVerify ? (
           <Alert type="info" title="当前账号无需认证或认证功能尚未开放" />
         ) : (
           <>

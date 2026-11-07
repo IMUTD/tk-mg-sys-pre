@@ -90,7 +90,7 @@ describe("identity upload page", () => {
     expect(button).toBeDisabled()
     expect(api.submit).not.toHaveBeenCalled()
   })
-  it("shows verified masked identity without asking for another upload", async () => {
+  it("only shows the verified status without another upload or entry action", async () => {
     renderPage({
       ...initial,
       status: "verified",
@@ -98,7 +98,34 @@ describe("identity upload page", () => {
       maskedName: "张*",
       maskedNumber: "1101**********1234",
     })
-    expect(await screen.findByText("1101**********1234")).toBeVisible()
+    expect(await screen.findByText("已认证", { exact: true })).toBeVisible()
+    expect(screen.queryByText("1101**********1234")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "进入系统" })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("身份证人像面")).not.toBeInTheDocument()
+  })
+  it("refreshes the session when a pending verification is later confirmed", async () => {
+    // Given
+    let current: IdentitySummary = { ...initial, status: "verifying" }
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const onVerified = vi.fn(async () => {})
+    render(
+      <QueryClientProvider client={client}>
+        <IdentityVerificationPage
+          userId="user"
+          api={{ me: async () => current, submit: vi.fn() }}
+          onVerified={onVerified}
+        />
+      </QueryClientProvider>,
+    )
+    await screen.findByText("认证中", { exact: true })
+
+    // When
+    current = { ...initial, status: "verified", canAccessBusiness: true, version: 1 }
+    await client.refetchQueries({ queryKey: ["identity", "user"] })
+
+    // Then
+    expect(await screen.findByText("已认证", { exact: true })).toBeVisible()
+    await waitFor(() => expect(onVerified).toHaveBeenCalledTimes(1))
     expect(screen.queryByLabelText("身份证人像面")).not.toBeInTheDocument()
   })
 })

@@ -55,11 +55,6 @@ type NavigationItem = {
 const navigation: readonly NavigationItem[] = [
   {
     icon: <SafetyCertificateOutlined aria-hidden />,
-    label: "实名认证",
-    path: "/identity-verification",
-  },
-  {
-    icon: <SafetyCertificateOutlined aria-hidden />,
     label: "实名认证管理",
     path: "/identity-verifications",
   },
@@ -170,7 +165,6 @@ const navigation: readonly NavigationItem[] = [
 ]
 
 const canSeeItem = (item: NavigationItem, user: SessionUser): boolean => {
-  if (item.path === "/identity-verification") return user.identity?.canVerify === true
   if (user.identity?.canAccessBusiness === false) return false
   if (item.path === "/identity-verifications")
     return user.isPlatformAdmin === true && user.identity?.mode !== "off"
@@ -195,6 +189,7 @@ const flattenItems = (items: readonly NavigationItem[]): readonly NavigationItem
   )
 
 const titleForPath = (path: string, user: SessionUser): string => {
+  if (path === "/profile") return "个人资料"
   const matches = flattenItems(visibleItems(navigation, user)).filter(
     (candidate) => path === candidate.path || path.startsWith(`${candidate.path}/`),
   )
@@ -294,7 +289,7 @@ export const AdminShell = ({ user }: AdminShellProps): ReactNode => {
       <ProLayout
         ErrorBoundary={false}
         avatarProps={{
-          render: (_, defaultDom) => <AccountMenu user={user}>{defaultDom}</AccountMenu>,
+          render: (_, defaultDom) => <AccountMenu>{defaultDom}</AccountMenu>,
           size: "small",
           title: memberDisplayName(user),
         }}

@@ -18,13 +18,16 @@ test("real browser uploads, binds, platform unbinds and the old session loses ac
   })
   expect(oversized.status()).toBe(413)
   await login(page, "tenant@identity.test")
-  await expect(page).toHaveURL(/\/identity-verification$/)
+  await expect(page).toHaveURL(/\/profile$/)
   await expect(page.getByRole("button", { name: "提交认证" })).toBeDisabled()
   await expect(page.locator(".ant-message-notice")).toHaveCount(0)
   await page.screenshot({ path: "/tmp/tk-mg-identity-qa/upload-desktop.png", fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
   expect(
-    await page.locator(".ant-card").evaluate((element) => element.getBoundingClientRect().right),
+    await page
+      .locator(".ant-card")
+      .last()
+      .evaluate((element) => element.getBoundingClientRect().right),
   ).toBeLessThanOrEqual(390)
   await page.screenshot({ path: "/tmp/tk-mg-identity-qa/upload-mobile.png", fullPage: true })
   await page.setViewportSize({ width: 1280, height: 800 })
@@ -39,9 +42,13 @@ test("real browser uploads, binds, platform unbinds and the old session loses ac
   })
   await page.getByRole("checkbox").check()
   await page.getByRole("button", { name: "提交认证" }).click()
-  await expect(page).toHaveURL(/\/overview$/)
+  await expect(page.getByText("已认证", { exact: true })).toBeVisible()
+  await expect(page).toHaveURL(/\/profile$/)
   await page.goto("/identity-verification")
-  await expect(page.getByText("110***********002X")).toBeVisible()
+  await expect(page).toHaveURL(/\/profile$/)
+  await expect(page.getByText("已认证", { exact: true })).toBeVisible()
+  await expect(page.getByText("110***********002X")).toHaveCount(0)
+  await expect(page.getByLabel("身份证人像面", { exact: true })).toHaveCount(0)
   await page.screenshot({ path: "/tmp/tk-mg-identity-qa/verified-desktop.png", fullPage: true })
   await page.getByRole("link", { name: "盒子时长", exact: true }).click()
   const context = await browser.newContext({ baseURL: "http://127.0.0.1:4189" })
@@ -71,7 +78,7 @@ test("real browser uploads, binds, platform unbinds and the old session loses ac
     await page.getByRole("link", { name: "任务列表", exact: true }).click()
     await expect(page).toHaveURL(/\/login$/)
     await login(page, "tenant@identity.test")
-    await expect(page).toHaveURL(/\/identity-verification$/)
+    await expect(page).toHaveURL(/\/profile$/)
     await expect(page.getByText("已解绑", { exact: true })).toBeVisible()
     await page.screenshot({ path: "/tmp/tk-mg-identity-qa/unbound-desktop.png", fullPage: true })
   } finally {

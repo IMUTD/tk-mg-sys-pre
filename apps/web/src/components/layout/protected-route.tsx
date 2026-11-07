@@ -42,11 +42,8 @@ export const ProtectedRoute = (): ReactNode => {
         </main>
       )
     case "authenticated":
-      if (
-        session.user.identity?.canAccessBusiness === false &&
-        location.pathname !== "/identity-verification"
-      )
-        return <Navigate replace to="/identity-verification" />
+      if (session.user.identity?.canAccessBusiness === false && location.pathname !== "/profile")
+        return <Navigate replace to="/profile" />
       if (session.user.identity?.canAccessBusiness === false) return <IdentityRequiredLayout />
       return <AdminShell user={session.user} />
     case "unauthenticated":

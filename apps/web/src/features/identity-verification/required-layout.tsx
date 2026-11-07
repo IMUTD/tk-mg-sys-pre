@@ -24,7 +24,7 @@ export const IdentityRequiredLayout = () => {
           justifyContent: "space-between",
         }}
       >
-        <Typography.Text strong>哈蜜瓜云控 · 实名认证</Typography.Text>
+        <Typography.Text strong>哈蜜瓜云控 · 个人资料</Typography.Text>
         <Button onClick={() => void logout()}>退出登录</Button>
       </Space>
       <Outlet />
