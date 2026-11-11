@@ -406,15 +406,16 @@ export const filterResources = (
 ): TkRegResource[] =>
   resources.filter((resource) => {
     const remarkParts = splitRemarks(resource.remark)
-    return combineChecks(mode, [
-      query.email.length > 0
-        ? resource.email.toLowerCase().includes(query.email.toLowerCase())
-        : null,
+    const searched =
+      (query.email.length === 0 ||
+        resource.email.toLowerCase().includes(query.email.toLowerCase())) &&
+      (query.remark.length === 0 ||
+        resource.remark.toLowerCase().includes(query.remark.toLowerCase()))
+    return (
+      searched &&
+      combineChecks(mode, [
       query.unremarked ? remarkParts.length === 0 : null,
       ...(query.unremarked ? [] : query.remarkChip.map((name) => remarkParts.includes(name))),
-      query.remark.length > 0
-        ? resource.remark.toLowerCase().includes(query.remark.toLowerCase())
-        : null,
       query.ungrouped || query.tag.length > 0
         ? query.ungrouped
           ? resource.tag.trim().length === 0
@@ -423,6 +424,7 @@ export const filterResources = (
       query.status.length > 0 ? resource.status === query.status : null,
       query.result.length > 0 ? resource.result === query.result : null,
     ])
+    )
   })
 
 export const resourceStatistics = (resources: readonly TkRegResource[]): TagStatistic[] => {

@@ -1,9 +1,5 @@
 export const PageKey = {
   Overview: "/overview",
-  MallRecords: "/mall/records",
-  MallOrders: "/mall/orders",
-  MallInvoices: "/mall/invoices",
-  MallRedeem: "/mall/redeem",
   Devices: "/operations/devices",
   CloudPreview: "/operations/previews",
   Accounts: "/operations/accounts",
@@ -15,9 +11,6 @@ export const PageKey = {
   Storage: "/engineering/storage",
   Robots: "/engineering/robots",
   Behaviors: "/engineering/behaviors",
-  StudioVideo: "/studio/video",
-  StudioImage: "/studio/image",
-  StudioText: "/studio/text",
   StudioTextPool: "/studio/text-pool",
   StudioVideoPool: "/studio/video-pool",
   StudioVideoResources: "/studio/video-resources",
@@ -31,14 +24,7 @@ export const PageKey = {
 
 export type PageKey = (typeof PageKey)[keyof typeof PageKey]
 
-export type PageGroup =
-  | "概览"
-  | "积分商场"
-  | "运营中心"
-  | "工程中心"
-  | "制作中心"
-  | "资源中心"
-  | "系统"
+export type PageGroup = "概览" | "运营中心" | "工程中心" | "资源中心" | "系统"
 
 export type PageDefinition = {
   readonly group: PageGroup
@@ -54,10 +40,6 @@ export type PageAccess = {
 
 export const PAGE_CATALOG: readonly PageDefinition[] = [
   { group: "概览", key: PageKey.Overview, label: "运营概览" },
-  { group: "积分商场", key: PageKey.MallRecords, label: "积分记录" },
-  { group: "积分商场", key: PageKey.MallOrders, label: "我的订单" },
-  { group: "积分商场", key: PageKey.MallInvoices, label: "发票申请" },
-  { group: "积分商场", key: PageKey.MallRedeem, label: "兑换中心" },
   { group: "运营中心", key: PageKey.Devices, label: "盒子管理" },
   { group: "运营中心", key: PageKey.CloudPreview, label: "云机预览" },
   { group: "运营中心", key: PageKey.Accounts, label: "账号管理" },
@@ -70,9 +52,6 @@ export const PAGE_CATALOG: readonly PageDefinition[] = [
   { group: "工程中心", key: PageKey.Storage, label: "私有云储存" },
   { group: "工程中心", key: PageKey.Robots, label: "运营机器人" },
   { group: "工程中心", key: PageKey.Behaviors, label: "行为中心" },
-  { group: "制作中心", key: PageKey.StudioVideo, label: "视频制作" },
-  { group: "制作中心", key: PageKey.StudioImage, label: "图片制作" },
-  { group: "制作中心", key: PageKey.StudioText, label: "文本制作" },
   { group: "资源中心", key: PageKey.StudioTextPool, label: "文本池" },
   { group: "资源中心", key: PageKey.StudioShareVideo, label: "视频池" },
   { group: "资源中心", key: PageKey.StudioImagePool, label: "图片池" },
@@ -106,13 +85,6 @@ export const CONFIGURABLE_ROLE_OPTIONS = MEMBER_ROLE_OPTIONS.filter(
   (option) => option.value !== "administrator",
 )
 
-const SALES_PAGES: readonly PageKey[] = [
-  PageKey.MallRecords,
-  PageKey.MallOrders,
-  PageKey.MallInvoices,
-  PageKey.MallRedeem,
-]
-
 const OPERATIONS_CORE_PAGES: readonly PageKey[] = [
   PageKey.Devices,
   PageKey.CloudPreview,
@@ -133,9 +105,6 @@ const ENGINEERING_CORE_PAGES: readonly PageKey[] = [
 ]
 
 const RESOURCE_PAGES: readonly PageKey[] = [
-  PageKey.StudioVideo,
-  PageKey.StudioImage,
-  PageKey.StudioText,
   PageKey.StudioTextPool,
   PageKey.StudioVideoPool,
   PageKey.StudioShareVideo,
@@ -160,8 +129,8 @@ const viewPagesByRole: Record<string, readonly PageKey[]> = {
   engineering_director: [PageKey.Overview, ...ENGINEERING_CORE_PAGES, ...RESOURCE_PAGES],
   operator: [PageKey.Overview, ...OPERATIONS_CORE_PAGES, ...RESOURCE_PAGES],
   operations_director: [PageKey.Overview, ...OPERATIONS_PAGES, ...RESOURCE_PAGES],
-  sales_director: [PageKey.Overview, ...SALES_PAGES, ...RESOURCE_PAGES],
-  salesperson: [PageKey.Overview, ...SALES_PAGES, ...RESOURCE_PAGES],
+  sales_director: [PageKey.Overview, ...RESOURCE_PAGES],
+  salesperson: [PageKey.Overview, ...RESOURCE_PAGES],
 }
 
 const deletePagesByRole: Record<string, readonly PageKey[]> = {
@@ -169,7 +138,7 @@ const deletePagesByRole: Record<string, readonly PageKey[]> = {
   engineering_director: [...ENGINEERING_CORE_PAGES, ...RESOURCE_PAGES],
   operator: [],
   operations_director: [...OPERATIONS_PAGES, ...RESOURCE_PAGES],
-  sales_director: [...SALES_PAGES, ...RESOURCE_PAGES],
+  sales_director: [...RESOURCE_PAGES],
   salesperson: [],
 }
 

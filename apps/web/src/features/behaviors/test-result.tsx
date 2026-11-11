@@ -261,7 +261,7 @@ export const TestResultCard = ({
     >
       {report === null ? (
         <p className="behaviors-meta">
-          点击测试后，云机返回的内容会显示在这里。四个页签共用这一份记录。
+          点击测试后，云机返回的内容会显示在这里。这些页签共用这一份记录。
         </p>
       ) : (
         <div className="api-lab-report">

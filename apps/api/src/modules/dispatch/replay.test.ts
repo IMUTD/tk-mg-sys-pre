@@ -3,10 +3,13 @@ import { describe, expect, it } from "bun:test"
 import type { ShareDrawFile, TextMaterial } from "./fill"
 import {
   applyReplayChoices,
+  nextListedProxy,
+  proxyIdForStep,
   redrawFile,
   redrawProxy,
   redrawText,
   replayOffers,
+  type ReplayProxy,
   type ReplayStep,
 } from "./replay"
 
@@ -42,6 +45,37 @@ describe("stage replay draws", () => {
 
   it("keeps the only proxy", () => {
     expect(redrawProxy([{ id: "proxy-a" }], "proxy-a")?.id).toBe("proxy-a")
+  })
+
+  it("walks the selected proxy list and wraps", () => {
+    const listed = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"].map((id) => ({ id }))
+    expect(nextListedProxy(listed, "b")?.id).toBe("c")
+    expect(nextListedProxy(listed, "j")?.id).toBe("a")
+    expect(nextListedProxy([{ id: "only" }], "only")?.id).toBe("only")
+    expect(nextListedProxy(listed, null)?.id).toBe("a")
+  })
+
+  it("advances past the landing on the step when the task proxy is different", () => {
+    const listed: ReplayProxy[] = ["a", "b", "c"].map((id, index) => ({
+      host: `10.0.0.${index + 1}`,
+      id,
+      link: "same",
+      name: id,
+      password: "",
+      port: "3000",
+      safe: "",
+      tun: "",
+      username: "",
+    }))
+    const step = {
+      parameters: { landIp: "10.0.0.2", landPort: "3000", vless: "same" },
+      scopes: { landIp: "external", landPort: "external", vless: "external" },
+      sequence: 0,
+      skill: "IndependentV5S5",
+      sources: { landIp: "proxy.host", landPort: "proxy.port", vless: "proxy.link" },
+      textResourceId: null,
+    } satisfies ReplayStep
+    expect(nextListedProxy(listed, proxyIdForStep(step, listed, "a"))?.id).toBe("c")
   })
 
   it("takes the next text and wraps", () => {

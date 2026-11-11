@@ -5,6 +5,7 @@ import { AiStudio } from "./ai-studio"
 import { ApiLab } from "./api-lab"
 import "./behaviors.css"
 import { ChainList } from "./chain-list"
+import { MatchImages } from "./match-images"
 import { loadChains, touchChainTest } from "./chain-store"
 import { CloudPanel } from "./cloud-panel"
 import {
@@ -33,7 +34,7 @@ type BehaviorsPageProps = {
   readonly canWrite: boolean
 }
 
-type StudioTab = "chains" | "taskChains" | "ai" | "lab"
+type StudioTab = "chains" | "taskChains" | "images" | "ai" | "lab"
 
 const wait = (ms: number): Promise<void> =>
   new Promise((resolve) => {
@@ -43,6 +44,7 @@ const wait = (ms: number): Promise<void> =>
 const TAB_OPTIONS = [
   { label: "行为链", value: "chains" },
   { label: "任务链", value: "taskChains" },
+  { label: "匹配图", value: "images" },
   { label: "AI制定", value: "ai" },
   { label: "接口测试", value: "lab" },
 ] as const
@@ -370,7 +372,22 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
           body?.error === "备注无效" ||
           body?.error === "行为链名无效" ||
           body?.error === "没有外部概率" ||
-          body?.error === "没有文本池"
+          body?.error === "没有文本池" ||
+          body?.error === "出现条件为空" ||
+          body?.error === "滑动条件为空" ||
+          body?.error === "滑动距离无效" ||
+          body?.error === "方向无效" ||
+          body?.error === "index 无效" ||
+          body?.error === "间隔无效" ||
+          body?.error === "屏幕行为为空" ||
+          body?.error === "行为无效" ||
+          body?.error === "通过无效" ||
+          body?.error === "关注点无效" ||
+          body?.error === "条件为空" ||
+          body?.error === "次数无效" ||
+          body?.error === "序号无效" ||
+          body?.error === "文字为空" ||
+          body?.error === "滑动坐标无效"
           ? body.error
           : "下发失败"
       note(response.ok ? `${label} 已下发` : failure, response.ok)
@@ -468,6 +485,9 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
           ) : null}
           {tab === "taskChains" ? (
             <TaskChainList canWrite={canWrite} {...(canDelete === undefined ? {} : { canDelete })} />
+          ) : null}
+          {tab === "images" ? (
+            <MatchImages canWrite={canWrite} {...(canDelete === undefined ? {} : { canDelete })} />
           ) : null}
           {tab === "ai" ? <AiStudio canWrite={canWrite} onTest={runTest} /> : null}
           {tab === "lab" ? (

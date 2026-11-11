@@ -146,26 +146,30 @@ export const boxMatches = (
   const text = filter.keyword.trim().toLowerCase()
   const versionText = filter.version.trim().toLowerCase()
   const remarkIds = box.remarks.map((item) => item.id)
-  return combineChecks(filter.filterMode, [
-    filter.remarkFilters.includes("none") ? remarkIds.length === 0 : null,
-    ...(filter.remarkFilters.length > 0 && !filter.remarkFilters.includes("none")
-      ? filter.remarkFilters.map((id) => remarkIds.includes(id))
-      : []),
-    filter.groupFilter === "all" ? null : matchesLabel(filter.groupFilter, box.boxGroupId),
-    filter.presence === "all" ? null : box.status === filter.presence,
-    versionText.length > 0
-      ? `${box.version ?? ""} ${box.firmware}`.toLowerCase().includes(versionText)
-      : null,
-    text.length === 0
-      ? null
-      : [
-          ...box.remarks.map((item) => item.name),
-          box.boxGroupName ?? "",
-          box.host,
-          box.externalId,
-          box.sequenceNo === null ? "" : String(box.sequenceNo),
-        ].some((value) => value.toLowerCase().includes(text)),
-  ])
+  const keywordHit =
+    text.length === 0 ||
+    [
+      ...box.remarks.map((item) => item.name),
+      box.boxGroupName ?? "",
+      box.host,
+      box.externalId,
+      box.sequenceNo === null ? "" : String(box.sequenceNo),
+    ].some((value) => value.toLowerCase().includes(text))
+  const versionHit =
+    versionText.length === 0 ||
+    `${box.version ?? ""} ${box.firmware}`.toLowerCase().includes(versionText)
+  return (
+    keywordHit &&
+    versionHit &&
+    combineChecks(filter.filterMode, [
+      filter.remarkFilters.includes("none") ? remarkIds.length === 0 : null,
+      ...(filter.remarkFilters.length > 0 && !filter.remarkFilters.includes("none")
+        ? filter.remarkFilters.map((id) => remarkIds.includes(id))
+        : []),
+      filter.groupFilter === "all" ? null : matchesLabel(filter.groupFilter, box.boxGroupId),
+      filter.presence === "all" ? null : box.status === filter.presence,
+    ])
+  )
 }
 
 const loadCatalog = async (): Promise<{

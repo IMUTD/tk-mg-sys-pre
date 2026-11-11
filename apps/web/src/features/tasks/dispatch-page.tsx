@@ -319,7 +319,12 @@ export const DispatchListPage = ({ canWrite, groupId }: DispatchPageProps): Reac
   })
 
   const columns: TableColumnsType<DispatchRow> = [
-    { dataIndex: "name", title: "任务", width: 180 },
+    {
+      render: (_value: unknown, item: DispatchRow) =>
+        item.chainName.trim().length > 0 ? item.chainName : item.name,
+      title: "任务",
+      width: 180,
+    },
     {
       render: (_value: unknown, item: DispatchRow) => (
         <ProgressCell finished={item.taskFinished} tone={item.taskTone} total={item.taskCount} />
@@ -353,7 +358,6 @@ export const DispatchListPage = ({ canWrite, groupId }: DispatchPageProps): Reac
       title: "状态",
       width: 160,
     },
-    { dataIndex: "chainName", title: "任务链", width: 180 },
   ]
   const accountColumns: TableColumnsType<DispatchAccount> = [
     {

@@ -115,6 +115,20 @@ export const jumpWriteSideReady = (
   return jumpWritePair(parameters[fieldKey], parameters[valueKey]) !== null
 }
 
+export const directAccountWrite = (
+  fieldRaw: unknown,
+  valueRaw: unknown,
+): {
+  readonly field: JumpWriteField
+  readonly hit: boolean
+  readonly label: string
+  readonly value: string
+} | null => {
+  const pair = jumpWritePair(fieldRaw, valueRaw)
+  if (pair === null || pair.field === "") return null
+  return { field: pair.field, hit: true, label: jumpWriteFieldLabels[pair.field], value: pair.value }
+}
+
 export const jumpWriteBack = (
   count: unknown,
   parameters: Readonly<Record<string, string>> | null | undefined,

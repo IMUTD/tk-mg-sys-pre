@@ -1,9 +1,18 @@
 import { Button, Card, Form, Input, Select, Space } from "antd"
-import { type MutableRefObject, type ReactNode, useEffect, useState } from "react"
+import { Fragment, type MutableRefObject, type ReactNode, useEffect, useState } from "react"
 
 import { useAuth } from "../auth/auth-provider"
 import { apiByCode, createStep, groupedSkillOptions, paramLabel, type SkillSpec, skillCatalog } from "./rpa-api"
-import { applyScreenToParams, type DevicePoint } from "./screen-map"
+import {
+  applyScreenToParams,
+  type DevicePoint,
+  paramsForPhaseSwipe,
+  paramsForSwipeDirection,
+  type SwipeDirection,
+  swipeDirectionOf,
+  withInferredSwipeDirection,
+} from "./screen-map"
+import { foldedScreenSkills, orderScreenActKeys, screenActHeading, screenActPhase, screenActVisible } from "./screen-act"
 
 type LabRecord = {
   code: string
@@ -166,6 +175,7 @@ export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps)
 
   const groups: Array<{ items: SkillSpec[]; name: string }> = []
   for (const item of list) {
+    if (foldedScreenSkills.has(item.code)) continue
     const found = groups.find((group) => group.name === item.group)
     if (found === undefined) groups.push({ items: [item], name: item.group || "其他" })
     else found.items.push(item)
@@ -244,7 +254,14 @@ export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps)
     return (
       <Input
         aria-label={key}
-        onChange={(event) => setParams((current) => ({ ...current, [key]: event.target.value }))}
+        onChange={(event) =>
+          setParams((current) => {
+            const next = { ...current, [key]: event.target.value }
+            return spec.code === "Swipe" && (key === "x0" || key === "y0" || key === "x1" || key === "y1")
+              ? withInferredSwipeDirection(next)
+              : next
+          })
+        }
         value={params[key] ?? ""}
       />
     )
@@ -305,13 +322,107 @@ export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps)
             {spec?.hint ? <p className="behaviors-meta">{spec.hint}</p> : null}
             {spec === undefined
               ? null
-              : spec.params.map((key) => {
+              : (spec.code === "ScreenAct" ? orderScreenActKeys(params, spec.params) : spec.params).map((key) => {
+              if (spec.code === "ScreenAct" && !screenActVisible(params, key)) return null
+              const section =
+                spec.code === "SwipeWait" && key === "swipeText"
+                  ? "滑动"
+                  : spec.code === "SwipeWait" && key === "text"
+                    ? "出现后通过"
+                    : spec.code === "ScreenAct"
+                      ? screenActHeading(params, key)
+                      : ""
               const swipeRepeat = spec.code !== "SwipeNode" ? "" : params["repeatMode"] === "random" ? "random" : "fixed"
               if (swipeRepeat === "fixed" && (key === "repeatMin" || key === "repeatMax")) return null
               if (swipeRepeat === "random" && key === "repeatCount") return null
               return (
-                <Form.Item key={key} label={paramLabel(spec, key)}>
-                  {spec.code === "SwipeNode" && key === "repeatMode" ? (
+                <Fragment key={key}>
+                {section.length > 0 ? <div className="rpa-section">{section}</div> : null}
+                <Form.Item label={paramLabel(spec, key)}>
+                  {spec.code === "ScreenAct" && key.endsWith("Action") ? (
+                    <Select
+                      aria-label={key}
+                      onChange={(value) => setParams((current) => ({ ...current, [key]: value }))}
+                      options={[
+                        { label: "不执行", value: "" },
+                        { label: "OCR识别", value: "OcrClick" },
+                        { label: "新节点点击", value: "ClickArrangedNode" },
+                        { label: "节点点击", value: "ClickNode" },
+                        { label: "滑动", value: "Swipe" },
+                        { label: "节点滑动", value: "SwipeNode" },
+                        { label: "等待节点", value: "WaitNode" },
+                        { label: "持续滑动等待", value: "SwipeWait" },
+                      ]}
+                      value={params[key] ?? ""}
+                      virtual={false}
+                    />
+                  ) : spec.code === "ScreenAct" && key.endsWith("Pass") ? (
+                    <Select
+                      aria-label={key}
+                      onChange={(value) => setParams((current) => ({ ...current, [key]: value }))}
+                      options={[
+                        { label: "只要执行就算成功", value: "on" },
+                        { label: "必须命中", value: "off" },
+                      ]}
+                      value={(params[key] ?? "on") === "off" ? "off" : "on"}
+                      virtual={false}
+                    />
+                  ) : spec.code === "ScreenAct" && key.endsWith("Focus") ? (
+                    <Select
+                      aria-label={key}
+                      onChange={(value) => setParams((current) => ({ ...current, [key]: value }))}
+                      options={[
+                        { label: "整个画面", value: "" },
+                        { label: "左侧", value: "left" },
+                        { label: "右侧", value: "right" },
+                        { label: "上方", value: "above" },
+                        { label: "下方", value: "below" },
+                      ]}
+                      value={params[key] ?? ""}
+                      virtual={false}
+                    />
+                  ) : spec.code === "ScreenAct" && key.endsWith("Direction") ? (
+                    <Select<SwipeDirection>
+                      aria-label={key}
+                      onChange={(value) => setParams((current) => paramsForPhaseSwipe(current, screenActPhase(key), value))}
+                      options={[
+                        { label: "上", value: "up" },
+                        { label: "下", value: "down" },
+                        { label: "左", value: "left" },
+                        { label: "右", value: "right" },
+                      ]}
+                      value={
+                        params[key] === "down" || params[key] === "left" || params[key] === "right"
+                          ? params[key]
+                          : "up"
+                      }
+                      virtual={false}
+                    />
+                  ) : spec.code === "ScreenAct" && key.endsWith("RepeatMode") ? (
+                    <Select
+                      aria-label={key}
+                      onChange={(value) => setParams((current) => ({ ...current, [key]: value }))}
+                      options={[
+                        { label: "固定次数", value: "fixed" },
+                        { label: "随机次数", value: "random" },
+                      ]}
+                      value={params[key] === "random" ? "random" : "fixed"}
+                      virtual={false}
+                    />
+                  ) : spec.code === "Swipe" && key === "direction" ? (
+                    <Select<SwipeDirection>
+                      aria-label="方向"
+                      onChange={(value) => setParams((current) => paramsForSwipeDirection(current, value))}
+                      options={[
+                        { label: "上", value: "up" },
+                        { label: "下", value: "down" },
+                        { label: "左", value: "left" },
+                        { label: "右", value: "right" },
+                      ]}
+                      value={swipeDirectionOf(params)}
+                      virtual={false}
+                    />
+                  ) : spec.code === "SwipeNode" && key === "repeatMode" ? (
                     <Select
                       aria-label="次数"
                       onChange={(value) => setParams((current) => ({ ...current, [key]: value }))}
@@ -326,6 +437,7 @@ export const ApiLab = ({ applyScreen, onEnqueue, pending, skills }: ApiLabProps)
                     fieldControl(key)
                   )}
                 </Form.Item>
+                </Fragment>
               )
             })}
           </Form>

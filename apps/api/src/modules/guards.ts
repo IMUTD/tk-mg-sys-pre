@@ -19,12 +19,10 @@ export const guardCatalog: Record<
 export const normalizeGuards = (raw: unknown): GuardCode[] | null => {
   if (raw === undefined) return []
   if (!Array.isArray(raw)) return null
-  const picked = new Set<GuardCode>()
   for (const item of raw) {
     if (item !== "ad" && item !== "transcode") return null
-    picked.add(item)
   }
-  return guardOrder.filter((code) => picked.has(code))
+  return []
 }
 
 export const xmlHasText = (xml: string, marker: string): boolean => {

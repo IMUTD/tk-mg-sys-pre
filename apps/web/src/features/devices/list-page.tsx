@@ -310,25 +310,29 @@ export const DeviceListPage = ({
     const versionText = version.trim().toLowerCase()
     return (boxes.data ?? []).filter((box) => {
       const remarkIds = box.remarks.map((item) => item.id)
-      return combineChecks(filterMode, [
-        remarkFilters.includes("none") ? remarkIds.length === 0 : null,
-        ...(remarkFilters.length > 0 && !remarkFilters.includes("none")
-          ? remarkFilters.map((id) => remarkIds.includes(id))
-          : []),
-        groupFilter === "all" ? null : matchesLabel(groupFilter, box.boxGroupId),
-        presence === "all" ? null : box.status === presence,
-        versionText.length > 0
-          ? `${box.version ?? ""} ${box.firmware}`.toLowerCase().includes(versionText)
-          : null,
-        text.length === 0
-          ? null
-          : [
-              ...box.remarks.map((item) => item.name),
-              box.boxGroupName ?? "",
-              box.host,
-              box.externalId,
-            ].some((value) => value.toLowerCase().includes(text)),
-      ])
+      const keywordHit =
+        text.length === 0 ||
+        [
+          ...box.remarks.map((item) => item.name),
+          box.boxGroupName ?? "",
+          box.host,
+          box.externalId,
+        ].some((value) => value.toLowerCase().includes(text))
+      const versionHit =
+        versionText.length === 0 ||
+        `${box.version ?? ""} ${box.firmware}`.toLowerCase().includes(versionText)
+      return (
+        keywordHit &&
+        versionHit &&
+        combineChecks(filterMode, [
+          remarkFilters.includes("none") ? remarkIds.length === 0 : null,
+          ...(remarkFilters.length > 0 && !remarkFilters.includes("none")
+            ? remarkFilters.map((id) => remarkIds.includes(id))
+            : []),
+          groupFilter === "all" ? null : matchesLabel(groupFilter, box.boxGroupId),
+          presence === "all" ? null : box.status === presence,
+        ])
+      )
     })
   }, [boxes.data, filterMode, groupFilter, keyword, presence, remarkFilters, version])
   const paging = useClientPagination(

@@ -94,7 +94,12 @@ export const readStepSources = (
       sources[key] = "chance.external"
       continue
     }
-    if (skill === "SendText" && key === "text" && scopes[key] === "external" && declared === "pool.text") {
+    if (
+      (skill === "SendText" || skill === "ClickNode" || skill === "ClickJumpNodes") &&
+      key === "text" &&
+      scopes[key] === "external" &&
+      declared === "pool.text"
+    ) {
       sources[key] = "pool.text"
       continue
     }

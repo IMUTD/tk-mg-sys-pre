@@ -6,6 +6,7 @@ export type MytMaterial = {
   content: string
   createTime: string
   id: string
+  lastAccount?: string
   remark: string
   tag: string
   tags?: readonly string[]
@@ -77,11 +78,14 @@ export const filterTextPool = (
 ): MytMaterial[] =>
   materials.filter((item) => {
     const labels = materialLabelSet(item)
-    return combineChecks(filter.mode, [
-      ...filter.tags.map((tag) => labels.includes(tag)),
-      filter.untagged ? labels.length === 0 : null,
-      matchesKeyword(item, filter.keyword),
-    ])
+    const keywordHit = matchesKeyword(item, filter.keyword)
+    return (
+      keywordHit !== false &&
+      combineChecks(filter.mode, [
+        ...filter.tags.map((tag) => labels.includes(tag)),
+        filter.untagged ? labels.length === 0 : null,
+      ])
+    )
   })
 
 export const materialStatistics = (materials: readonly MytMaterial[]): MaterialTagStatistic[] => {

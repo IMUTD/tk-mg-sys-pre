@@ -1,3 +1,5 @@
+import { orderScreenActKeys } from "./screen-act"
+
 export const RPA_API_OPTIONS = [
   {
     code: "CheckLive",
@@ -43,10 +45,17 @@ export const RPA_API_OPTIONS = [
   },
   {
     code: "Swipe",
-    defaults: { millis: "400", x0: "360", x1: "360", y0: "1100", y1: "420" },
+    defaults: { direction: "up", millis: "400", x0: "360", x1: "360", y0: "1100", y1: "420" },
     group: "触摸",
     name: "滑动",
-    params: ["x0", "y0", "x1", "y1", "millis"],
+    options: [
+      { label: "上", value: "up" },
+      { label: "下", value: "down" },
+      { label: "左", value: "left" },
+      { label: "右", value: "right" },
+    ],
+    paramLabels: { direction: "方向" },
+    params: ["direction", "x0", "y0", "x1", "y1", "millis"],
   },
   {
     code: "KeyPress",
@@ -300,7 +309,9 @@ export const setAnchorFields = (next: readonly AnchorField[]): void => {
 export const anchorFieldList = (): readonly AnchorField[] => anchorFields
 
 export const anchorFieldLabel = (source: string | undefined): string =>
-  anchorFields.find((item) => item.source === source)?.label ?? ""
+  source === "pool.text"
+    ? "文本池"
+    : (anchorFields.find((item) => item.source === source)?.label ?? "")
 
 export type AnchorKey = {
   key: "id" | "identifier"
@@ -328,12 +339,18 @@ export type ChainStep = {
   sources: Record<string, string>
 }
 
+export type ChainRemark = {
+  id: string
+  name: string
+}
+
 export type BehaviorChain = {
   anchor: ChainAnchor | null
   id: string
   lastTestAt: string
   name: string
   origin: ChainOrigin
+  remarks: ChainRemark[]
   steps: ChainStep[]
   updateTime: string
 }
@@ -372,7 +389,11 @@ export const stepText = (step: ChainStep): string => {
         return field.length === 0 ? [] : [`${label}=${field}`]
       }
       const value = step.params[key] ?? ""
-      if (key === "steps" && step.api === "CheckLive" && (step.params["jumpWhen"] ?? "off") === "off") {
+      if (
+        key === "steps" &&
+        step.api === "CheckLive" &&
+        (step.params["jumpWhen"] ?? "off") === "off"
+      ) {
         return []
       }
       if (key === "writeOnSuccessValue" || key === "writeOnFailureValue") return []
@@ -380,8 +401,9 @@ export const stepText = (step: ChainStep): string => {
         if (value.length === 0) return []
         const side = key === "writeOnSuccessField" ? "成功写回" : "失败写回"
         const written = (
-          step.params[key === "writeOnSuccessField" ? "writeOnSuccessValue" : "writeOnFailureValue"] ??
-          ""
+          step.params[
+            key === "writeOnSuccessField" ? "writeOnSuccessValue" : "writeOnFailureValue"
+          ] ?? ""
         ).trim()
         const names: Record<string, string> = {
           avatar: "头像地址",
@@ -401,8 +423,7 @@ export const stepText = (step: ChainStep): string => {
         if (value === "off" || value.trim().length === 0) return []
         return [`${label}=${value === "failure" ? "失败时" : "成功时"}`]
       }
-      const shown =
-        spec?.options === undefined ? value : optionLabel(spec, value)
+      const shown = spec?.options === undefined ? value : optionLabel(spec, value)
       return value.trim().length === 0 ? [] : [`${label}=${shown}`]
     })
     .join(" ")
@@ -469,32 +490,58 @@ export const createStep = (api: RpaApiCode, id: number): ChainStep => {
   }
 }
 
-const guardOrder: readonly GuardCode[] = ["ad", "transcode"]
+const nasApis = new Set([
+  "ExportAndroidContainer",
+  "DeleteExtraBackup",
+  "ImportPitBackup",
+  "UploadPitImage",
+  "UploadPitVideo",
+])
+
+export const orderedParamKeys = (
+  api: string,
+  params: Readonly<Record<string, string | undefined>>,
+): string[] => {
+  const spec = apiByCode(api)
+  const keys: string[] = []
+  const push = (key: string): void => {
+    if (key === "nasKey" || keys.includes(key)) return
+    keys.push(key)
+  }
+  for (const key of spec?.params ?? []) push(key)
+  if (nasApis.has(api)) {
+    push("useNas")
+    push("nasId")
+  }
+  for (const key of Object.keys(params)) push(key)
+  if (api === "ScreenAct") return orderScreenActKeys(params, keys)
+  return keys
+}
 
 export const publishChainSteps = (steps: readonly ChainStep[]): ChainStep[] =>
-  steps.map((step) => ({
-    ...step,
-    delayMs: normalizeDelay(step.delayMs),
-    remark: (step.remark ?? "").trim(),
-    guards: guardOrder.filter((code) => (step.guards ?? []).includes(code)),
-    params: Object.fromEntries(
-      Object.entries(step.params).map(([key, value]) => [
-        key,
-        step.scopes?.[key] === "external" ? "" : value,
-      ]),
-    ),
-    scopes: { ...(step.scopes ?? {}) },
-    sources: Object.fromEntries(
-      Object.keys(step.params).map((key) => [
-        key,
-        step.scopes?.[key] !== "external"
-          ? "literal"
-          : step.api === "ClickJumpNodes" && key === "clickChance"
-            ? "chance.external"
-            : (step.sources?.[key] ?? ""),
-      ]),
-    ),
-  }))
+  steps.map((step) => {
+    const keys = orderedParamKeys(step.api, step.params).filter((key) => key in step.params)
+    return {
+      ...step,
+      delayMs: normalizeDelay(step.delayMs),
+      remark: (step.remark ?? "").trim(),
+      guards: [],
+      params: Object.fromEntries(
+        keys.map((key) => [key, step.scopes?.[key] === "external" ? "" : (step.params[key] ?? "")]),
+      ),
+      scopes: { ...(step.scopes ?? {}) },
+      sources: Object.fromEntries(
+        keys.map((key) => [
+          key,
+          step.scopes?.[key] !== "external"
+            ? "literal"
+            : step.api === "ClickJumpNodes" && key === "clickChance"
+              ? "chance.external"
+              : (step.sources?.[key] ?? ""),
+        ]),
+      ),
+    }
+  })
 
 export const createSeedDevices = (): CloudDevice[] => []
 

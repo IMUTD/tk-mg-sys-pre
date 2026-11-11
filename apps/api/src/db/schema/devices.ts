@@ -129,7 +129,15 @@ export const businessLabels = pgTable(
     kind: text("kind").$type<"remark" | "group">().notNull(),
     scope: text("scope")
       .$type<
-        "device" | "account" | "account-tag" | "proxy" | "resource" | "registration" | "legacy"
+        | "device"
+        | "account"
+        | "account-tag"
+        | "proxy"
+        | "resource"
+        | "registration"
+        | "legacy"
+        | "behavior"
+        | "task-chain"
       >()
       .notNull()
       .default("legacy"),
@@ -145,7 +153,7 @@ export const businessLabels = pgTable(
     check("business_label_kind_check", sql`${table.kind} in ('remark', 'group')`),
     check(
       "business_label_scope_check",
-      sql`${table.scope} in ('device', 'account', 'account-tag', 'proxy', 'resource', 'registration', 'legacy')`,
+      sql`${table.scope} in ('device', 'account', 'account-tag', 'proxy', 'resource', 'registration', 'legacy', 'behavior', 'task-chain')`,
     ),
     check("business_label_name_check", sql`length(trim(${table.name})) > 0`),
   ],

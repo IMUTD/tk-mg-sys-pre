@@ -87,6 +87,8 @@ describe("AccountsListPage", () => {
     const recycle = await screen.findByRole("dialog")
     await waitFor(() => expect(within(recycle).getByText("user.bravo")).toBeVisible())
     expect(within(recycle).getByText("recycled.one")).toBeVisible()
+    expect(within(recycle).getByRole("button", { name: "批量删除" })).toBeDisabled()
+    expect(within(recycle).getAllByRole("button", { name: "删除" }).length).toBeGreaterThan(0)
     await user.click(within(recycle).getByLabelText("选择 user.bravo"))
     await user.click(within(recycle).getByRole("button", { name: "批量恢复" }))
     const restoreDialog = (await screen.findAllByRole("dialog")).at(-1)

@@ -24,8 +24,8 @@ describe("guard scripts", () => {
     expect(guardCatalog.transcode.probe.skill).toBe("DumpNodeXmlEx")
   })
 
-  it("keeps ad before transcode", () => {
-    expect(normalizeGuards(["transcode", "ad", "ad"])).toEqual(["ad", "transcode"])
+  it("drops the retired ad and transcode switches", () => {
+    expect(normalizeGuards(["transcode", "ad", "ad"])).toEqual([])
     expect(normalizeGuards(["nope"])).toBeNull()
   })
 })

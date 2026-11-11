@@ -5,6 +5,7 @@ type StoredResource = {
   readonly category: string
   readonly createdAt: string
   readonly id: string
+  readonly lastAccount?: string
   readonly lastAssignedAt?: string | null
   readonly name: string
   readonly note: string
@@ -46,6 +47,7 @@ const toMaterial = (item: StoredResource): MytMaterial => ({
   content: item.name,
   createTime: formatTime(item.createdAt) ?? nowText(),
   id: item.id,
+  lastAccount: item.lastAccount ?? "",
   remark: item.note,
   tag: item.category,
   tags: item.tags ?? [],

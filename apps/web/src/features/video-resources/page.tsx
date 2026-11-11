@@ -18,6 +18,7 @@ import { filteredRowSelection } from "../../components/tables/filtered-selection
 
 type ShareFile = {
   id: string
+  lastAccount?: string
   mtime: string | null
   name: string
   path: string
@@ -182,6 +183,17 @@ export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): 
             ? requested
             : "text"
   const backup = category === "backup"
+  const tableColumns = useMemo((): TableColumnsType<ShareFile> => {
+    if (category !== "image" && category !== "video") return columns
+    const next = [...columns]
+    next.splice(3, 0, {
+      dataIndex: "lastAccount",
+      ellipsis: true,
+      title: "上次账号",
+      width: 160,
+    })
+    return next
+  }, [category])
   const canTransfer = category === "video" || category === "image" || backup
   const [boxes, setBoxes] = useState<ShareBox[]>([])
   const [nasGroups, setNasGroups] = useState<NasGroup[]>([])
@@ -554,7 +566,7 @@ export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): 
         const grouped = backup ? backupFolders(group.files, group.directories ?? []) : null
         const fileTable = (files: readonly ShareFile[]): ReactNode => (
           <Table
-            columns={columns}
+            columns={tableColumns}
             dataSource={[...files]}
             pagination={false}
             rowKey="id"
@@ -638,7 +650,7 @@ export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): 
                 items={box.directories.map((dir) => ({
                   children: (
                     <Table
-                      columns={columns}
+                      columns={tableColumns}
                       dataSource={dir.files}
                       pagination={false}
                       rowKey="id"

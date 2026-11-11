@@ -7,13 +7,11 @@ describe("defaultPagesForRole", () => {
     const pages = defaultPagesForRole("operator")
     const devices = pages.find((page) => page.key === PageKey.Devices)
     const members = pages.find((page) => page.key === PageKey.Members)
-    const mall = pages.find((page) => page.key === PageKey.MallRecords)
     const videoPool = pages.find((page) => page.key === PageKey.StudioVideoPool)
     const workLogs = pages.find((page) => page.key === PageKey.WorkLogs)
     const overview = pages.find((page) => page.key === PageKey.Overview)
     expect(devices).toEqual({ canDelete: false, canView: true, key: PageKey.Devices })
     expect(members).toEqual({ canDelete: false, canView: false, key: PageKey.Members })
-    expect(mall).toEqual({ canDelete: false, canView: false, key: PageKey.MallRecords })
     expect(videoPool).toEqual({ canDelete: false, canView: true, key: PageKey.StudioVideoPool })
     expect(workLogs).toEqual({ canDelete: false, canView: false, key: PageKey.WorkLogs })
     expect(overview).toEqual({ canDelete: false, canView: true, key: PageKey.Overview })
@@ -21,7 +19,7 @@ describe("defaultPagesForRole", () => {
 
   it("gives department directors delete on their own pages and resource center", () => {
     const sales = defaultPagesForRole("sales_director").find(
-      (page) => page.key === PageKey.MallRecords,
+      (page) => page.key === PageKey.StudioTextPool,
     )
     const ops = defaultPagesForRole("operations_director").find(
       (page) => page.key === PageKey.Devices,
@@ -36,7 +34,7 @@ describe("defaultPagesForRole", () => {
     const engineeringDirector = defaultPagesForRole("engineering_director").find(
       (page) => page.key === PageKey.StudioTextPool,
     )
-    expect(sales).toEqual({ canDelete: true, canView: true, key: PageKey.MallRecords })
+    expect(sales).toEqual({ canDelete: true, canView: true, key: PageKey.StudioTextPool })
     expect(ops).toEqual({ canDelete: true, canView: true, key: PageKey.Devices })
     expect(opsResource).toEqual({ canDelete: true, canView: true, key: PageKey.StudioVideoPool })
     expect(opsLogs).toEqual({ canDelete: false, canView: false, key: PageKey.WorkLogs })
@@ -59,6 +57,9 @@ describe("defaultPagesForRole", () => {
     expect(permissionsForPages(defaultPagesForRole("operator"))).toContain("devices:write")
     expect(permissionsForPages(defaultPagesForRole("salesperson"))).not.toContain("devices:read")
     expect(permissionsForPages(defaultPagesForRole("salesperson"))).toContain("resources:read")
+    expect(defaultPagesForRole("salesperson").some((page) => page.key.startsWith("/mall"))).toBe(
+      false,
+    )
   })
 
   it("ignores stored work-log grants and overview delete for non-admins", () => {

@@ -185,7 +185,8 @@ export const registerNasAgentRoutes = (
     const found = existing[0]
     if (found !== undefined) {
       await sql`
-        update box_share_entry set dest_dir = ${directory}, phone_name = ${stamped.phoneName}, saved_at = ${stamped.namedAt}
+        update box_share_entry set dest_dir = ${directory}, phone_name = ${stamped.phoneName},
+          saved_at = ${stamped.namedAt}, mtime = ${stamped.namedAt}
         where id = ${found.id}::uuid and place = 'nas'
       `
       return context.json({ action: "replace", entryId: found.id })
@@ -194,10 +195,10 @@ export const registerNasAgentRoutes = (
     const rows = await sql<{ id: string }[]>`
       insert into box_share_entry (
         device_id, bucket, relative_path, parent_path, name, kind, category, size_bytes, sha256, last_scan_id,
-        phone_name, saved_at, assignee_user_id, box_online, place, dest_dir
+        phone_name, saved_at, mtime, assignee_user_id, box_online, place, dest_dir
       ) values (
         ${device.deviceId}::uuid, 'backup', ${name}, '', ${name}, 'file', 'other', ${Math.trunc(size)}, ${sha}, ${scanId}::uuid,
-        ${stamped.phoneName}, ${stamped.namedAt}, ${device.assigneeUserId}::uuid,
+        ${stamped.phoneName}, ${stamped.namedAt}, ${stamped.namedAt}, ${device.assigneeUserId}::uuid,
         (select status = 'online' and enabled from device where id = ${device.deviceId}::uuid),
         'box', ${directory}
       )
@@ -206,6 +207,7 @@ export const registerNasAgentRoutes = (
         sha256 = excluded.sha256,
         phone_name = excluded.phone_name,
         saved_at = excluded.saved_at,
+        mtime = excluded.mtime,
         dest_dir = excluded.dest_dir,
         seen_at = now()
       where box_share_entry.place = 'box'
@@ -281,6 +283,7 @@ export const registerNasAgentRoutes = (
         size_bytes = ${Math.trunc(size)},
         sha256 = ${sha},
         saved_at = ${savedAt},
+        mtime = case when ${kind} = 'backup' then ${savedAt} else mtime end,
         seen_at = now()
       where id = ${targetId}::uuid and assignee_user_id = ${device.assigneeUserId}::uuid
     `

@@ -6,7 +6,9 @@ import {
   assertNoActiveAccountLeases,
   assertNoActiveAccountResourceAllocations,
   assertNoActiveTaskClaims,
+  OperationDeleteConflictError,
 } from "../../lib/operation-claim-guard"
+import { clearLastAccount } from "../last-account"
 import { type AccountDesk, createAccountDesk } from "./desk"
 
 export const OperationAccountIdSchema = z.string().uuid().brand<"OperationAccountId">()
@@ -463,6 +465,44 @@ const resolveBinding = async (
   }
 }
 
+const releaseDispatchAccounts = async (
+  transaction: TransactionSql,
+  groupId: GroupId,
+  accountIds: readonly string[],
+): Promise<void> => {
+  if (accountIds.length === 0) return
+  await transaction`
+    update operation_dispatch_item
+    set account_id = null
+    where group_id = ${groupId}
+      and account_id = any(${accountIds})
+      and device_id is not null
+      and instance_index is not null
+  `
+  const leftover = await transaction<{ readonly id: string }[]>`
+    select id from operation_dispatch_item
+    where group_id = ${groupId} and account_id = any(${accountIds})
+  `
+  const itemIds = leftover.map((row) => row.id)
+  if (itemIds.length === 0) return
+  const active = await transaction<{ readonly id: string }[]>`
+    select id from execution_task
+    where dispatch_item_id = any(${itemIds})
+      and status::text = any(${["queued", "dispatching", "running", "ood", "needs_reconciliation"]})
+    limit 1
+  `
+  if (active[0] !== undefined) throw new OperationDeleteConflictError()
+  await transaction`
+    update execution_task
+    set dispatch_item_id = null
+    where dispatch_item_id = any(${itemIds})
+  `
+  await transaction`
+    delete from operation_dispatch_item
+    where group_id = ${groupId} and id = any(${itemIds})
+  `
+}
+
 const lockAccounts = async (
   transaction: Sql | TransactionSql,
   groupId: GroupId,
@@ -566,6 +606,7 @@ export const createPostgresAccountRepository = (client: Sql): AccountRepository 
         await assertNoActiveTaskClaims(transaction, groupId, "account", entityIds)
         await assertNoActiveAccountLeases(transaction, groupId, entityIds)
         await assertNoActiveAccountResourceAllocations(transaction, groupId, entityIds)
+        await releaseDispatchAccounts(transaction, groupId, entityIds)
         const rows = await transaction<{ readonly id: string }[]>`
         delete from operation_account where group_id = ${groupId} and id = any(${entityIds}) and deleted = true returning id
       `
@@ -597,6 +638,8 @@ export const createPostgresAccountRepository = (client: Sql): AccountRepository 
         where group_id = ${groupId} and id = any(${entityIds}) and deleted = false
         returning id
       `
+        const removed = rows.map((item) => item.id)
+        if (removed.length > 0) await clearLastAccount(transaction, removed)
         return rows.length
       })
     },

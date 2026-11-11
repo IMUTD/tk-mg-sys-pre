@@ -5,6 +5,7 @@ import type { Sql } from "postgres"
 import type { SecretCipher } from "../../lib/crypto"
 import { listDeskAccounts, readDeskQuery } from "../account-pool/desk-pool"
 import { fingerprint } from "../box-contract"
+import { remarkMap } from "../chain-remarks"
 import { parseCredentials } from "../proxies/configuration"
 import { skillCatalog } from "../skills"
 import { nodeNameOf } from "../step-remark"
@@ -37,6 +38,7 @@ import {
   type TextMaterial,
   textAssignments,
   usesExternalChance,
+  usesExternalText,
 } from "./fill"
 import { languageCatalog, languageCodes, languageParameter } from "./languages"
 import { regionCodes, regionContinents, regionParameter } from "./regions"
@@ -44,6 +46,8 @@ import {
   applyReplayChoices,
   choicesMatch,
   isIndependentProxyStep,
+  nextListedProxy,
+  proxyIdForStep,
   type ReplayChoice,
   type ReplayStep,
   readReplaySelection,
@@ -53,6 +57,7 @@ import {
   redrawText,
   replayOffers,
 } from "./replay"
+import { rememberDrawnAccount } from "../last-account"
 import { accountRunStatus, dispatchRunStatus, displayRunStatus } from "./run-status"
 
 const skillNames = new Map(skillCatalog.map((item) => [item.code, item.name]))
@@ -329,7 +334,7 @@ const chainSteps = (row: {
 }): ChainStep[] =>
   (row.parameters ?? []).map((item, index) => ({
     afterMs: row.delays?.[index] ?? 0,
-    guards: row.guards?.[index] ?? [],
+    guards: (row.guards?.[index] ?? []).filter((code) => code !== "ad" && code !== "transcode"),
     input: asRecord(item.input),
     remark: row.remarks?.[index] ?? "",
     scopes: asRecord(row.paramScopes?.[index]),
@@ -898,7 +903,7 @@ export const planDispatch = (
       ...(containerMissing ? ["容器名"] : []),
       ...(proxyMissing ? ["proxy"] : []),
       ...filled.flatMap((step) =>
-        step.skill === "SendText" && step.missingKeys.includes("text")
+        usesExternalText(step) && step.missingKeys.includes("text")
           ? [
               (step.stagePosition ?? 0) === 0
                 ? `text:${step.sequence}`
@@ -1381,14 +1386,18 @@ export const createDispatchRepository = (
           : ready.filter((item) => item.tags.includes(selection.proxyTag ?? ""))
     const proxyPool = constrain ? tagged : ready
     const proxy = redrawProxy(proxyPool, first.proxyId)
+    const listedOrder = selection.proxyIds.length > 0 ? selection.proxyIds : proxyPool.map((item) => item.id)
+    const listed = listedOrder.flatMap((id) => {
+      const item = proxyPool.find((proxyItem) => proxyItem.id === id)
+      return item === undefined ? [] : [item]
+    })
     const stepProxies = new Map<number, NonNullable<typeof proxy>>()
     for (const choice of choices) {
       if (choice.kind !== "proxy" || choice.mode !== "redraw" || choice.sequence === undefined)
         continue
-      const picked = redrawProxy(
-        proxyPool.filter((item) => item.id !== first.proxyId),
-        first.proxyId,
-      )
+      const step = steps.find((item) => item.sequence === choice.sequence)
+      const currentId = step === undefined ? null : proxyIdForStep(step, listed, first.proxyId)
+      const picked = nextListedProxy(listed, currentId)
       if (picked !== null) stepProxies.set(choice.sequence, picked)
     }
     const materials = await tx<TextMaterial[]>`
@@ -1706,6 +1715,7 @@ export const createDispatchRepository = (
       const taskChains: {
         id: string
         name: string
+        remarks: { id: string; name: string }[]
         stages: {
           anchor: { key: "id" | "identifier"; table: "operation_account" } | null
           chainId: string
@@ -1723,7 +1733,7 @@ export const createDispatchRepository = (
       for (const row of taskChainRows) {
         let chain = taskChains.find((item) => item.id === row.id)
         if (chain === undefined) {
-          chain = { id: row.id, name: row.name, stages: [] }
+          chain = { id: row.id, name: row.name, remarks: [], stages: [] }
           taskChains.push(chain)
         }
         chain.stages.push({
@@ -1747,6 +1757,12 @@ export const createDispatchRepository = (
           })),
         })
       }
+      const taskRemarks = await remarkMap(
+        sql,
+        "task-chain",
+        taskChains.map((chain) => chain.id),
+      )
+      for (const chain of taskChains) chain.remarks = taskRemarks.get(chain.id) ?? []
       return {
         accountGroups: accountGroups.map((row) => row.name),
         accountTags: accountTags.map((row) => row.name),
@@ -2096,6 +2112,13 @@ export const createDispatchRepository = (
                 ${refreshOn.has(`${step.stagePosition ?? 0}:${step.sequence}`)},
                 ${step.remark ?? ""}
               )`
+            await rememberDrawnAccount(
+              tx,
+              item.accountId,
+              step.textResourceId,
+              step.parameters["图片ID"],
+              step.parameters["视频ID"],
+            )
           }
         }
       })
@@ -2662,6 +2685,13 @@ export const createDispatchRepository = (
                 ${inspected.instanceId}::uuid, ${tx.json(row.guards)}, ${row.afterMs},
                 ${row.remark}, ${skillNodeName(row.skill)}
               )`
+            await rememberDrawnAccount(
+              tx,
+              inspected.accountId,
+              applied?.textResourceId,
+              typeof input["图片ID"] === "string" ? input["图片ID"] : null,
+              typeof input["视频ID"] === "string" ? input["视频ID"] : null,
+            )
           }
           if (inspected.applied.proxyId !== null) {
             await tx`

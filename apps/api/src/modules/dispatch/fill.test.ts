@@ -154,6 +154,27 @@ describe("dispatch fill", () => {
     )
     expect(named.parameters["text"]).toBe("user-a")
     expect(named.textResourceId).toBeNull()
+    const clicked = fillStep(
+      {
+        input: { text: "" },
+        scopes: { text: "external" },
+        skill: "ClickNode",
+        sources: { text: "pool.text" },
+      },
+      drawn,
+    )
+    expect(clicked.parameters["text"]).toBe("抽到的文案")
+    expect(clicked.textResourceId).toBe("text-1")
+    const jumped = fillStep(
+      {
+        input: { clickChance: "100", text: "" },
+        scopes: { clickChance: "internal", text: "external" },
+        skill: "ClickJumpNodes",
+        sources: { clickChance: "literal", text: "pool.text" },
+      },
+      drawn,
+    )
+    expect(jumped.parameters).toEqual({ clickChance: "100", text: "抽到的文案" })
   })
 
   it("requires one text pool for each external text step and rejects extras", () => {
@@ -177,6 +198,19 @@ describe("dispatch fill", () => {
       "text_not_allowed",
     )
     expect(textAssignments(steps, [{ ids: [], sequence: 0, stage: 0 }])).toBe("text_required")
+    expect(
+      textAssignments(
+        [
+          {
+            scopes: { text: "external" },
+            skill: "ClickJumpNodes",
+            sources: { text: "pool.text" },
+            stagePosition: 1,
+          },
+        ],
+        [{ ids: ["text-2"], sequence: 0, stage: 1 }],
+      ),
+    ).toBe("ok")
   })
 
   it("uses the accelerator V2 link when the landing proxy has none", () => {
@@ -423,6 +457,166 @@ describe("dispatch fill", () => {
     )
     expect(filled.parameters["countryCode"]).toBe("JP")
     expect(filled.parameters["language"]).toBeUndefined()
+  })
+
+  it("fills empty create coordinates from the task region", () => {
+    const filled = fillStep(
+      {
+        input: { countryCode: "", latitude: "", longitude: "", name: "" },
+        scopes: {
+          countryCode: "internal",
+          latitude: "internal",
+          longitude: "internal",
+          name: "internal",
+        },
+        skill: "CreateAndroid",
+        sources: {
+          countryCode: "literal",
+          latitude: "literal",
+          longitude: "literal",
+          name: "literal",
+        },
+      },
+      context({ region: "US" }),
+    )
+    expect(filled.parameters["countryCode"]).toBe("US")
+    expect(filled.parameters["latitude"]).toBe("40.7128")
+    expect(filled.parameters["longitude"]).toBe("-74.0060")
+    expect(filled.missingKeys).toEqual([])
+  })
+
+  it("leaves create coordinates empty when the task has no region", () => {
+    const filled = fillStep(
+      {
+        input: { countryCode: "JP", latitude: "", longitude: "" },
+        scopes: { countryCode: "internal", latitude: "internal", longitude: "internal" },
+        skill: "CreateAndroid",
+        sources: { countryCode: "literal", latitude: "literal", longitude: "literal" },
+      },
+      context(),
+    )
+    expect(filled.parameters["countryCode"]).toBe("JP")
+    expect(filled.parameters["latitude"]).toBe("")
+    expect(filled.parameters["longitude"]).toBe("")
+  })
+
+  it("keeps handwritten coordinates when a region is selected", () => {
+    const filled = fillStep(
+      {
+        input: { countryCode: "", latitude: "39.9000", longitude: "116.4000" },
+        scopes: { countryCode: "internal", latitude: "internal", longitude: "internal" },
+        skill: "CreateAndroid",
+        sources: { countryCode: "literal", latitude: "literal", longitude: "literal" },
+      },
+      context({ region: "JP" }),
+    )
+    expect(filled.parameters["countryCode"]).toBe("JP")
+    expect(filled.parameters["latitude"]).toBe("39.9000")
+    expect(filled.parameters["longitude"]).toBe("116.4000")
+  })
+
+  it("does not complete a single handwritten coordinate", () => {
+    const filled = fillStep(
+      {
+        input: { countryCode: "", latitude: "39.9000", longitude: "" },
+        scopes: { countryCode: "internal", latitude: "internal", longitude: "internal" },
+        skill: "CreateAndroid",
+        sources: { countryCode: "literal", latitude: "literal", longitude: "literal" },
+      },
+      context({ region: "US" }),
+    )
+    expect(filled.parameters["latitude"]).toBe("39.9000")
+    expect(filled.parameters["longitude"]).toBe("")
+  })
+
+  it("fills empty reset coordinates from the same region table", () => {
+    const filled = fillStep(
+      {
+        input: { countryCode: "", latitude: "  ", longitude: "" },
+        scopes: { countryCode: "internal", latitude: "internal", longitude: "internal" },
+        skill: "ResetAndroidContainer",
+        sources: { countryCode: "literal", latitude: "literal", longitude: "literal" },
+      },
+      context({ region: "JP" }),
+    )
+    expect(filled.parameters["countryCode"]).toBe("JP")
+    expect(filled.parameters["latitude"]).toBe("35.6762")
+    expect(filled.parameters["longitude"]).toBe("139.6503")
+  })
+
+  it("does not add coordinates to a model switch or send text", () => {
+    const model = fillStep(
+      {
+        input: { countryCode: "" },
+        scopes: { countryCode: "internal" },
+        skill: "SwitchAndroidPhoneModel",
+        sources: { countryCode: "literal" },
+      },
+      context({ region: "US" }),
+    )
+    expect(model.parameters).toEqual({ countryCode: "US" })
+    const text = fillStep(
+      {
+        input: { text: "原文" },
+        scopes: { text: "internal" },
+        skill: "SendText",
+        sources: { text: "literal" },
+      },
+      context({ region: "JP" }),
+    )
+    expect(text.parameters).toEqual({ text: "原文" })
+  })
+
+  it("keeps a resolved external latitude and fills only when both external coordinates are empty", () => {
+    const kept = fillStep(
+      {
+        input: { countryCode: "", latitude: "", longitude: "" },
+        scopes: { countryCode: "internal", latitude: "external", longitude: "external" },
+        skill: "CreateAndroid",
+        sources: {
+          countryCode: "literal",
+          latitude: "account.region",
+          longitude: "account.language",
+        },
+      },
+      context({ account: { ...account, language: "", region: "39.9000" }, region: "JP" }),
+    )
+    expect(kept.parameters["countryCode"]).toBe("JP")
+    expect(kept.parameters["latitude"]).toBe("39.9000")
+    expect(kept.parameters["longitude"]).toBe("")
+    expect(kept.missingKeys).toEqual(["longitude"])
+    const filled = fillStep(
+      {
+        input: { countryCode: "", latitude: "", longitude: "" },
+        scopes: { countryCode: "external", latitude: "external", longitude: "external" },
+        skill: "CreateAndroid",
+        sources: {
+          countryCode: "account.region",
+          latitude: "account.backup_name",
+          longitude: "account.language",
+        },
+      },
+      context({ account: { ...account, backupName: "", language: "", region: "随便写" }, region: "JP" }),
+    )
+    expect(filled.parameters["countryCode"]).toBe("JP")
+    expect(filled.parameters["latitude"]).toBe("35.6762")
+    expect(filled.parameters["longitude"]).toBe("139.6503")
+    expect(filled.missingKeys).toEqual([])
+  })
+
+  it("does not turn an account region into coordinates", () => {
+    const filled = fillStep(
+      {
+        input: { countryCode: "", latitude: "", longitude: "" },
+        scopes: { countryCode: "external", latitude: "internal", longitude: "internal" },
+        skill: "CreateAndroid",
+        sources: { countryCode: "account.region", latitude: "literal", longitude: "literal" },
+      },
+      context({ account: { ...account, region: "东京" } }),
+    )
+    expect(filled.parameters["countryCode"]).toBe("东京")
+    expect(filled.parameters["latitude"]).toBe("")
+    expect(filled.parameters["longitude"]).toBe("")
   })
 
   it("does not apply a task region to send text", () => {

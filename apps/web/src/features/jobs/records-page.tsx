@@ -3,6 +3,7 @@ import { App, Button, Card, Input, Space, Table, type TableColumnsType } from "a
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
 import {
+  combineChecks,
   type FilterMode,
   FilterModeSwitch,
   pageSlice,
@@ -279,10 +280,11 @@ const SeedRecords = (): ReactNode => {
   const rows = useMemo(
     () =>
       createSeedTaskLogs().filter((item) => {
-        if (keyword.length === 0) return true
-        return item.feature.includes(keyword) || item.content.includes(keyword)
+        const hit =
+          keyword.length === 0 || item.feature.includes(keyword) || item.content.includes(keyword)
+        return hit && combineChecks(filterMode, [])
       }),
-    [keyword],
+    [filterMode, keyword],
   )
 
   return (

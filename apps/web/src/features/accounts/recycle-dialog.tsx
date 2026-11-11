@@ -17,15 +17,19 @@ import {
 
 type RecycleDialogProps = {
   readonly accounts: readonly MytAccount[]
+  readonly canDelete: boolean
   readonly canWrite: boolean
   readonly onCancel: () => void
+  readonly onDelete: (ids: readonly number[]) => void
   readonly onRestore: (ids: readonly number[]) => void
 }
 
 export const RecycleDialog = ({
   accounts,
+  canDelete,
   canWrite,
   onCancel,
+  onDelete,
   onRestore,
 }: RecycleDialogProps): ReactNode => {
   const [draft, setDraft] = useState<AccountQuery>(emptyAccountQuery())
@@ -133,6 +137,16 @@ export const RecycleDialog = ({
             批量恢复
           </Button>
         ) : null}
+        {canWrite && canDelete ? (
+          <Button
+            danger
+            disabled={selectedIds.length === 0}
+            onClick={() => onDelete(selectedIds)}
+            type="primary"
+          >
+            批量删除
+          </Button>
+        ) : null}
       </Space>
       <Alert
         className="recycle-alert"
@@ -170,12 +184,19 @@ export const RecycleDialog = ({
                   fixed: "right" as const,
                   key: "actions",
                   render: (_value: unknown, account: MytAccount) => (
-                    <Button onClick={() => onRestore([account.id])} size="small" type="primary">
-                      恢复
-                    </Button>
+                    <Space>
+                      <Button onClick={() => onRestore([account.id])} size="small" type="primary">
+                        恢复
+                      </Button>
+                      {canDelete ? (
+                        <Button danger onClick={() => onDelete([account.id])} size="small">
+                          删除
+                        </Button>
+                      ) : null}
+                    </Space>
                   ),
                   title: "操作",
-                  width: 120,
+                  width: canDelete ? 160 : 120,
                 },
               ]
             : []),

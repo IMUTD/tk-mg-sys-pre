@@ -1,28 +1,19 @@
 import {
-  AccountBookOutlined,
   AppstoreOutlined,
   CloudServerOutlined,
   DatabaseOutlined,
   DesktopOutlined,
-  FileImageOutlined,
   FileProtectOutlined,
   FileTextOutlined,
   FolderOpenOutlined,
-  FontSizeOutlined,
-  GiftOutlined,
   GlobalOutlined,
-  HighlightOutlined,
   HomeOutlined,
   InboxOutlined,
   NodeIndexOutlined,
   PictureOutlined,
   PlaySquareOutlined,
-  ProfileOutlined,
   RobotOutlined,
   SafetyCertificateOutlined,
-  ShopOutlined,
-  ShoppingOutlined,
-  SwapOutlined,
   TabletOutlined,
   TeamOutlined,
   ToolOutlined,
@@ -52,27 +43,6 @@ type NavigationItem = {
 
 const navigation: readonly NavigationItem[] = [
   { icon: <HomeOutlined aria-hidden />, label: "运营概览", path: "/overview" },
-  {
-    icon: <GiftOutlined aria-hidden />,
-    label: "积分商场",
-    path: "/mall",
-    children: [
-      { icon: <AccountBookOutlined aria-hidden />, label: "积分记录", path: "/mall/records" },
-      { icon: <ProfileOutlined aria-hidden />, label: "我的订单", path: "/mall/orders" },
-      { icon: <FileProtectOutlined aria-hidden />, label: "发票申请", path: "/mall/invoices" },
-      { icon: <ShoppingOutlined aria-hidden />, label: "兑换中心", path: "/mall/redeem" },
-    ],
-  },
-  {
-    icon: <ShopOutlined aria-hidden />,
-    label: "商家中心",
-    path: "/merchant",
-    children: [
-      { icon: <SwapOutlined aria-hidden />, label: "账号转移", path: "/merchant/accounts" },
-      { icon: <SwapOutlined aria-hidden />, label: "代理转移", path: "/merchant/proxies" },
-      { icon: <ProfileOutlined aria-hidden />, label: "订单管理", path: "/merchant/orders" },
-    ],
-  },
   {
     icon: <AppstoreOutlined aria-hidden />,
     label: "运营中心",
@@ -107,16 +77,6 @@ const navigation: readonly NavigationItem[] = [
         label: "行为中心",
         path: "/engineering/behaviors",
       },
-    ],
-  },
-  {
-    icon: <HighlightOutlined aria-hidden />,
-    label: "制作中心",
-    path: "/production",
-    children: [
-      { icon: <VideoCameraOutlined aria-hidden />, label: "视频制作", path: "/studio/video" },
-      { icon: <FileImageOutlined aria-hidden />, label: "图片制作", path: "/studio/image" },
-      { icon: <FontSizeOutlined aria-hidden />, label: "文本制作", path: "/studio/text" },
     ],
   },
   {
@@ -179,9 +139,6 @@ const titleForPath = (path: string, user: SessionUser): string => {
   )
   if (item?.label === "运营中心") return "运营概览"
   if (item?.label === "工程中心") return "私有云储存"
-  if (item?.label === "积分商场") return "积分记录"
-  if (item?.label === "商家中心") return "账号转移"
-  if (item?.label === "制作中心") return "视频制作"
   if (item?.label === "资源中心") return "文本池"
   return item?.label ?? "运营概览"
 }

@@ -27,7 +27,6 @@ import { Link } from "react-router-dom"
 import "./accounts.css"
 import { useFilteredRowSelection } from "../../components/tables/filtered-selection"
 import {
-  combineChecks,
   type FilterMode,
   FilterModeSwitch,
   pageSlice,
@@ -352,18 +351,16 @@ export const AccountsListPage = ({
       const proxyActive = proxyKeyword.length > 0 && query.proxyId.length === 0
       const device = accountDevice(devices, account.deviceId)
       const proxy = accountProxy(proxies, account.proxyId)
-      return combineChecks(filterMode, [
-        cardActive ? filterAccounts([account], query, false, filterMode).length === 1 : null,
-        deviceActive
-          ? labelIncludes(device === null ? "" : deviceOptionLabel(device), deviceKeyword)
-          : null,
-        proxyActive
-          ? labelIncludes(
-              proxy === null ? "" : formatProxyOptionLabel(proxy, usedCounts.get(proxy.id) ?? 0),
-              proxyKeyword,
-            )
-          : null,
-      ])
+      const cardHit = !cardActive || filterAccounts([account], query, false, filterMode).length === 1
+      const deviceHit =
+        !deviceActive || labelIncludes(device === null ? "" : deviceOptionLabel(device), deviceKeyword)
+      const proxyHit =
+        !proxyActive ||
+        labelIncludes(
+          proxy === null ? "" : formatProxyOptionLabel(proxy, usedCounts.get(proxy.id) ?? 0),
+          proxyKeyword,
+        )
+      return cardHit && deviceHit && proxyHit
     })
   }, [accounts, deviceText, devices, filterMode, proxies, proxyText, query, usedCounts])
   const accountPaging = useClientPagination(
@@ -375,6 +372,7 @@ export const AccountsListPage = ({
   const [catalogTags, setCatalogTags] = useState<readonly string[]>([])
   const [catalogGroups, setCatalogGroups] = useState<readonly string[]>([])
   const [catalogRemarks, setCatalogRemarks] = useState<readonly string[]>([])
+  const [remarkAccounts, setRemarkAccounts] = useState<ReadonlyMap<string, string>>(() => new Map())
   useEffect(() => {
     const api = createLabelsApi()
     const load = (): void => {
@@ -387,6 +385,14 @@ export const AccountsListPage = ({
         .then((result) => {
           setCatalogGroups(result.groups.map((item) => item.name))
           setCatalogRemarks(result.remarks.map((item) => item.name))
+          setRemarkAccounts(
+            new Map(
+              result.remarks.flatMap((item) => {
+                const account = item.lastAccount?.trim() ?? ""
+                return account.length === 0 ? [] : [[item.name, account] as const]
+              }),
+            ),
+          )
         })
         .catch(() => undefined)
     }
@@ -866,6 +872,34 @@ export const AccountsListPage = ({
       .catch(async (error: unknown) => message.error(await accountRequestError(error)))
   }
 
+  const purgeIds = (ids: readonly number[]): void => {
+    if (ids.length === 0) return
+    void modal.confirm({
+      cancelText: "取消",
+      content: `确认永久删除选中的 ${ids.length} 个账号吗？删除后无法恢复。`,
+      okButtonProps: { danger: true },
+      okText: "确定",
+      onOk: () => {
+        const recordIds = accounts.flatMap((item) =>
+          ids.includes(item.id) && item.recordId !== undefined ? [item.recordId] : [],
+        )
+        const apply = (): void => {
+          setAccounts((current) => current.filter((item) => !ids.includes(item.id)))
+          message.success(`已永久删除 ${ids.length} 个账号`)
+        }
+        if (groupId.length === 0 || recordIds.length === 0) {
+          apply()
+          return
+        }
+        void createAccountsApi()
+          .delete(groupId, recordIds)
+          .then(apply)
+          .catch(async (error: unknown) => message.error(await accountRequestError(error)))
+      },
+      title: "提示",
+    })
+  }
+
   const restoreIds = (ids: readonly number[]): void => {
     void modal.confirm({
       cancelText: "取消",
@@ -1023,10 +1057,14 @@ export const AccountsListPage = ({
           system
           blankLabel={usageLabel("未备注", unremarkedAccounts)}
           multiple
-          options={remarks.map((remark) => ({
-            value: remark,
-            label: usageLabel(remark, remarkCounts.get(remark) ?? 0),
-          }))}
+          options={unionLabelNames(catalogRemarks, remarks).map((remark) => {
+            const account = remarkAccounts.get(remark) ?? ""
+            const base = usageLabel(remark, remarkCounts.get(remark) ?? 0)
+            return {
+              value: remark,
+              label: account.length === 0 ? base : `${base} ${account}`,
+            }
+          })}
           value={draft.unremarked ? [UNASSIGNED_VALUE] : draft.userRemarks}
           onChange={(userRemarks) =>
             changeSelectQuery(
@@ -1721,8 +1759,10 @@ export const AccountsListPage = ({
       {recycleOpen ? (
         <RecycleDialog
           accounts={accounts}
+          canDelete={allowDelete}
           canWrite={canWrite}
           onCancel={() => setRecycleOpen(false)}
+          onDelete={(ids) => purgeIds(ids)}
           onRestore={(ids) => restoreIds(ids)}
         />
       ) : null}

@@ -2,6 +2,7 @@ import type { Hono } from "hono"
 import type { Sql } from "postgres"
 
 import { administratorFor } from "./business-labels"
+import { remarkMap } from "./chain-remarks"
 
 const isUuid = (value: string): boolean =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
@@ -90,6 +91,16 @@ const groupStages = (rows: readonly StageRow[], preview: boolean) => {
   })
 }
 
+const presentChains = async (sql: Sql, administratorId: string, id?: string, preview = true) => {
+  const chains = groupStages(await loadRows(sql, administratorId, id), preview)
+  const labels = await remarkMap(
+    sql,
+    "task-chain",
+    chains.map((chain) => chain.id),
+  )
+  return chains.map((chain) => ({ ...chain, remarks: labels.get(chain.id) ?? [] }))
+}
+
 const loadRows = async (sql: Sql, administratorId: string, id?: string) =>
   sql<StageRow[]>`
     select tc.id::text as "taskChainId", tc.name, tc.updated_at as "updatedAt",
@@ -159,7 +170,7 @@ export const registerTaskChains = (
     if (user === null) return context.json({ error: "authentication_required" }, 401)
     const administratorId = await administratorFor(sql, user)
     if (administratorId === null) return context.json([])
-    return context.json(groupStages(await loadRows(sql, administratorId), true))
+    return context.json(await presentChains(sql, administratorId))
   })
 
   app.get("/api/task-chains/:id", async (context) => {
@@ -168,7 +179,7 @@ export const registerTaskChains = (
     const administratorId = await administratorFor(sql, user)
     const id = context.req.param("id")
     if (administratorId === null || !isUuid(id)) return context.json({ error: "not_found" }, 404)
-    const view = groupStages(await loadRows(sql, administratorId, id), false)[0]
+    const view = (await presentChains(sql, administratorId, id, false))[0]
     return view === undefined ? context.json({ error: "not_found" }, 404) : context.json(view)
   })
 
@@ -177,7 +188,8 @@ export const registerTaskChains = (
     if (user === null) return context.json({ error: "authentication_required" }, 401)
     const administratorId = await administratorFor(sql, user)
     const groupId = administratorId === null ? null : await sharedGroup(sql, user, administratorId)
-    if (administratorId === null || groupId === null) return context.json({ error: "not_found" }, 404)
+    if (administratorId === null || groupId === null)
+      return context.json({ error: "not_found" }, 404)
     const body = (await context.req.json().catch(() => null)) as {
       name?: unknown
       stages?: unknown
@@ -200,7 +212,7 @@ export const registerTaskChains = (
       return id
     })
     if (created === null) return context.json({ error: "invalid_task_chain" }, 400)
-    const view = groupStages(await loadRows(sql, administratorId, created), false)[0]
+    const view = (await presentChains(sql, administratorId, created, false))[0]
     return context.json(view, 201)
   })
 
@@ -232,7 +244,7 @@ export const registerTaskChains = (
       return true
     })
     if (!saved) return context.json({ error: "not_found" }, 404)
-    const view = groupStages(await loadRows(sql, administratorId, id), false)[0]
+    const view = (await presentChains(sql, administratorId, id, false))[0]
     return context.json(view)
   })
 

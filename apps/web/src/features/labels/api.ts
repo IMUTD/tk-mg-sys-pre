@@ -4,7 +4,16 @@ import { resolveApiBaseUrl } from "../../lib/api/auth-api"
 import { PageKey } from "../../lib/pages"
 
 export type LabelKind = "remark" | "group"
-const Scope = z.enum(["device", "account", "account-tag", "proxy", "resource", "registration"])
+const Scope = z.enum([
+  "device",
+  "account",
+  "account-tag",
+  "proxy",
+  "resource",
+  "registration",
+  "behavior",
+  "task-chain",
+])
 export type LabelScope = z.infer<typeof Scope>
 export const labelScopeForPage = (page: string): LabelScope => {
   const scopes: Record<string, LabelScope> = {
@@ -23,6 +32,7 @@ export const labelScopeForPage = (page: string): LabelScope => {
 const Label = z.object({
   id: z.string().uuid(),
   administratorId: z.string().uuid(),
+  lastAccount: z.string().optional(),
   name: z.string(),
   scope: Scope,
 })

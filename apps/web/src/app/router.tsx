@@ -23,21 +23,13 @@ import { DeviceControlPage } from "../features/devices/control-page"
 import { DeviceCreatePage } from "../features/devices/create-page"
 import { DeviceListPage } from "../features/devices/list-page"
 import { DevicePreviewPage } from "../features/devices/preview-page"
-import { MallInvoicesPage } from "../features/mall/invoices-page"
-import { MallOrdersPage } from "../features/mall/orders-page"
-import { MallRecordsPage } from "../features/mall/records-page"
-import { MallRedeemPage } from "../features/mall/redeem-page"
 import { MemberPage } from "../features/members/page"
-import { AccountTransferPage } from "../features/merchant/accounts-page"
-import { MerchantOrdersPage } from "../features/merchant/orders-page"
-import { ProxyTransferPage } from "../features/merchant/proxies-page"
 import { OverviewPage } from "../features/overview/page"
 import { ProxiesListPage } from "../features/proxies/list-page"
 import { RegistrationResourceListPage } from "../features/registration-resources/list-page"
 import { ResourcesListPage } from "../features/resources/list-page"
 import { RobotsPage } from "../features/robots/page"
 import { StoragePage } from "../features/storage/page"
-import { StudioPage } from "../features/studio/page"
 import { DispatchListPage } from "../features/tasks/dispatch-page"
 import { VideoPoolPage } from "../features/video-pool/page"
 import { VideoResourcesPage } from "../features/video-resources/page"
@@ -259,37 +251,14 @@ const AuthenticatedRoutes = (): ReactNode => (
     <Route element={<ProtectedLayout />}>
       <Route index element={<Navigate replace to="/overview" />} />
       <Route path="/overview" element={guarded(PageKey.Overview, <OverviewPage />)} />
-      <Route path="/mall" element={<Navigate replace to="/mall/records" />} />
-      <Route path="/mall/records" element={guarded(PageKey.MallRecords, <MallRecordsPage />)} />
-      <Route path="/mall/orders" element={guarded(PageKey.MallOrders, <MallOrdersPage />)} />
-      <Route path="/mall/invoices" element={guarded(PageKey.MallInvoices, <MallInvoicesPage />)} />
-      <Route path="/mall/redeem" element={guarded(PageKey.MallRedeem, <MallRedeemPage />)} />
-      <Route path="/merchant" element={<Navigate replace to="/merchant/accounts" />} />
-      <Route
-        path="/merchant/accounts"
-        element={guarded("/merchant/accounts", <AccountTransferPage />)}
-      />
-      <Route
-        path="/merchant/proxies"
-        element={guarded("/merchant/proxies", <ProxyTransferPage />)}
-      />
-      <Route
-        path="/merchant/orders"
-        element={guarded("/merchant/orders", <MerchantOrdersPage />)}
-      />
-      <Route path="/studio" element={<Navigate replace to="/studio/video" />} />
-      <Route
-        path="/studio/video"
-        element={guarded(PageKey.StudioVideo, <StudioPage kind="video" />)}
-      />
-      <Route
-        path="/studio/image"
-        element={guarded(PageKey.StudioImage, <StudioPage kind="image" />)}
-      />
-      <Route
-        path="/studio/text"
-        element={guarded(PageKey.StudioText, <StudioPage kind="text" />)}
-      />
+      <Route path="/mall" element={<Navigate replace to="/overview" />} />
+      <Route path="/mall/*" element={<Navigate replace to="/overview" />} />
+      <Route path="/merchant" element={<Navigate replace to="/overview" />} />
+      <Route path="/merchant/*" element={<Navigate replace to="/overview" />} />
+      <Route path="/studio" element={<Navigate replace to="/studio/text-pool" />} />
+      <Route path="/studio/video" element={<Navigate replace to="/overview" />} />
+      <Route path="/studio/image" element={<Navigate replace to="/overview" />} />
+      <Route path="/studio/text" element={<Navigate replace to="/overview" />} />
       <Route
         path="/studio/text-pool"
         element={guarded(PageKey.StudioTextPool, <ResourcesPage />)}

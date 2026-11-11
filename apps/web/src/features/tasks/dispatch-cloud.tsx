@@ -21,6 +21,8 @@ export type CloudInstance = {
 }
 
 type DispatchCloudPickProps = {
+  readonly initialInstances?: readonly CloudInstance[]
+  readonly initialPitRange?: readonly number[]
   readonly onChange: (value: {
     readonly instances: readonly CloudInstance[]
     readonly pitRange: readonly number[]
@@ -40,7 +42,17 @@ const readJson = async <T,>(response: Response): Promise<T | null> => {
   return (await response.json()) as T
 }
 
-export const DispatchCloudPick = ({ onChange }: DispatchCloudPickProps): ReactNode => {
+const keptRange = (values: readonly number[] | undefined): number[] => {
+  if (values === undefined) return [...pitNumbers]
+  const chosen = new Set(values)
+  return pitNumbers.filter((item) => chosen.has(item))
+}
+
+export const DispatchCloudPick = ({
+  initialInstances = [],
+  initialPitRange,
+  onChange,
+}: DispatchCloudPickProps): ReactNode => {
   const [catalog, setCatalog] = useState<Pit[]>([])
   const [boxes, setBoxes] = useState<BoxRecord[]>([])
   const [remarks, setRemarks] = useState<LabelItem[]>([])
@@ -51,8 +63,10 @@ export const DispatchCloudPick = ({ onChange }: DispatchCloudPickProps): ReactNo
   const [remarkFilters, setRemarkFilters] = useState<readonly string[]>([])
   const [groupFilter, setGroupFilter] = useState<LabelFilter>("all")
   const [filterMode, setFilterMode] = useState<FilterMode>("and")
-  const [pitRange, setPitRange] = useState<number[]>([1, 2, 3, 4, 5])
-  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
+  const [pitRange, setPitRange] = useState<number[]>(() => keptRange(initialPitRange))
+  const [picked, setPicked] = useState<ReadonlySet<string>>(
+    () => new Set(initialInstances.map(pitKey)),
+  )
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {

@@ -1,5 +1,5 @@
 import { App, Button, Card, Input, Select, Switch, theme } from "antd"
-import { type MutableRefObject, type ReactNode, useEffect, useId, useRef, useState } from "react"
+import { Fragment, type MutableRefObject, type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { useAuth } from "../auth/auth-provider"
 import { SaveChainDialog } from "./chain-list"
 import { saveChain, updateChain, useChains } from "./chain-store"
@@ -10,16 +10,25 @@ import {
   type BehaviorChain,
   type ChainStep,
   createStep,
-  type GuardCode,
   groupedSkillOptions,
   normalizeDelay,
+  orderedParamKeys,
   paramLabel,
   publishChainSteps,
   type SkillSpec,
   skillCatalog,
   stepText,
 } from "./rpa-api"
-import { applyScreenToParams, type DevicePoint } from "./screen-map"
+import {
+  applyScreenToParams,
+  type DevicePoint,
+  paramsForPhaseSwipe,
+  paramsForSwipeDirection,
+  type SwipeDirection,
+  swipeDirectionOf,
+  withInferredSwipeDirection,
+} from "./screen-map"
+import { foldedScreenSkills, screenActHeading, screenActLocked, screenActPhase, screenActVisible } from "./screen-act"
 import { type NasCard, readNasCards } from "../storage/nas-s3"
 
 const fuzzyMatch = (text: string, query: string): boolean => {
@@ -91,14 +100,18 @@ const adoptJumpWrite = (
 
 const nodeJump = (api: string): boolean => api === "JumpNodes" || api === "ClickJumpNodes"
 
+const textPoolApi = (api: string): boolean =>
+  api === "SendText" || api === "ClickNode" || api === "ClickJumpNodes"
+
+const pictureNodes = new Set(["WaitNode", "ClickNode", "SwipeNode", "ClickJumpNodes"])
+
 const fillJumpFields = (
   step: ChainStep,
 ): Pick<ChainStep, "params" | "scopes" | "sources"> => {
   const defaults: Record<string, string> | null =
     nodeJump(step.api)
       ? {
-          ...(step.api === "ClickJumpNodes" ? { clickChance: "100" } : {}),
-          jumpWhen: "success",
+          ...(step.api === "ClickJumpNodes" ? { clickChance: "100", jumpWhen: "off" } : { jumpWhen: "success" }),
           writeOnSuccessField: "",
           writeOnSuccessValue: "",
           writeOnFailureField: "",
@@ -165,12 +178,13 @@ const studioSeed = (chain: BehaviorChain | null): {
       guards: [...step.guards],
       id: index,
       params: filled.params,
+      remark: step.remark ?? "",
       scopes: filled.scopes,
       sources: Object.fromEntries(
         Object.entries(filled.sources).map(([key, source]) => [
           key,
           source === "pool.text"
-            ? step.api === "SendText" && key === "text"
+            ? textPoolApi(step.api) && key === "text"
               ? source
               : ""
             : retiredSources.has(source)
@@ -239,9 +253,12 @@ export const RpaStudio = ({
   const [selectedId, setSelectedId] = useState<number | null>(seed.selectedId)
   const [editing, setEditing] = useState<EditingChain>({ id: loadedChain.id, name: loadedChain.name })
   const list = skills.length > 0 ? skills : skillCatalog()
-  const visible = list.filter((item) => fuzzyMatch(`${item.group} ${item.name} ${item.code}`, query))
+  const visible = list.filter(
+    (item) => !foldedScreenSkills.has(item.code) && fuzzyMatch(`${item.group} ${item.name} ${item.code}`, query),
+  )
   const known = new Set(list.map((item) => item.code))
   const recentSkills = recent.flatMap((code) => {
+    if (foldedScreenSkills.has(code)) return []
     const skill = list.find((item) => item.code === code)
     return skill === undefined ? [] : [skill]
   })
@@ -263,6 +280,28 @@ export const RpaStudio = ({
   const [nasCards, setNasCards] = useState<readonly NasCard[]>([])
   const [backupDirs, setBackupDirs] = useState<readonly { directory: string; name: string; nasId: string }[]>([])
   const [nasNote, setNasNote] = useState("")
+  const [pictureOpen, setPictureOpen] = useState<readonly number[]>([])
+  const [matchImages, setMatchImages] = useState<readonly { id: string; sizeBytes: number }[]>([])
+  const [picturesReady, setPicturesReady] = useState(false)
+  const showPictures = steps.some(
+    (step) =>
+      pictureNodes.has(step.api) &&
+      ((step.params["matchImageId"] ?? "").length > 0 || pictureOpen.includes(step.id)),
+  )
+  useEffect(() => {
+    if (!showPictures) return
+    let cancelled = false
+    void fetch("/api/match-images", { credentials: "same-origin" }).then(async (response) => {
+      if (!response.ok || cancelled) return
+      const payload = (await response.json()) as { images?: { id: string; sizeBytes: number }[] }
+      if (cancelled) return
+      setMatchImages(payload.images ?? [])
+      setPicturesReady(true)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [showPictures])
   useEffect(() => {
     if (!nasWatch.includes(":on")) return
     let cancelled = false
@@ -317,6 +356,22 @@ export const RpaStudio = ({
     requestAnimationFrame(() => stepListRef.current?.scrollTo({ top: 0 }))
   }
 
+  const insertStep = (): void => {
+    const index = steps.findIndex((item) => item.id === selectedId)
+    if (index < 0) return
+    const id = nextId
+    setSteps((current) => {
+      const at = current.findIndex((item) => item.id === selectedId)
+      if (at < 0) return current
+      const next = [...current]
+      next.splice(at + 1, 0, createStep(pick, id))
+      return next
+    })
+    setNextId((current) => current + 1)
+    setSelectedId(id)
+    setRecent(rememberRecent(userId, pick, known))
+  }
+
   const setBackupDir = (id: number, value: string): void => {
     const slash = value.indexOf("/")
     const nasId = slash > 0 ? value.slice(0, slash) : ""
@@ -330,10 +385,21 @@ export const RpaStudio = ({
 
   const patchStep = (id: number, key: string, value: string): void => {
     setSteps((current) =>
-      current.map((item) =>
-        item.id === id ? { ...item, params: { ...item.params, [key]: value } } : item,
-      ),
+      current.map((item) => {
+        if (item.id !== id) return item
+        const params = { ...item.params, [key]: value }
+        const swipe =
+          item.api === "Swipe" && (key === "x0" || key === "y0" || key === "x1" || key === "y1")
+        return { ...item, params: swipe ? withInferredSwipeDirection(params) : params }
+      }),
     )
+  }
+
+  const setPicture = (id: number, on: boolean): void => {
+    setPictureOpen((current) =>
+      on ? (current.includes(id) ? current : [...current, id]) : current.filter((item) => item !== id),
+    )
+    if (!on) patchStep(id, "matchImageId", "")
   }
 
   const setWrite = (id: number, fieldKey: string, valueKey: string, field: string): void => {
@@ -353,12 +419,25 @@ export const RpaStudio = ({
     )
   }
 
-  const setGuard = (id: number, code: GuardCode, on: boolean): void => {
+  const setPhaseSwipe = (id: number, phase: string, direction: SwipeDirection): void => {
     setSteps((current) =>
       current.map((item) => {
-        if (item.id !== id) return item
-        const guards = (item.guards ?? []).filter((itemCode) => itemCode !== code)
-        return { ...item, guards: on ? [...guards, code] : guards }
+        if (item.id !== id || item.api !== "ScreenAct") return item
+        return { ...item, params: paramsForPhaseSwipe(item.params, phase, direction) }
+      }),
+    )
+  }
+
+  const setSwipeDirection = (id: number, direction: SwipeDirection): void => {
+    setSteps((current) =>
+      current.map((item) => {
+        if (item.id !== id || item.api !== "Swipe") return item
+        return {
+          ...item,
+          params: paramsForSwipeDirection(item.params, direction),
+          scopes: { ...item.scopes, direction: "internal" },
+          sources: { ...item.sources, direction: "literal" },
+        }
       }),
     )
   }
@@ -382,6 +461,8 @@ export const RpaStudio = ({
     setSteps((current) =>
       current.map((item) => {
         if (item.id !== id) return item
+        if (item.api === "SwipeWait" && key === "interval" && !internal) return item
+        if (item.api === "ScreenAct" && screenActLocked(key) && !internal) return item
         if (
           (nodeJump(item.api) || item.api === "CheckLive") &&
           (key === "steps" || key === "jumpWhen") &&
@@ -425,7 +506,7 @@ export const RpaStudio = ({
     setSteps((current) =>
       current.map((item) => {
         if (item.id !== id) return item
-        const pool = item.api === "SendText" && key === "text" && source === "pool.text"
+        const pool = textPoolApi(item.api) && key === "text" && source === "pool.text"
         return {
           ...item,
           params: pool ? { ...item.params, text: "" } : item.params,
@@ -535,6 +616,9 @@ export const RpaStudio = ({
             />
           ) : null}
           <Button onClick={onBack}>返回</Button>
+          <Button disabled={steps.every((item) => item.id !== selectedId)} onClick={insertStep}>
+            插入
+          </Button>
           <Button onClick={addStep} type="primary">
             添加步骤
           </Button>
@@ -600,14 +684,7 @@ export const RpaStudio = ({
               title={`${index + 1}. ${stepText(item)}`}
             >
               <div className="rpa-step-params">
-                {(() => {
-                  const paramKeys = Object.keys(item.params)
-                  const nasSkill =
-                    backupNas || item.api === "UploadPitImage" || item.api === "UploadPitVideo"
-                  if (nasSkill && !paramKeys.includes("useNas")) paramKeys.push("useNas")
-                  if (nasSkill && !paramKeys.includes("nasId")) paramKeys.push("nasId")
-                  return paramKeys.filter((key) => key !== "nasKey")
-                })().map((key) => {
+                {orderedParamKeys(item.api, item.params).map((key) => {
                   const external = item.scopes[key] === "external"
                   const jumpLocked =
                     ((nodeJump(item.api) || item.api === "CheckLive") &&
@@ -642,6 +719,8 @@ export const RpaStudio = ({
                   const swipeRepeat = item.api === "SwipeNode" && item.params["repeatMode"] === "random" ? "random" : item.api === "SwipeNode" ? "fixed" : ""
                   if (swipeRepeat === "fixed" && (key === "repeatMin" || key === "repeatMax")) return null
                   if (swipeRepeat === "random" && key === "repeatCount") return null
+                  if (key === "matchImageId") return null
+                  if (item.api === "ScreenAct" && !screenActVisible(item.params, key)) return null
                   const nasOn = item.params["useNas"] === "on"
                   if ((key === "图片ID" || key === "视频ID") && nasOn) return null
                   if (key === "nasDir") return null
@@ -654,8 +733,18 @@ export const RpaStudio = ({
                         : "backup"
                   const nasChoices = nasCards.filter((card) => card.bucket === nasBucket)
                   const requestedNas = item.params["nasId"] ?? ""
+                  const section =
+                    item.api === "SwipeWait" && key === "swipeText"
+                      ? "滑动"
+                      : item.api === "SwipeWait" && key === "text"
+                        ? "出现后通过"
+                        : item.api === "ScreenAct"
+                          ? screenActHeading(item.params, key)
+                          : ""
                   return (
-                    <div className={writeSide.length > 0 ? "rpa-param rpa-write" : "rpa-param"} key={key}>
+                    <Fragment key={key}>
+                    {section.length > 0 ? <div className="rpa-section">{section}</div> : null}
+                    <div className={writeSide.length > 0 ? "rpa-param rpa-write" : "rpa-param"}>
                       {(nodeJump(item.api) || item.api === "CheckLive") &&
                       key === "jumpWhen" ? (
                         <div className="rpa-source">
@@ -705,6 +794,102 @@ export const RpaStudio = ({
                             disabled
                             size="small"
                             unCheckedChildren="外部"
+                          />
+                        </div>
+                      ) : item.api === "ScreenAct" && key.endsWith("Action") ? (
+                        <Select<string>
+                          aria-label={`${item.api}-${key}`}
+                          onChange={(value) => patchStep(item.id, key, value)}
+                          options={[
+                            { label: "不执行", value: "" },
+                            { label: "OCR识别", value: "OcrClick" },
+                            { label: "新节点点击", value: "ClickArrangedNode" },
+                            { label: "节点点击", value: "ClickNode" },
+                            { label: "滑动", value: "Swipe" },
+                            { label: "节点滑动", value: "SwipeNode" },
+                            { label: "等待节点", value: "WaitNode" },
+                            { label: "持续滑动等待", value: "SwipeWait" },
+                          ]}
+                          value={item.params[key] ?? ""}
+                          virtual={false}
+                        />
+                      ) : item.api === "ScreenAct" && key.endsWith("Pass") ? (
+                        <div className="rpa-source">
+                          <span className="rpa-source-label">只要执行就算成功</span>
+                          <Switch
+                            aria-label={`${item.api}-${key}`}
+                            checked={(item.params[key] ?? "on") !== "off"}
+                            onChange={(on) => patchStep(item.id, key, on ? "on" : "off")}
+                            size="small"
+                          />
+                        </div>
+                      ) : item.api === "ScreenAct" && key.endsWith("Focus") ? (
+                        <div className="rpa-source">
+                        <span className="rpa-source-label">关注点</span>
+                        <Select<string>
+                          aria-label={`${item.api}-${key}`}
+                          onChange={(value) => patchStep(item.id, key, value)}
+                          options={[
+                            { label: "整个画面", value: "" },
+                            { label: "左侧", value: "left" },
+                            { label: "右侧", value: "right" },
+                            { label: "上方", value: "above" },
+                            { label: "下方", value: "below" },
+                          ]}
+                          value={item.params[key] ?? ""}
+                          virtual={false}
+                        />
+                        </div>
+                      ) : item.api === "ScreenAct" && key.endsWith("Direction") ? (
+                        <div className="rpa-source">
+                          <span className="rpa-source-label">方向</span>
+                          <Select<SwipeDirection>
+                            aria-label={`${item.api}-${key}`}
+                            onChange={(value) => setPhaseSwipe(item.id, screenActPhase(key), value)}
+                            options={[
+                              { label: "上", value: "up" },
+                              { label: "下", value: "down" },
+                              { label: "左", value: "left" },
+                              { label: "右", value: "right" },
+                            ]}
+                            value={
+                              item.params[key] === "down" ||
+                              item.params[key] === "left" ||
+                              item.params[key] === "right"
+                                ? item.params[key]
+                                : "up"
+                            }
+                            virtual={false}
+                          />
+                        </div>
+                      ) : item.api === "ScreenAct" && key.endsWith("RepeatMode") ? (
+                        <div className="rpa-source">
+                          <span className="rpa-source-label">次数</span>
+                          <Select<string>
+                            aria-label={`${item.api}-${key}`}
+                            onChange={(value) => patchStep(item.id, key, value)}
+                            options={[
+                              { label: "固定次数", value: "fixed" },
+                              { label: "随机次数", value: "random" },
+                            ]}
+                            value={item.params[key] === "random" ? "random" : "fixed"}
+                            virtual={false}
+                          />
+                        </div>
+                      ) : item.api === "Swipe" && key === "direction" ? (
+                        <div className="rpa-source">
+                          <span className="rpa-source-label">方向</span>
+                          <Select<SwipeDirection>
+                            aria-label="Swipe-方向"
+                            onChange={(value) => setSwipeDirection(item.id, value)}
+                            options={[
+                              { label: "上", value: "up" },
+                              { label: "下", value: "down" },
+                              { label: "左", value: "left" },
+                              { label: "右", value: "right" },
+                            ]}
+                            value={swipeDirectionOf(item.params)}
+                            virtual={false}
                           />
                         </div>
                       ) : item.api === "SwipeNode" && key === "repeatMode" ? (
@@ -781,6 +966,31 @@ export const RpaStudio = ({
                             virtual={false}
                           />
                         </div>
+                      ) : item.api === "ClickJumpNodes" && key === "focus" ? (
+                        <Select<string>
+                          aria-label={`${item.api}-关注点`}
+                          onChange={(value) => patchStep(item.id, key, value)}
+                          options={[
+                            { label: "整个画面", value: "" },
+                            { label: "左侧", value: "left" },
+                            { label: "右侧", value: "right" },
+                            { label: "上方", value: "above" },
+                            { label: "下方", value: "below" },
+                          ]}
+                          value={item.params[key] ?? ""}
+                          virtual={false}
+                        />
+                      ) : item.api === "WriteAccount" && key === "field" ? (
+                        <Select<string>
+                          aria-label="写回账号-字段"
+                          onChange={(value) => patchStep(item.id, key, value)}
+                          options={[
+                            { label: "请选择", value: "" },
+                            ...writeFieldOptions.filter((option) => option.value !== ""),
+                          ]}
+                          value={item.params[key] ?? ""}
+                          virtual={false}
+                        />
                       ) : external && item.api === "ClickJumpNodes" && key === "clickChance" ? (
                         <div className="rpa-source">
                           <span className="rpa-source-label">
@@ -806,7 +1016,7 @@ export const RpaStudio = ({
                                 <span>{option.label}</span>
                               )
                             }
-                            options={(item.api === "SendText" && key === "text"
+                            options={(textPoolApi(item.api) && key === "text"
                               ? [...anchorFields, { label: "文本池", source: "pool.text" }]
                               : anchorFields
                             ).map((field) => ({
@@ -826,12 +1036,16 @@ export const RpaStudio = ({
                           placeholder={
                             item.api === "DeleteExtraBackup" && key === "backupName"
                               ? "留空则用当前坑位的云机名"
-                              : ""
+                              : item.api === "SwipeWait" && key === "interval"
+                                ? "毫秒，默认 500"
+                                : item.api === "ScreenAct" && (key === "interval" || key.endsWith("SwipeInterval"))
+                                  ? "毫秒，默认 500"
+                                : ""
                           }
                           value={item.params[key]}
                         />
                       )}
-                      {key === "jumpWhen" || key === "useNas" || key === "nasId" || key === "nasDir" || key === "nasKey" || writeSide.length > 0 ? null : (
+                      {key === "jumpWhen" || key === "focus" || key === "direction" || key === "matchImageId" || key === "useNas" || key === "nasId" || key === "nasDir" || key === "nasKey" || writeSide.length > 0 || (item.api === "WriteAccount" && key === "field") || (item.api === "SwipeWait" && key === "interval") || (item.api === "ScreenAct" && screenActLocked(key)) ? null : (
                         <Switch
                           aria-label={`${item.api}-${key}-范围`}
                           checked={!external}
@@ -843,8 +1057,57 @@ export const RpaStudio = ({
                         />
                       )}
                     </div>
+                    </Fragment>
                   )
                 })}
+                {pictureNodes.has(item.api) ? (
+                  <div className="rpa-guards">
+                    <span>守护</span>
+                    <label htmlFor={`${studioId}-${item.id}-picture`}>
+                      <Switch
+                        aria-label={`${item.api}-图片识别`}
+                        checked={
+                          (item.params["matchImageId"] ?? "").length > 0 || pictureOpen.includes(item.id)
+                        }
+                        id={`${studioId}-${item.id}-picture`}
+                        onChange={(on) => setPicture(item.id, on)}
+                        size="small"
+                      />
+                      图片识别
+                    </label>
+                    {(item.params["matchImageId"] ?? "").length > 0 || pictureOpen.includes(item.id) ? (
+                      <div aria-label={`${item.api}-选择匹配图`} className="rpa-picture-pick" role="listbox">
+                        {matchImages.length === 0 ? (
+                          <span>{picturesReady ? "还没有匹配图" : "正在读取匹配图"}</span>
+                        ) : (
+                          matchImages.map((image, imageIndex) => {
+                            const selected = (item.params["matchImageId"] ?? "") === image.id
+                            return (
+                              <button
+                                aria-label={`${item.api}-匹配图${imageIndex + 1}`}
+                                aria-pressed={selected}
+                                className={selected ? "is-selected" : ""}
+                                key={image.id}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  patchStep(item.id, "matchImageId", image.id)
+                                }}
+                                type="button"
+                              >
+                                <img alt="" src={`/api/match-images/${image.id}`} />
+                              </button>
+                            )
+                          })
+                        )}
+                        {picturesReady &&
+                        (item.params["matchImageId"] ?? "").length > 0 &&
+                        !matchImages.some((image) => image.id === item.params["matchImageId"]) ? (
+                          <span>这张图已删除</span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="rpa-delay">
                   <Input
                     addonAfter="毫秒"
@@ -853,29 +1116,6 @@ export const RpaStudio = ({
                     onChange={(event) => setDelay(item.id, event.target.value)}
                     value={item.delayMs > 0 ? String(item.delayMs) : ""}
                   />
-                </div>
-                <div className="rpa-guards">
-                  <span>守护</span>
-                  <label htmlFor={`${studioId}-${item.id}-ad`}>
-                    <Switch
-                      aria-label={`${item.api}-广告通过`}
-                      id={`${studioId}-${item.id}-ad`}
-                      checked={(item.guards ?? []).includes("ad")}
-                      onChange={(on) => setGuard(item.id, "ad", on)}
-                      size="small"
-                    />
-                    广告通过
-                  </label>
-                  <label htmlFor={`${studioId}-${item.id}-transcode`}>
-                    <Switch
-                      aria-label={`${item.api}-转码通过`}
-                      id={`${studioId}-${item.id}-transcode`}
-                      checked={(item.guards ?? []).includes("transcode")}
-                      onChange={(on) => setGuard(item.id, "transcode", on)}
-                      size="small"
-                    />
-                    转码通过
-                  </label>
                 </div>
                 <div className="rpa-delay rpa-remark">
                   <Input
@@ -981,7 +1221,23 @@ export const RpaStudio = ({
                   caught instanceof Error && caught.message === "chain_name_taken"
                     ? "名称已存在"
                     : caught instanceof Error &&
-                        (caught.message === "备注过长" || caught.message === "备注无效")
+                        (caught.message === "备注过长" ||
+                          caught.message === "备注无效" ||
+                          caught.message === "出现条件为空" ||
+                          caught.message === "滑动条件为空" ||
+                          caught.message === "滑动距离无效" ||
+                          caught.message === "方向无效" ||
+                          caught.message === "index 无效" ||
+                          caught.message === "间隔无效" ||
+                          caught.message === "屏幕行为为空" ||
+                          caught.message === "行为无效" ||
+                          caught.message === "通过无效" ||
+                          caught.message === "关注点无效" ||
+                          caught.message === "条件为空" ||
+                          caught.message === "次数无效" ||
+                          caught.message === "序号无效" ||
+                          caught.message === "文字为空" ||
+                          caught.message === "滑动坐标无效")
                       ? caught.message
                       : "保存失败",
                 ),

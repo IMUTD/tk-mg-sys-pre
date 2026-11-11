@@ -172,6 +172,46 @@ const uncoveredProxy = (
 ): readonly [string, string][] =>
   externalProxyEntries(step).filter(([key]) => !covered(step, key, selection))
 
+const sourceValue = (step: ReplayStep, source: string): string => {
+  const key = Object.entries(step.sources).find(([, item]) => item === source)?.[0]
+  return key === undefined ? "" : (step.parameters[key] ?? "")
+}
+
+export const proxyIdForStep = (
+  step: ReplayStep,
+  listed: readonly ReplayProxy[],
+  itemProxyId: string | null,
+): string | null => {
+  const host = sourceValue(step, "proxy.host")
+  const port = sourceValue(step, "proxy.port")
+  let matches =
+    host.length === 0 || port.length === 0
+      ? []
+      : listed.filter((item) => item.host === host && item.port === port)
+  if (matches.length > 1) {
+    const link = sourceValue(step, "proxy.link")
+    const linked = matches.filter((item) => item.link === link)
+    if (linked.length > 0) matches = linked
+  }
+  if (matches.length > 1 && itemProxyId !== null) {
+    const preferred = matches.find((item) => item.id === itemProxyId)
+    if (preferred !== undefined) return preferred.id
+  }
+  if (matches.length > 0) return matches[0]?.id ?? null
+  if (itemProxyId !== null && listed.some((item) => item.id === itemProxyId)) return itemProxyId
+  return null
+}
+
+export const nextListedProxy = <T extends { readonly id: string }>(
+  listed: readonly T[],
+  currentId: string | null,
+): T | null => {
+  if (listed.length === 0) return null
+  if (listed.length === 1) return listed[0] ?? null
+  const index = currentId === null ? -1 : listed.findIndex((item) => item.id === currentId)
+  return listed[(index + 1) % listed.length] ?? null
+}
+
 const proxyCurrentOf = (step: ReplayStep): string => {
   const link = Object.entries(step.sources).find(([, source]) => source === "proxy.link")
   if (link !== undefined) return step.parameters[link[0]] ?? ""

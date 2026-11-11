@@ -5,7 +5,6 @@ import {
   type ChainAnchor,
   type ChainOrigin,
   type ChainStep,
-  type GuardCode,
   normalizeDelay,
   type ParamScope,
 } from "./rpa-api"
@@ -32,6 +31,7 @@ type ChainPayload = {
   lastTestedAt: string | null
   name: string
   origin: ChainOrigin
+  remarks?: readonly { id?: string; name?: string }[]
   steps: ChainStep[]
   updatedAt: string
 }
@@ -46,6 +46,11 @@ const toChain = (row: ChainPayload): BehaviorChain => ({
   lastTestAt: textTime(row.lastTestedAt),
   name: row.name,
   origin: row.origin,
+  remarks: (row.remarks ?? []).flatMap((item) =>
+    typeof item.id === "string" && typeof item.name === "string"
+      ? [{ id: item.id, name: item.name }]
+      : [],
+  ),
   steps: row.steps.map((step, index) => {
     const scopes = Object.fromEntries(
       Object.entries(step.scopes ?? {}).map(([key, value]) => [
@@ -56,13 +61,13 @@ const toChain = (row: ChainPayload): BehaviorChain => ({
     return {
       api: step.api,
       delayMs: normalizeDelay(step.delayMs),
-      guards: (step.guards ?? []).filter(
-        (code): code is GuardCode => code === "ad" || code === "transcode",
-      ),
+      guards: [],
       id: index,
       params: {
         ...step.params,
-        ...(step.api === "ClickJumpNodes" && scopes.clickChance === "external" ? { clickChance: "" } : {}),
+        ...(step.api === "ClickJumpNodes" && scopes.clickChance === "external"
+          ? { clickChance: "" }
+          : {}),
       },
       remark: typeof step.remark === "string" ? step.remark : "",
       scopes,
@@ -103,7 +108,26 @@ export const loadChains = async (): Promise<void> => {
 
 const readSaveError = async (response: Response): Promise<Error> => {
   const body = (await response.json().catch(() => null)) as { error?: string } | null
-  if (body?.error === "chain_name_taken" || body?.error === "备注过长" || body?.error === "备注无效") {
+  if (
+    body?.error === "chain_name_taken" ||
+    body?.error === "备注过长" ||
+    body?.error === "备注无效" ||
+    body?.error === "出现条件为空" ||
+    body?.error === "滑动条件为空" ||
+    body?.error === "滑动距离无效" ||
+    body?.error === "方向无效" ||
+    body?.error === "index 无效" ||
+    body?.error === "间隔无效" ||
+    body?.error === "屏幕行为为空" ||
+    body?.error === "行为无效" ||
+    body?.error === "通过无效" ||
+    body?.error === "关注点无效" ||
+    body?.error === "条件为空" ||
+    body?.error === "次数无效" ||
+    body?.error === "序号无效" ||
+    body?.error === "文字为空" ||
+    body?.error === "滑动坐标无效"
+  ) {
     return new Error(body.error)
   }
   return new Error("save_failed")

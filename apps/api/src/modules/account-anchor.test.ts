@@ -72,6 +72,24 @@ describe("account anchor", () => {
     ).toEqual({ text: "pool.text" })
     expect(
       readStepSources(
+        { text: "" },
+        { text: "external" },
+        { text: "pool.text" },
+        null,
+        "ClickNode",
+      ),
+    ).toEqual({ text: "pool.text" })
+    expect(
+      readStepSources(
+        { clickChance: "", text: "" },
+        { clickChance: "external", text: "external" },
+        { clickChance: "chance.external", text: "pool.text" },
+        null,
+        "ClickJumpNodes",
+      ),
+    ).toEqual({ clickChance: "chance.external", text: "pool.text" })
+    expect(
+      readStepSources(
         { text: "你好" },
         { text: "internal" },
         { text: "pool.text" },

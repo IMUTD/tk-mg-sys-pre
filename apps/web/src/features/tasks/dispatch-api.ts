@@ -63,6 +63,7 @@ export type DispatchOptions = {
   readonly taskChains: readonly {
     readonly id: string
     readonly name: string
+    readonly remarks?: readonly { readonly id: string; readonly name: string }[]
     readonly stages: readonly {
       readonly anchor: null | {
         readonly key: "id" | "identifier"

@@ -24,7 +24,16 @@ export const administratorFor = async (
   return rows[0]?.id ?? null
 }
 
-const Scope = z.enum(["device", "account", "account-tag", "proxy", "resource", "registration"])
+const Scope = z.enum([
+  "device",
+  "account",
+  "account-tag",
+  "proxy",
+  "resource",
+  "registration",
+  "behavior",
+  "task-chain",
+])
 export type BusinessLabelScope = z.infer<typeof Scope>
 const scopePages: Record<BusinessLabelScope, string> = {
   device: PageKey.Devices,
@@ -33,6 +42,8 @@ const scopePages: Record<BusinessLabelScope, string> = {
   proxy: PageKey.Proxies,
   resource: PageKey.StudioTextPool,
   registration: PageKey.StudioRegistration,
+  behavior: PageKey.Behaviors,
+  "task-chain": PageKey.Behaviors,
 }
 const scopeWritePermissions: Record<BusinessLabelScope, Permission> = {
   device: Permission.DevicesWrite,
@@ -41,6 +52,8 @@ const scopeWritePermissions: Record<BusinessLabelScope, Permission> = {
   proxy: Permission.OperationsWrite,
   resource: Permission.ResourcesWrite,
   registration: Permission.ResourcesWrite,
+  behavior: Permission.ResourcesWrite,
+  "task-chain": Permission.ResourcesWrite,
 }
 const pageScopes: Record<string, readonly BusinessLabelScope[]> = {
   [PageKey.Devices]: ["device"],
@@ -50,6 +63,7 @@ const pageScopes: Record<string, readonly BusinessLabelScope[]> = {
   [PageKey.Proxies]: ["proxy"],
   [PageKey.StudioRegistration]: ["registration"],
   [PageKey.StudioTextPool]: ["resource"],
+  [PageKey.Behaviors]: ["behavior", "task-chain"],
 }
 const Kind = z.enum(["remark", "group"])
 const Input = z.object({ kind: Kind, name: z.string().trim().min(1).max(40) })
@@ -116,14 +130,18 @@ export const registerBusinessLabels = (
             {
               id: string
               administratorId: string
+              kind: "remark" | "group"
+              lastAccount: string
               name: string
               scope: BusinessLabelScope
-              kind: "remark" | "group"
             }[]
           >`
-      select id, administrator_id as "administratorId", name, kind, scope
-      from business_label where administrator_id = ${administratorId}::uuid and scope = ${scope}
-      order by name, id`
+      select l.id, l.administrator_id as "administratorId", l.name, l.kind, l.scope,
+        coalesce(a.identifier, '') as "lastAccount"
+      from business_label l
+      left join operation_account a on a.id = l.last_account_id and a.deleted = false
+      where l.administrator_id = ${administratorId}::uuid and l.scope = ${scope}
+      order by l.name, l.id`
     return context.json({
       administratorId,
       scope,
@@ -197,6 +215,18 @@ export const registerBusinessLabels = (
         label.kind === "remark" &&
         scope === "proxy" &&
         (await proxyRemarkInUse(tx, administratorId, label.name))
+      )
+        return context.json({ error: "label_in_use" }, 409)
+      if (
+        scope === "behavior" &&
+        (await tx`select 1 from behavior_chain_remark where label_id = ${id.data}::uuid limit 1`)
+          .length > 0
+      )
+        return context.json({ error: "label_in_use" }, 409)
+      if (
+        scope === "task-chain" &&
+        (await tx`select 1 from task_chain_remark where label_id = ${id.data}::uuid limit 1`)
+          .length > 0
       )
         return context.json({ error: "label_in_use" }, 409)
       await tx`delete from business_label where id = ${id.data}::uuid`

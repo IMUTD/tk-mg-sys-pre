@@ -223,6 +223,18 @@
   color: rgba(0, 0, 0, 0.88);
 }
 
+.quick-tasks {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.quick-tasks .ant-tag {
+  cursor: pointer;
+  margin-inline-end: 0;
+}
+
 .dispatch-choice .ant-form-item-row {
   flex-direction: column;
   height: auto;

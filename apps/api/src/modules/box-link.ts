@@ -27,24 +27,45 @@ import {
   StatusSchema,
   WatchSchema,
 } from "./box-contract"
-import { markBoxesWithoutHeartbeat, presenceHolder, sqlState, tryAcquirePresenceLease } from "./box-presence"
-import { registerTaskChains } from "./task-chains"
+import {
+  markBoxesWithoutHeartbeat,
+  presenceHolder,
+  sqlState,
+  tryAcquirePresenceLease,
+} from "./box-presence"
 import {
   administratorFor,
   businessGroupInUse,
   lockBusinessLabel,
   registerBusinessLabels,
 } from "./business-labels"
-import { refreshDeviceHosts } from "./dispatch/fill"
+import { registerChainRemarkRoutes, remarkMap } from "./chain-remarks"
+import { refreshDeviceHosts, usesExternalText } from "./dispatch/fill"
+import { normalizeScreenAct, screenActError } from "./screen-act"
+import { normalizeSwipeWait, swipeWaitError } from "./swipe-wait"
 import { readFrameBody } from "./frame-body"
-import { type GuardCode, guardCatalog, normalizeGuards, xmlHasText } from "./guards"
-import { clickChanceReady, clickJumpPassed, jumpFoundCount, jumpNodesShouldSkip, jumpWhenMode, jumpWriteBack, jumpWriteKeys, jumpWriteSideReady, statusShouldJump } from "./jump-nodes"
+import { type GuardCode, guardCatalog, normalizeGuards } from "./guards"
+import {
+  clickChanceReady,
+  clickJumpPassed,
+  directAccountWrite,
+  jumpFoundCount,
+  jumpNodesShouldSkip,
+  jumpWhenMode,
+  jumpWriteBack,
+  jumpWriteKeys,
+  jumpWriteSideReady,
+  statusShouldJump,
+} from "./jump-nodes"
+import { rememberAccountRemark } from "./last-account"
 import { registerMailCode } from "./mail-code"
 import { mixedBatchRejected } from "./pit-chain"
 import { registerShareFiles } from "./share-files"
+import { registerStudioExtras } from "./studio-extras"
 import { backupPhone } from "./share-path"
 import { registerNasAgentRoutes } from "./storage/agent-routes"
 import { createPostgresStorageRepository } from "./storage/repository"
+import { registerTaskChains } from "./task-chains"
 
 const guardLabel = (code: string): string =>
   code === "ad" || code === "transcode" ? guardCatalog[code].label : code
@@ -111,6 +132,19 @@ const stripNull = (value: unknown): unknown => {
 }
 
 const hashToken = (token: string): string => createHash("sha256").update(token).digest("hex")
+
+const matchImageType = (bytes: Buffer): string => {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8) return "image/jpeg"
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50) return "image/png"
+  if (bytes.length >= 6 && bytes.subarray(0, 6).toString("ascii").startsWith("GIF8")) return "image/gif"
+  if (
+    bytes.length >= 12 &&
+    bytes.subarray(0, 4).toString("ascii") === "RIFF" &&
+    bytes.subarray(8, 12).toString("ascii") === "WEBP"
+  )
+    return "image/webp"
+  return "application/octet-stream"
+}
 
 const bearer = (header: string | undefined): string => {
   const value = header ?? ""
@@ -295,7 +329,28 @@ const readChainSteps = (
       paramSources: ChainSource[]
       remarks: string[]
     }
-  | { ok: false; error: "invalid_chain" | "备注过长" | "备注无效" } => {
+  | {
+      ok: false
+      error:
+        | "invalid_chain"
+        | "备注过长"
+        | "备注无效"
+        | "出现条件为空"
+        | "滑动条件为空"
+        | "滑动距离无效"
+        | "方向无效"
+        | "index 无效"
+        | "间隔无效"
+        | "屏幕行为为空"
+        | "行为无效"
+        | "通过无效"
+        | "关注点无效"
+        | "条件为空"
+        | "次数无效"
+        | "序号无效"
+        | "文字为空"
+        | "滑动坐标无效"
+    } => {
   if (!Array.isArray(raw) || raw.length === 0 || raw.length > 100) return invalidChain
   const parameters: ChainParameter[] = []
   const paramScopes: ChainScope[] = []
@@ -342,6 +397,26 @@ const readChainSteps = (
     if (nodeJumpKind(skill) && !jumpNodesReady(input)) return invalidChain
     if (skill === "ClickJumpNodes" && !clickChanceReady(input?.["clickChance"])) return invalidChain
     if (skill === "CheckLive" && !checkLiveReady(input)) return invalidChain
+    if (skill === "SwipeWait") {
+      const problem = swipeWaitError(input)
+      if (problem !== null) return { ok: false, error: problem }
+      normalizeSwipeWait(input)
+      scopes.interval = "internal"
+    }
+    if (skill === "ScreenAct") {
+      const problem = screenActError(input)
+      if (problem !== null) return { ok: false, error: problem }
+      normalizeScreenAct(input)
+      scopes.interval = "internal"
+      for (const phase of ["before", "main", "after"]) {
+        scopes[`${phase}Action`] = "internal"
+        scopes[`${phase}Pass`] = "internal"
+        scopes[`${phase}Focus`] = "internal"
+        scopes[`${phase}Direction`] = "internal"
+        scopes[`${phase}RepeatMode`] = "internal"
+        scopes[`${phase}SwipeInterval`] = "internal"
+      }
+    }
     const sources = readStepSources(input, scopes, step.sources, anchor, skill)
     if (sources === null) return invalidChain
     parameters.push({ input, skill })
@@ -376,11 +451,7 @@ const jumpNodesReady = (input: Record<string, string> | null | undefined): boole
 }
 
 const checkLiveReady = (input: Record<string, string> | null | undefined): boolean => {
-  if (
-    input !== undefined &&
-    input !== null &&
-    jumpWriteKeys.some((key) => key in input)
-  ) {
+  if (input !== undefined && input !== null && jumpWriteKeys.some((key) => key in input)) {
     return false
   }
   const when = jumpWhenMode(input?.["jumpWhen"], "off")
@@ -516,12 +587,16 @@ const writeJumpAccount = async (
   },
   count: unknown,
   logTitle = "",
+  forced: ReturnType<typeof directAccountWrite> = null,
 ) => {
-  const chosen = jumpWriteBack(count, row.parameters)
+  const chosen = forced ?? jumpWriteBack(count, row.parameters)
   if (chosen === null) return
   const outcome = chosen.hit ? "命中" : "未命中"
   const title = logTitle.trim()
-  const prefix = title.length > 0 ? `${row.externalId} ${title} ${outcome}` : `${row.externalId} 节点跳跃${outcome}`
+  const prefix =
+    title.length > 0
+      ? `${row.externalId} ${title} ${outcome}`
+      : `${row.externalId} 节点跳跃${outcome}`
   if (row.accountId === null || row.accountId.length === 0) {
     await writeLog(sql, row.groupId, row.deviceId, "ok", `${prefix}，任务没有账号，未写回`)
     return
@@ -618,11 +693,20 @@ const writeJumpAccount = async (
       ? `${prefix}，账号已删除，未写回`
       : `${prefix}，账号写回${chosen.label} ${value}`,
   )
+  if (chosen.field === "note" && updated.length > 0 && row.accountId !== null) {
+    await rememberAccountRemark(sql, row.groupId, row.accountId, value)
+  }
 }
 
 const cloudMachineName = (raw: string): string | null => {
   const name = raw.trim()
-  if (name.length === 0 || name.length > 200 || name.includes("/") || name.includes("\\") || name.includes("..")) {
+  if (
+    name.length === 0 ||
+    name.length > 200 ||
+    name.includes("/") ||
+    name.includes("\\") ||
+    name.includes("..")
+  ) {
     return null
   }
   const phone = backupPhone(name).phoneName
@@ -1149,6 +1233,8 @@ export const registerBoxLink = (
 ) => {
   registerBusinessLabels(app, sql, authService, auditRepository)
   registerTaskChains(app, sql, userFromRequest)
+  registerChainRemarkRoutes(app, sql, userFromRequest)
+  registerStudioExtras(app, sql, userFromRequest)
   const frames = new Map<string, FrameHit>()
   const waiters = new Map<string, Set<() => void>>()
   const wake = (deviceId: string): void => {
@@ -1570,7 +1656,23 @@ export const registerBoxLink = (
       taskName: row.taskName,
     })
     if (status === "succeeded" || status === "failed" || status === "cancelled") {
-      const stepStatus = status
+      let stepStatus = status
+      let failDetail = ""
+      const accountWrite =
+        status === "succeeded" && row.kind === "WriteAccount"
+          ? directAccountWrite(row.parameters?.["field"], row.parameters?.["value"])
+          : null
+      if (status === "succeeded" && row.kind === "WriteAccount") {
+        const field = (row.parameters?.["field"] ?? "").trim()
+        const value = (row.parameters?.["value"] ?? "").trim()
+        if (row.accountId === null || row.accountId.length === 0) {
+          stepStatus = "failed"
+          failDetail = "任务没有账号"
+        } else if (accountWrite === null) {
+          stepStatus = "failed"
+          failDetail = field.length === 0 || value.length === 0 ? "写回字段为空" : "写回内容无效"
+        }
+      }
       const outputs = stripNull(body?.checkpoint?.outputs ?? {}) as Record<string, string>
       const outcome = await sql.begin(async (tx) => {
         // Match claim/synchronization lock order before writing device-linked history.
@@ -1584,7 +1686,9 @@ export const registerBoxLink = (
             row.groupId,
             row.deviceId,
             value === "failed" ? "error" : "ok",
-            detail.length > 0 ? `${row.externalId} ${quoted}${detail}` : progressLogText(row, value, logTitle),
+            detail.length > 0
+              ? `${row.externalId} ${quoted}${detail}`
+              : progressLogText(row, value, logTitle),
           )
           if (value === "failed" || value === "cancelled") {
             await cancelLaterStages(tx, taskId, row.groupId, row.deviceId, row.externalId, {
@@ -1617,7 +1721,7 @@ export const registerBoxLink = (
         await tx`
           update execution_task_step
           set status = ${stepStatus}, finished_at = now(), result = ${tx.json(outputs)},
-            error_code = ${body?.error_code ?? null}
+            error_code = ${stepStatus === status ? (body?.error_code ?? null) : "write_account"}
           where id = ${row.stepId}::uuid
         `
         await tx`
@@ -1664,7 +1768,7 @@ export const registerBoxLink = (
           liveSteps !== null &&
           liveSteps > 0 &&
           Number.isInteger(liveSequence)
-        if ((status === "failed" || status === "cancelled") && !liveFailureJump) {
+        if ((stepStatus === "failed" || stepStatus === "cancelled") && !liveFailureJump) {
           await tx`
             update execution_task_step
             set status = 'cancelled', finished_at = now()
@@ -1672,10 +1776,10 @@ export const registerBoxLink = (
           `
           await tx`
             update execution_task
-            set status = ${status}, finished_at = now(), updated_at = now(), error_code = ${body?.error_code ?? null}
+            set status = ${stepStatus}, finished_at = now(), updated_at = now(), error_code = ${stepStatus === status ? (body?.error_code ?? null) : "write_account"}
             where id = ${taskId}::uuid
           `
-          return finish(status)
+          return finish(stepStatus === "cancelled" ? "cancelled" : "failed", failDetail)
         }
         if (liveFailureJump && liveSteps !== null) {
           const skipped = await skipLaterSteps(tx, taskId, row.stepId, liveSequence, liveSteps)
@@ -1706,6 +1810,9 @@ export const registerBoxLink = (
         }
         if (status === "succeeded" && row.kind === "ExportAndroidContainer") {
           await writeBackupName(tx, row, outputs["exportName"] ?? "")
+        }
+        if (stepStatus === "succeeded" && row.kind === "WriteAccount" && accountWrite !== null) {
+          await writeJumpAccount(tx, row, "1", logTitle, accountWrite)
         }
         if (
           status === "succeeded" &&
@@ -1803,7 +1910,6 @@ export const registerBoxLink = (
       } | null
       const stepId = body?.stepId ?? ""
       const reported = body !== null && Object.hasOwn(body, "output")
-      const output = typeof body?.output === "string" ? body.output.replaceAll("\u0000", "") : ""
       if (token === "" || stepId === "") return context.json({ error: "invalid_guard" }, 400)
       await sql`select d.id from device d join execution_task t on t.device_id = d.id
         join device_agent a on a.device_id = d.id
@@ -1849,102 +1955,9 @@ export const registerBoxLink = (
       const codes = step.guards ?? []
       if (step.guardIndex >= codes.length) return context.json({ action: "pass", pending: false })
       const code = codes[step.guardIndex]
-      if (code !== "ad" && code !== "transcode")
-        return context.json({ error: "invalid_guard" }, 400)
-      const spec = guardCatalog[code]
-      if (!reported) {
-        await sql`update execution_task_step set guard_probe_index = ${step.guardIndex},
-        guard_response = null where id = ${step.id}::uuid`
-        return context.json({
-          action: "probe",
-          guard: code,
-          input: spec.probe.input,
-          label: spec.label,
-          pending: true,
-          skill: spec.probe.skill,
-        })
-      }
-      if (step.probeIndex !== step.guardIndex)
-        return context.json({ error: "guard_probe_required" }, 409)
-      if (!xmlHasText(output, spec.marker)) {
-        const next = step.guardIndex + 1
-        const response = {
-          action: "pass",
-          guard: code,
-          label: spec.label,
-          pending: next < codes.length,
-        }
-        await sql`update execution_task_step set guard_index = ${next}, guard_response = ${sql.json(response)}
-        where id = ${step.id}::uuid`
-        return context.json(response)
-      }
-      const existing = await sql<{ id: string }[]>`
-      select id::text as id from execution_task_step
-      where parent_step_id = ${step.id}::uuid and guard_code = ${code} and status = 'pending'
-    `
-      if (existing[0] !== undefined) {
-        return context.json({
-          action: "ood",
-          guard: code,
-          insertedStepId: existing[0].id,
-          label: spec.label,
-          pending: true,
-        })
-      }
-      const insertedId = randomUUID()
-      const input = { index: "0", text: spec.marker }
-      const tx = sql
-      await tx`update execution_task_step set sequence = sequence + 100000 where task_id = ${taskId}::uuid and sequence > ${step.sequence}`
-      await tx`update execution_task_step set sequence = sequence - 99999 where task_id = ${taskId}::uuid and sequence > 100000`
-      if (step.instanceId) {
-        await tx`
-          insert into execution_task_step (
-            id, task_id, group_id, sequence, command_idempotency_key, fingerprint, kind, target, parameters, status,
-            role, phase, guards, guard_code, guard_index, parent_step_id, instance_id, node_name
-          ) values (
-            ${insertedId}::uuid, ${taskId}::uuid, ${step.groupId}::uuid, ${step.sequence + 1},
-            ${`${taskId}:ood:${insertedId}`}, ${insertedId}, 'ClickNode', ${tx.json(z.json().parse(step.target ?? {}))}, ${tx.json(input)}, 'pending',
-            'ood', 'skill', ${tx.json([])}, ${code}, 0, ${step.id}::uuid, ${step.instanceId}::uuid, ${skillNodeName("ClickNode")}
-          )
-        `
-      } else {
-        await tx`
-          insert into execution_task_step (
-            id, task_id, group_id, sequence, command_idempotency_key, fingerprint, kind, target, parameters, status,
-            role, phase, guards, guard_code, guard_index, parent_step_id, node_name
-          ) values (
-            ${insertedId}::uuid, ${taskId}::uuid, ${step.groupId}::uuid, ${step.sequence + 1},
-            ${`${taskId}:ood:${insertedId}`}, ${insertedId}, 'ClickNode', ${tx.json(z.json().parse(step.target ?? {}))}, ${tx.json(input)}, 'pending',
-            'ood', 'skill', ${tx.json([])}, ${code}, 0, ${step.id}::uuid, ${skillNodeName("ClickNode")}
-          )
-        `
-      }
-      await tx`update execution_task_step set status = 'held', phase = 'guard' where id = ${step.id}::uuid`
-      await tx`update execution_task set status = 'ood', updated_at = now(), finished_at = null where id = ${taskId}::uuid`
-      await tx`update execution_task_device_lease set released_at = now() where task_id = ${taskId}::uuid and released_at is null`
-      await tx`
-        update execution_task_run
-        set status = 'cancelled', finished_at = now(), recovery_reason = 'ood'
-        where task_id = ${taskId}::uuid and finished_at is null
-      `
-      const response = {
-        action: "ood",
-        guard: code,
-        insertedStepId: insertedId,
-        label: spec.label,
-        pending: true,
-      }
-      await sql`update execution_task_step set guard_response = ${sql.json(response)} where id = ${step.id}::uuid`
-      await writeLog(
-        sql,
-        step.groupId,
-        step.deviceId,
-        "info",
-        `守护 ${spec.label} 发现 ${spec.marker}，插入点击`,
-      )
-      await sql`select pg_notify('agent_task', ${step.deviceId})`
-      wake(step.deviceId)
-      return context.json(response)
+      if (code === "ad" || code === "transcode")
+        return context.json({ action: "pass", guard: code, pending: false })
+      return context.json({ error: "invalid_guard" }, 400)
     })
   })
 
@@ -2026,6 +2039,35 @@ export const registerBoxLink = (
       groupId: device.groupId,
     })
     return context.body(null, 204)
+  })
+
+  app.get("/agent/match-images/:id", async (context) => {
+    const token = bearer(context.req.header("authorization"))
+    const boxId = context.req.query("boxId") ?? ""
+    const id = context.req.param("id")
+    if (!/^[0-9a-f-]{36}$/i.test(id) || token === "" || boxId === "") return context.body(null, 401)
+    const rows = await sql<{ bytes: Buffer }[]>`
+      select m.bytes
+      from match_image m
+      join device d on d.assignee_user_id = m.administrator_id
+      join device_agent a on a.device_id = d.id
+      where m.id = ${id}::uuid
+        and a.token_hash = ${hashToken(token)}
+        and d.external_id = ${boxId}
+        and d.enabled = true
+        and exists (
+          select 1 from execution_task t
+          join execution_task_step s on s.task_id = t.id
+          where t.device_id = d.id
+            and t.executor_key = 'box-agent'
+            and t.status in ('queued', 'dispatching', 'running', 'ood', 'needs_reconciliation')
+            and s.parameters->>'matchImageId' = m.id::text
+        )
+      limit 1
+    `
+    const bytes = rows[0]?.bytes
+    if (bytes === undefined || bytes.length === 0) return context.body(null, 404)
+    return context.body(bytes, 200, { "content-type": matchImageType(bytes) })
   })
 
   app.get("/agent/templates/:id/:ver", (context) =>
@@ -2455,6 +2497,18 @@ export const registerBoxLink = (
       ) {
         return context.json({ error: "skill_rejected" }, 400)
       }
+      const swipeWaitProblem = steps
+        .map((step) => (step.skill === "SwipeWait" ? swipeWaitError(step.input) : null))
+        .find((item) => item !== null)
+      if (swipeWaitProblem !== undefined && swipeWaitProblem !== null) {
+        return context.json({ error: swipeWaitProblem }, 400)
+      }
+      const screenActProblem = steps
+        .map((step) => (step.skill === "ScreenAct" ? screenActError(step.input) : null))
+        .find((item) => item !== null)
+      if (screenActProblem !== undefined && screenActProblem !== null) {
+        return context.json({ error: screenActProblem }, 400)
+      }
       const prepared = steps.map((step) => {
         const input = step.input ?? {}
         const skill = step.skill ?? ""
@@ -2473,7 +2527,8 @@ export const registerBoxLink = (
         if (sources === null) return null
         return { input, scopes, skill, sources }
       })
-      if (prepared.some((item) => item === null)) return context.json({ error: "skill_rejected" }, 400)
+      if (prepared.some((item) => item === null))
+        return context.json({ error: "skill_rejected" }, 400)
       if (
         prepared.some(
           (item) =>
@@ -2486,18 +2541,14 @@ export const registerBoxLink = (
         return context.json({ error: "没有外部概率" }, 400)
       }
       if (
-        prepared.some(
-          (item) =>
-            item !== null &&
-            item.skill === "SendText" &&
-            item.scopes.text === "external" &&
-            item.sources.text === "pool.text",
-        )
+        prepared.some((item) => item !== null && usesExternalText(item))
       ) {
         return context.json({ error: "没有文本池" }, 400)
       }
       const parameters = prepared.flatMap((item) =>
-        item === null ? [] : [{ input: item.input, scopes: item.scopes, skill: item.skill, sources: item.sources }],
+        item === null
+          ? []
+          : [{ input: item.input, scopes: item.scopes, skill: item.skill, sources: item.sources }],
       )
       const indexNum = Number(body?.indexNum ?? 0)
       const hash = hashToken(
@@ -2652,7 +2703,14 @@ export const registerBoxLink = (
       where administrator_id = ${administratorId}::uuid
       order by updated_at desc
     `
-    return context.json(rows.map(chainView))
+    const labels = await remarkMap(
+      sql,
+      "behavior",
+      rows.map((row) => row.id),
+    )
+    return context.json(
+      rows.map((row) => ({ ...chainView(row), remarks: labels.get(row.id) ?? [] })),
+    )
   })
 
   app.post("/api/behavior-chains", async (context) => {
@@ -2708,7 +2766,8 @@ export const registerBoxLink = (
     `
     const row = rows[0]
     if (row === undefined) return context.json({ error: "invalid_chain" }, 400)
-    return context.json(chainView(row), 201)
+    const labels = await remarkMap(sql, "behavior", [row.id])
+    return context.json({ ...chainView(row), remarks: labels.get(row.id) ?? [] }, 201)
   })
 
   app.put("/api/behavior-chains/:id", async (context) => {
@@ -2751,9 +2810,9 @@ export const registerBoxLink = (
       returning ${sql.unsafe(chainColumns)}
     `
     const row = rows[0]
-    return row === undefined
-      ? context.json({ error: "not_found" }, 404)
-      : context.json(chainView(row))
+    if (row === undefined) return context.json({ error: "not_found" }, 404)
+    const labels = await remarkMap(sql, "behavior", [row.id])
+    return context.json({ ...chainView(row), remarks: labels.get(row.id) ?? [] })
   })
 
   app.delete("/api/behavior-chains/:id", async (context) => {

@@ -27,6 +27,7 @@ type ResourceRow = {
   readonly name: string
   readonly note: string
   readonly assignedCount?: number
+  readonly lastAccount?: string
   readonly lastAssignedAt?: Date | null
   readonly status: string
   readonly tags: readonly string[]
@@ -48,6 +49,7 @@ const toResource = (row: ResourceRow): OperationResource => ({
   groupId: z.string().uuid().brand<"GroupId">().parse(row.groupId),
   id: OperationResourceIdSchema.parse(row.id),
   assignedCount: row.assignedCount ?? 0,
+  lastAccount: row.lastAccount ?? "",
   lastAssignedAt: row.lastAssignedAt ?? null,
   name: row.name,
   note: row.note,
@@ -245,7 +247,11 @@ export const createPostgresResourceRepository = (client: Sql): ResourceRepositor
   },
   list: async (filter) => {
     const rows = await client<ResourceRow[]>`
-      select ${resourceColumns(client)},
+      select operation_resource.id, operation_resource.group_id as "groupId", operation_resource.name,
+        operation_resource.category, operation_resource.note, operation_resource.tags,
+        operation_resource.status, operation_resource.created_at as "createdAt",
+        operation_resource.updated_at as "updatedAt",
+        coalesce(account.identifier, '') as "lastAccount",
         coalesce((
           select count(*)::int from operation_resource_allocation allocation
           where allocation.resource_id = operation_resource.id
@@ -254,8 +260,11 @@ export const createPostgresResourceRepository = (client: Sql): ResourceRepositor
           select max(allocation.created_at) from operation_resource_allocation allocation
           where allocation.resource_id = operation_resource.id
         ) as "lastAssignedAt"
-      from operation_resource where group_id = ${filter.groupId}
-      order by created_at desc, id desc
+      from operation_resource
+      left join operation_account account
+        on account.id = operation_resource.last_account_id and account.deleted = false
+      where operation_resource.group_id = ${filter.groupId}
+      order by operation_resource.created_at desc, operation_resource.id desc
     `
     const all = rows.map(toResource).filter((resource) => matching(resource, filter))
     const offset = (filter.page - 1) * filter.pageSize

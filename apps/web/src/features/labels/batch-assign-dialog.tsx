@@ -46,7 +46,7 @@ export const BatchAssignDialog = ({
   selectedCount,
   tagOptions,
 }: {
-  readonly groupOptions: readonly Choice[]
+  readonly groupOptions?: readonly Choice[]
   readonly onCancel: () => void
   readonly onSubmit: (result: BatchAssignResult) => void
   readonly open: boolean
@@ -80,7 +80,7 @@ export const BatchAssignDialog = ({
       onCancel={onCancel}
       onOk={submit}
       open={open}
-      title="批量分配备注和分组"
+      title={groupOptions === undefined ? "批量分配备注" : "批量分配备注和分组"}
     >
       <Space direction="vertical" style={{ width: "100%" }}>
         <span>已选 {selectedCount} 条</span>
@@ -94,16 +94,18 @@ export const BatchAssignDialog = ({
           style={{ width: "100%" }}
           value={remarks}
         />
-        <Select
-          aria-label="批量分组"
-          mode="tags"
-          onChange={(values: string[]) => setGroup(keepLatest(values, false))}
-          optionFilterProp="label"
-          options={[...groupOptions]}
-          placeholder="不修改；选择一个分组，替换选中行的分组"
-          style={{ width: "100%" }}
-          value={group}
-        />
+        {groupOptions === undefined ? null : (
+          <Select
+            aria-label="批量分组"
+            mode="tags"
+            onChange={(values: string[]) => setGroup(keepLatest(values, false))}
+            optionFilterProp="label"
+            options={[...groupOptions]}
+            placeholder="不修改；选择一个分组，替换选中行的分组"
+            style={{ width: "100%" }}
+            value={group}
+          />
+        )}
         {tagOptions === undefined ? null : (
           <Select
             aria-label="批量标签"

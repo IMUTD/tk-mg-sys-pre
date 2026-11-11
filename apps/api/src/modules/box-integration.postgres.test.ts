@@ -1282,54 +1282,19 @@ describe("initializer and box software integration", () => {
     })
   })
 
-  pgTest(
-    "persists idempotent guard insertion and resumes the next guard without replaying the skill",
-    async () => {
-      const { sql, post, enqueue, claim, status } = await setup()
-      await enqueue("guards", 1, ["transcode", "ad"])
-      const pointer = Pointer.parse(await (await claim()).json())
-      const path = `/agent/tasks/${pointer.task_id}/guard`
-      const body = { stepId: pointer.checkpoint.step_id }
-      expect(await (await post(path, body, true)).json()).toMatchObject({
-        action: "probe",
-        guard: "ad",
-      })
-      expect((await status(pointer)).status).toBe(409)
-      const reports = await Promise.all(
-        [1, 2].map(() =>
-          post(
-            path,
-            {
-              ...body,
-              output: '<node text="Settings"/>',
-            },
-            true,
-          ),
-        ),
-      )
-      const first = await reports[0]?.json()
-      expect(first).toMatchObject({ action: "ood", guard: "ad" })
-      expect(await reports[1]?.json()).toEqual(first)
-      expect(await sql`select id from execution_task_step where role = 'ood'`).toHaveLength(1)
-      const guard = Pointer.parse(await (await claim()).json())
-      expect(guard.role).toBe("ood")
-      expect((await status(guard)).status).toBe(200)
-      const resumed = Pointer.parse(await (await claim()).json())
-      expect(resumed.phase).toBe("guard")
-      expect(resumed.checkpoint.step_id).toBe(pointer.checkpoint.step_id)
-      expect(await (await post(path, body, true)).json()).toMatchObject({
-        action: "probe",
-        guard: "transcode",
-      })
-      const pass = await post(path, { ...body, output: '<node text="clear"/>' }, true)
-      expect(await pass.json()).toMatchObject({
-        action: "pass",
-        guard: "transcode",
-        pending: false,
-      })
-      expect((await status(resumed)).status).toBe(200)
-    },
-  )
+  pgTest("retired ad and transcode guards pass without inserting a click", async () => {
+    const { sql, post, enqueue, claim } = await setup()
+    await enqueue("guards", 1, ["transcode", "ad"])
+    const pointer = Pointer.parse(await (await claim()).json())
+    const path = `/agent/tasks/${pointer.task_id}/guard`
+    const body = { stepId: pointer.checkpoint.step_id }
+    expect(await (await post(path, body, true)).json()).toEqual({
+      action: "pass",
+      guard: "ad",
+      pending: false,
+    })
+    expect(await sql`select id from execution_task_step where role = 'ood'`).toHaveLength(0)
+  })
 
   pgTest(
     "rejects malformed and foreign reports and expires long polls and watch access",

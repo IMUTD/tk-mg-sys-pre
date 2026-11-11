@@ -341,6 +341,14 @@ export const ResourcesListPage = ({
             width: 120,
           },
           {
+            dataIndex: "lastAccount",
+            ellipsis: true,
+            key: "lastAccount",
+            render: (value: string | undefined) => value ?? "",
+            title: "上次账号",
+            width: 160,
+          },
+          {
             dataIndex: "remark",
             ellipsis: true,
             key: "remark",

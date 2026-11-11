@@ -370,7 +370,12 @@ export const filterProxies = (
   proxies.filter((item) => {
     const remarkParts = splitRemarks(item.remark)
     const keyword = query.search.trim()
-    return combineChecks(mode, [
+    const keywordHit =
+      keyword.length === 0 ||
+      [item.ip, item.port, item.remark, item.tag].some((field) => includesIgnoreCase(field, keyword))
+    return (
+      keywordHit &&
+      combineChecks(mode, [
       query.id.length > 0 ? String(item.id) === query.id.trim() : null,
       query.noTag ? item.tag.length === 0 : query.tag.length > 0 ? item.tag === query.tag : null,
       query.type.length > 0 ? item.type === query.type : null,
@@ -390,12 +395,8 @@ export const filterProxies = (
         : query.region.length > 0
           ? proxyDetectedRegion(item) === query.region
           : null,
-      keyword.length > 0
-        ? [item.ip, item.port, item.remark, item.tag].some((field) =>
-            includesIgnoreCase(field, keyword),
-          )
-        : null,
     ])
+    )
   })
 
 export const isStructuredResult = (value: unknown): value is ProxyCheckResult =>

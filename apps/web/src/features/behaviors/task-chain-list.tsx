@@ -1,8 +1,13 @@
-import { App, Button, Card, Form, Input, Modal, Select } from "antd"
-import { type ReactNode, useEffect, useState } from "react"
+import { App, Button, Card, Checkbox, Form, Input, Modal, Select, Space, Tag } from "antd"
+import { type ReactNode, useEffect, useMemo, useState } from "react"
 
+import type { FilterMode } from "../../components/tables/operation-controls"
+import { usageLabel } from "../labels/filter-row"
+import { ChainConditionCard } from "./chain-condition"
+import { countBy, matchTaskChain } from "./chain-filter"
+import { useChainRemarkTools } from "./chain-remark-tools"
 import { useChains } from "./chain-store"
-import { type ChainStep, stepText } from "./rpa-api"
+import { apiLabel, type ChainStep, stepText } from "./rpa-api"
 
 type TaskChainStep = ChainStep
 
@@ -16,6 +21,7 @@ type TaskChainStage = {
 type TaskChain = {
   readonly id: string
   readonly name: string
+  readonly remarks?: readonly { readonly id: string; readonly name: string }[]
   readonly stages: readonly TaskChainStage[]
   readonly updatedAt: string
 }
@@ -32,7 +38,8 @@ const readError = async (response: Response): Promise<string> => {
 const loadTaskChains = async (): Promise<TaskChain[]> => {
   const response = await fetch("/api/task-chains", { credentials: "same-origin" })
   if (!response.ok) throw new Error(await readError(response))
-  return (await response.json()) as TaskChain[]
+  const rows = (await response.json()) as TaskChain[]
+  return rows.map((item) => ({ ...item, remarks: item.remarks ?? [] }))
 }
 
 const stageSummary = (steps: readonly TaskChainStep[]): string => {
@@ -42,7 +49,11 @@ const stageSummary = (steps: readonly TaskChainStep[]): string => {
   return steps.length === 1 ? text : `${text} · 等 ${steps.length} 步`
 }
 
-const saveTaskChain = async (name: string, rows: readonly DraftRow[], id?: string): Promise<void> => {
+const saveTaskChain = async (
+  name: string,
+  rows: readonly DraftRow[],
+  id?: string,
+): Promise<void> => {
   const response = await fetch(id === undefined ? "/api/task-chains" : `/api/task-chains/${id}`, {
     body: JSON.stringify({ name, stages: rows.map((row) => ({ chainId: row.chainId })) }),
     credentials: "same-origin",
@@ -52,7 +63,10 @@ const saveTaskChain = async (name: string, rows: readonly DraftRow[], id?: strin
   if (!response.ok) throw new Error(await readError(response))
 }
 
-export const TaskChainList = ({ canDelete, canWrite }: {
+export const TaskChainList = ({
+  canDelete,
+  canWrite,
+}: {
   readonly canDelete?: boolean
   readonly canWrite: boolean
 }): ReactNode => {
@@ -63,6 +77,37 @@ export const TaskChainList = ({ canDelete, canWrite }: {
   const [name, setName] = useState("")
   const [rows, setRows] = useState<DraftRow[]>([])
   const [pick, setPick] = useState<string | null>(null)
+  const [keyword, setKeyword] = useState("")
+  const [chainNames, setChainNames] = useState<readonly string[]>([])
+  const [apis, setApis] = useState<readonly string[]>([])
+  const [remarkFilters, setRemarkFilters] = useState<readonly string[]>([])
+  const [mode, setMode] = useState<FilterMode>("and")
+  const filter = { apis, chains: chainNames, keyword, mode, remarks: remarkFilters }
+  const filtered = items.filter((item) => matchTaskChain(item, filter))
+  const chainOptions = useMemo(() => {
+    const counts = countBy(
+      items.flatMap((item) => [...new Set(item.stages.map((stage) => stage.chainName))]),
+    )
+    return [...counts.entries()]
+      .map(([value, count]) => ({ label: usageLabel(value, count), value }))
+      .sort((left, right) => left.label.localeCompare(right.label, "zh-CN"))
+  }, [items])
+  const apiOptions = useMemo(() => {
+    const counts = countBy(
+      items.flatMap((item) => [
+        ...new Set(item.stages.flatMap((stage) => stage.steps.map((step) => step.api))),
+      ]),
+    )
+    return [...counts.entries()]
+      .map(([value, count]) => ({ label: usageLabel(apiLabel(value), count), value }))
+      .sort((left, right) => left.label.localeCompare(right.label, "zh-CN"))
+  }, [items])
+  const reset = (): void => {
+    setKeyword("")
+    setChainNames([])
+    setApis([])
+    setRemarkFilters([])
+  }
 
   const refresh = (): void => {
     void loadTaskChains()
@@ -82,7 +127,10 @@ export const TaskChainList = ({ canDelete, canWrite }: {
     setRows(
       item === "new"
         ? []
-        : item.stages.map((stage) => ({ chainId: stage.chainId, key: `${stage.position}-${stage.chainId}` })),
+        : item.stages.map((stage) => ({
+            chainId: stage.chainId,
+            key: `${stage.position}-${stage.chainId}`,
+          })),
     )
     setPick(null)
   }
@@ -120,20 +168,61 @@ export const TaskChainList = ({ canDelete, canWrite }: {
       })
   }
 
+  const remarks = useChainRemarkTools({
+    canWrite,
+    filteredIds: filtered.map((item) => item.id),
+    filters: remarkFilters,
+    items,
+    onFilters: setRemarkFilters,
+    onReload: refresh,
+    scope: "task-chain",
+  })
+
   return (
     <div className="behaviors-pane">
+      <ChainConditionCard
+        keyword={keyword}
+        mode={mode}
+        onKeyword={setKeyword}
+        onMode={setMode}
+        onReset={reset}
+        placeholder="名称 / 行为链 / 步骤"
+        rows={[
+          remarks.row,
+          {
+            multiple: true,
+            onChange: setChainNames,
+            options: chainOptions,
+            selected: chainNames,
+            title: "行为链",
+            tone: "group",
+          },
+          {
+            multiple: true,
+            onChange: setApis,
+            options: apiOptions,
+            selected: apis,
+            title: "接口",
+            tone: "remark",
+          },
+        ]}
+        searchLabel="搜索任务链"
+      />
       <div className="behaviors-toolbar">
+        {remarks.toolbar}
         {canWrite ? (
           <Button onClick={() => open("new")} type="primary">
             新建任务链
           </Button>
         ) : null}
       </div>
-      {items.length === 0 ? (
-        <Card className="behaviors-empty">暂无任务链</Card>
+      {filtered.length === 0 ? (
+        <Card className="behaviors-empty">
+          {items.length === 0 ? "暂无任务链" : "没有符合条件的任务链"}
+        </Card>
       ) : (
         <div className="behaviors-card-grid">
-          {items.map((item) => (
+          {filtered.map((item) => (
             <Card
               extra={
                 <>
@@ -178,9 +267,29 @@ export const TaskChainList = ({ canDelete, canWrite }: {
                 </>
               }
               key={item.id}
-              title={item.name}
+              title={
+                <span className="chain-card-title">
+                  {canWrite ? (
+                    <Checkbox
+                      aria-label={`选择 ${item.name}`}
+                      checked={remarks.selected.has(item.id)}
+                      onChange={() => remarks.toggle(item.id)}
+                    />
+                  ) : null}
+                  <span>{item.name}</span>
+                </span>
+              }
             >
               <p>{item.stages.map((stage) => stage.chainName).join(" → ")}</p>
+              {(item.remarks ?? []).length === 0 ? null : (
+                <Space wrap>
+                  {(item.remarks ?? []).map((remark) => (
+                    <Tag color="blue" key={remark.id}>
+                      {remark.name}
+                    </Tag>
+                  ))}
+                </Space>
+              )}
               <ol className="chain-steps">
                 {item.stages
                   .flatMap((stage) => stage.steps.map((step) => ({ name: stage.chainName, step })))
@@ -250,7 +359,9 @@ export const TaskChainList = ({ canDelete, canWrite }: {
                   <span className="task-chain-stage-index">{index + 1}</span>
                   <div className="task-chain-stage-body">
                     <div className="task-chain-stage-name">{chain?.name ?? "行为链"}</div>
-                    <div className="task-chain-stage-summary">{stageSummary(chain?.steps ?? [])}</div>
+                    <div className="task-chain-stage-summary">
+                      {stageSummary(chain?.steps ?? [])}
+                    </div>
                   </div>
                   <div className="task-chain-stage-actions">
                     <Button disabled={index === 0} onClick={() => move(index, -1)} size="small">
@@ -264,7 +375,9 @@ export const TaskChainList = ({ canDelete, canWrite }: {
                       下移
                     </Button>
                     <Button
-                      onClick={() => setRows((current) => current.filter((item) => item.key !== row.key))}
+                      onClick={() =>
+                        setRows((current) => current.filter((item) => item.key !== row.key))
+                      }
                       size="small"
                     >
                       移除
@@ -276,6 +389,7 @@ export const TaskChainList = ({ canDelete, canWrite }: {
           </ol>
         )}
       </Modal>
+      {remarks.dialog}
     </div>
   )
 }

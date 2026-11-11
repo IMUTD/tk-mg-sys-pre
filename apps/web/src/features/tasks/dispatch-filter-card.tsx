@@ -34,12 +34,20 @@ type DispatchFilterCardProps = {
   readonly required?: boolean
   readonly title: string
   readonly unit: string
+  readonly value?: FilterCardValue
 }
 
 export const chipOptions = (
   names: readonly string[],
   count: (name: string) => number,
 ): LabelOption[] => names.map((name) => ({ label: usageLabel(name, count(name)), value: name }))
+
+const remembered = (value: FilterCardValue | undefined): boolean =>
+  value !== undefined &&
+  (value.ids.length > 0 ||
+    value.keyword.trim().length > 0 ||
+    value.mode !== "and" ||
+    Object.values(value.selected).some((names) => names.length > 0))
 
 export const DispatchFilterCard = ({
   columns,
@@ -52,12 +60,18 @@ export const DispatchFilterCard = ({
   required = false,
   title,
   unit,
+  value,
 }: DispatchFilterCardProps): ReactNode => {
   const seen = useRef(new Set<string>())
-  const [mode, setMode] = useState<FilterMode>("and")
-  const [keyword, setKeyword] = useState("")
-  const [selected, setSelected] = useState<Record<string, string[]>>({})
-  const [picked, setPicked] = useState<string[]>([])
+  const restoring = useRef(remembered(value))
+  const [mode, setMode] = useState<FilterMode>(value?.mode ?? "and")
+  const [keyword, setKeyword] = useState(value?.keyword ?? "")
+  const [selected, setSelected] = useState<Record<string, string[]>>(() =>
+    Object.fromEntries(
+      Object.entries(value?.selected ?? {}).map(([key, names]) => [key, [...names]]),
+    ),
+  )
+  const [picked, setPicked] = useState<string[]>(() => [...(value?.ids ?? [])])
   const active =
     lines.some((line) => (selected[line.key] ?? []).length > 0) || keyword.trim().length > 0
   const prepared = prepare({ ids: [], keyword, mode, selected })
@@ -76,6 +90,18 @@ export const DispatchFilterCard = ({
   useEffect(() => {
     const ids = visibleKey.length === 0 ? [] : visibleKey.split("\n")
     const known = new Set(ids)
+    if (restoring.current) {
+      if (ids.length === 0) return
+      for (const id of ids) seen.current.add(id)
+      restoring.current = false
+      setPicked((current) => {
+        const next = current.filter((id) => known.has(id))
+        return next.length === current.length && next.every((id, index) => id === current[index])
+          ? current
+          : next
+      })
+      return
+    }
     setPicked((current) => {
       const next = current.filter((id) => known.has(id))
       for (const id of ids) {

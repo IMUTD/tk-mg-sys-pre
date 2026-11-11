@@ -97,19 +97,114 @@ export const devicePointFromEvent = (
   }
 }
 
+export type SwipeDirection = "down" | "left" | "right" | "up"
+
+const swipeDirections = new Set<SwipeDirection>(["down", "left", "right", "up"])
+
+const swipeNumber = (value: string | undefined, fallback: number): number => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+export const swipeDirectionFromDelta = (dx: number, dy: number): SwipeDirection => {
+  if (Math.abs(dx) > Math.abs(dy)) return dx >= 0 ? "right" : "left"
+  return dy > 0 ? "down" : "up"
+}
+
+export const swipeDirectionOf = (params: Record<string, string>): SwipeDirection => {
+  const named = params["direction"]
+  if (named !== undefined && swipeDirections.has(named as SwipeDirection)) return named as SwipeDirection
+  return swipeDirectionFromDelta(
+    swipeNumber(params["x1"], 0) - swipeNumber(params["x0"], 0),
+    swipeNumber(params["y1"], 0) - swipeNumber(params["y0"], 0),
+  )
+}
+
+const axisOf = (direction: SwipeDirection): { x: number; y: number } => {
+  if (direction === "left") return { x: -1, y: 0 }
+  if (direction === "right") return { x: 1, y: 0 }
+  if (direction === "down") return { x: 0, y: 1 }
+  return { x: 0, y: -1 }
+}
+
+export const withInferredSwipeDirection = (params: Record<string, string>): Record<string, string> => {
+  const ready = ["x0", "y0", "x1", "y1"].every((key) => /^-?\d+$/.test((params[key] ?? "").trim()))
+  if (!ready) return params
+  return {
+    ...params,
+    direction: swipeDirectionFromDelta(
+      swipeNumber(params["x1"], 0) - swipeNumber(params["x0"], 0),
+      swipeNumber(params["y1"], 0) - swipeNumber(params["y0"], 0),
+    ),
+  }
+}
+
+export const paramsForPhaseSwipe = (
+  params: Record<string, string>,
+  phase: string,
+  direction: SwipeDirection,
+): Record<string, string> => {
+  const next = paramsForSwipeDirection(
+    {
+      direction: params[`${phase}Direction`] ?? "",
+      x0: params[`${phase}X0`] ?? "",
+      x1: params[`${phase}X1`] ?? "",
+      y0: params[`${phase}Y0`] ?? "",
+      y1: params[`${phase}Y1`] ?? "",
+    },
+    direction,
+  )
+  return {
+    ...params,
+    [`${phase}Direction`]: next["direction"] ?? direction,
+    [`${phase}X0`]: next["x0"] ?? "",
+    [`${phase}X1`]: next["x1"] ?? "",
+    [`${phase}Y0`]: next["y0"] ?? "",
+    [`${phase}Y1`]: next["y1"] ?? "",
+  }
+}
+
+export const paramsForSwipeDirection = (
+  params: Record<string, string>,
+  direction: SwipeDirection,
+): Record<string, string> => {
+  const x0 = swipeNumber(params["x0"], 540)
+  const y0 = swipeNumber(params["y0"], 1600)
+  const x1 = swipeNumber(params["x1"], 540)
+  const y1 = swipeNumber(params["y1"], 900)
+  const length = Math.max(Math.hypot(x1 - x0, y1 - y0), 80)
+  const midX = (x0 + x1) / 2
+  const midY = (y0 + y1) / 2
+  const axis = axisOf(direction)
+  const half = length / 2
+  const place = (value: number): string => String(Math.max(0, Math.round(value)))
+  return {
+    ...params,
+    direction,
+    x0: place(midX - axis.x * half),
+    x1: place(midX + axis.x * half),
+    y0: place(midY - axis.y * half),
+    y1: place(midY + axis.y * half),
+  }
+}
+
 const swipeFromStart = (
   params: Record<string, string>,
   start: DevicePoint,
 ): Record<string, string> => {
-  const lift = Math.max(80, Math.round(start.h * 0.4))
+  const direction = swipeDirectionOf(params)
+  const liftX = Math.max(80, Math.round(start.w * 0.4))
+  const liftY = Math.max(80, Math.round(start.h * 0.4))
+  const axis = axisOf(direction)
   const clamp = (value: number, max: number): string =>
     String(Math.max(0, Math.min(Math.max(max, 1) - 1, Math.round(value))))
   return {
     ...params,
+    direction,
     x0: clamp(start.x, start.w),
-    x1: clamp(start.x, start.w),
+    x1: clamp(start.x + axis.x * (axis.x === 0 ? 0 : liftX), start.w),
     y0: clamp(start.y, start.h),
-    y1: clamp(start.y - lift, start.h),
+    y1: clamp(start.y + axis.y * (axis.y === 0 ? 0 : liftY), start.h),
   }
 }
 
@@ -124,6 +219,7 @@ export const applyScreenToParams = (
       distance >= 24
         ? {
             ...params,
+            direction: swipeDirectionFromDelta(end.x - start.x, end.y - start.y),
             x0: String(start.x),
             x1: String(end.x),
             y0: String(start.y),

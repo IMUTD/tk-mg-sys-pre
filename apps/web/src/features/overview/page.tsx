@@ -1,7 +1,6 @@
 import {
   CloudServerOutlined,
   DatabaseOutlined,
-  GiftOutlined,
   GlobalOutlined,
   InboxOutlined,
   NodeIndexOutlined,
@@ -11,7 +10,6 @@ import {
   TeamOutlined,
   UnorderedListOutlined,
   UserOutlined,
-  VideoCameraOutlined,
 } from "@ant-design/icons"
 import { Card, Col, Row, Statistic, Typography } from "antd"
 import type { ReactNode } from "react"
@@ -29,9 +27,7 @@ const shortcuts = [
   { icon: <DatabaseOutlined />, path: "/studio/registration", title: "注册池" },
   { icon: <CloudServerOutlined />, path: "/engineering/storage", title: "私有云储存" },
   { icon: <RobotOutlined />, path: "/engineering/robots", title: "运营机器人" },
-  { icon: <GiftOutlined />, path: "/mall/records", title: "积分记录" },
   { icon: <PlaySquareOutlined />, path: "/studio/video-pool", title: "视频数据" },
-  { icon: <VideoCameraOutlined />, path: "/studio/video", title: "视频制作" },
   { icon: <NodeIndexOutlined />, path: "/engineering/behaviors", title: "行为中心" },
 ] as const
 

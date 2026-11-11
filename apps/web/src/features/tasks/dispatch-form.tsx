@@ -1,7 +1,8 @@
-﻿import { App, Button, Form, Input, Modal, Radio, Select, Slider, Switch } from "antd"
-import { type ReactNode, useEffect, useState } from "react"
+﻿import { App, Button, Form, Input, Modal, Radio, Select, Slider, Switch, Tag } from "antd"
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 
 import { combineChecks } from "../../components/tables/operation-controls"
+import { LabelFilterRow, usageLabel } from "../labels/filter-row"
 import { createDispatchApi, type DispatchMediaFile, type DispatchOptions } from "./dispatch-api"
 import { type CloudInstance, DispatchCloudPick } from "./dispatch-cloud"
 import {
@@ -90,6 +91,51 @@ type RepeatDraft =
   | { readonly count: string; readonly mode: "fixed" }
   | { readonly max: string; readonly min: string; readonly mode: "range" }
 
+type QuickPayload = {
+  readonly accountCard: FilterCardValue
+  readonly chances: Record<string, number>
+  readonly continent: string
+  readonly instances?: readonly CloudInstance[]
+  readonly language: string | null
+  readonly limits: Record<string, string>
+  readonly pitRange?: readonly number[]
+  readonly mediaCards: Record<string, FilterCardValue>
+  readonly mediaDraw: Record<string, "random" | "sequence">
+  readonly proxyCard: FilterCardValue
+  readonly refreshes: Record<string, boolean>
+  readonly region: string | null
+  readonly repeats: Record<string, RepeatDraft>
+  readonly retries: Record<string, { limit: string; on: boolean }>
+  readonly taskChainId: string | null
+  readonly taskRemarks: readonly string[]
+  readonly textCards: Record<string, FilterCardValue>
+}
+
+type QuickTask = { readonly id: string; readonly name: string; readonly payload: QuickPayload }
+
+const pitNumbers = [1, 2, 3, 4, 5]
+
+const keptPits = (
+  values: readonly CloudInstance[] | undefined,
+): readonly CloudInstance[] => {
+  if (values === undefined) return []
+  const seen = new Set<string>()
+  const next: CloudInstance[] = []
+  for (const item of values) {
+    if (typeof item?.deviceId !== "string" || !Number.isInteger(item.index)) continue
+    if (item.index < 1 || item.index > 5 || seen.has(`${item.deviceId}#${item.index}`)) continue
+    seen.add(`${item.deviceId}#${item.index}`)
+    next.push({ deviceId: item.deviceId, index: item.index })
+  }
+  return next
+}
+
+const keptRange = (values: readonly number[] | undefined): readonly number[] => {
+  if (values === undefined) return pitNumbers
+  const chosen = new Set(values)
+  return pitNumbers.filter((item) => chosen.has(item))
+}
+
 const fixedDraft = (count: string): RepeatDraft => ({ count, mode: "fixed" })
 
 const parseCount = (raw: string): number | null => {
@@ -99,9 +145,10 @@ const parseCount = (raw: string): number | null => {
 }
 
 export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps): ReactNode => {
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const [options, setOptions] = useState<DispatchOptions>(emptyOptions)
   const [taskChainId, setTaskChainId] = useState<string | null>(null)
+  const [taskRemarks, setTaskRemarks] = useState<readonly string[]>([])
   const [repeats, setRepeats] = useState<Record<number, RepeatDraft>>({})
   const [retries, setRetries] = useState<Record<number, { limit: string; on: boolean }>>({})
   const [refreshes, setRefreshes] = useState<Record<string, boolean>>({})
@@ -110,6 +157,7 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
     instances: readonly CloudInstance[]
     pitRange: readonly number[]
   }>({ instances: [], pitRange: [1, 2, 3, 4, 5] })
+  const [draftToken, setDraftToken] = useState(0)
   const [proxyCard, setProxyCard] = useState<FilterCardValue>(emptyCard)
   const [textCards, setTextCards] = useState<Record<string, FilterCardValue>>({})
   const [mediaCards, setMediaCards] = useState<Record<string, FilterCardValue>>({})
@@ -121,7 +169,57 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
   const [limits, setLimits] = useState<Record<string, string>>({})
   const [chances, setChances] = useState<Record<string, number>>({})
   const [saving, setSaving] = useState(false)
-  const taskChain = options.taskChains.find((item) => item.id === taskChainId) ?? null
+  const [quickTasks, setQuickTasks] = useState<readonly QuickTask[]>([])
+  const [quickName, setQuickName] = useState("")
+  const applyCloud = useCallback(
+    (value: { instances: readonly CloudInstance[]; pitRange: readonly number[] }) => {
+      setCloud((current) => ({ ...current, instances: value.instances, pitRange: value.pitRange }))
+    },
+    [],
+  )
+  useEffect(() => {
+    let stop = false
+    void fetch("/api/quick-tasks", { credentials: "same-origin" }).then(async (response) => {
+      if (!response.ok || stop) return
+      const body = (await response.json()) as { items?: QuickTask[] }
+      if (!stop && Array.isArray(body.items)) setQuickTasks(body.items)
+    })
+    return () => {
+      stop = true
+    }
+  }, [])
+  const taskRemarkChoices = useMemo(() => {
+    const counts = new Map<string, { count: number; name: string }>()
+    let blank = 0
+    for (const chain of options.taskChains) {
+      const remarks = chain.remarks ?? []
+      if (remarks.length === 0) blank += 1
+      for (const id of new Set(remarks.map((item) => item.id))) {
+        const remark = remarks.find((item) => item.id === id)
+        if (remark === undefined) continue
+        const current = counts.get(id)
+        counts.set(id, { count: (current?.count ?? 0) + 1, name: remark.name })
+      }
+    }
+    return {
+      blank,
+      options: [...counts.entries()]
+        .map(([value, item]) => ({ label: usageLabel(item.name, item.count), value }))
+        .sort((left, right) => left.label.localeCompare(right.label, "zh-CN")),
+    }
+  }, [options.taskChains])
+  const taskChainChoices = options.taskChains.filter((chain) =>
+    combineChecks("and", [
+      taskRemarks.includes("none") ? (chain.remarks ?? []).length === 0 : null,
+      ...(taskRemarks.includes("none")
+        ? []
+        : taskRemarks.map((id) => (chain.remarks ?? []).some((item) => item.id === id))),
+    ]),
+  )
+  const taskChain = taskChainChoices.find((item) => item.id === taskChainId) ?? null
+  useEffect(() => {
+    if (taskChainId !== null && taskChain === null) setTaskChainId(null)
+  }, [taskChain, taskChainId])
   const stages = taskChain?.stages ?? []
   const needsAccount = stages.some((stage) => stage.anchor !== null)
   const needsRegion = stages.some((stage) => stage.steps.some((step) => regionSkills.has(step.api)))
@@ -147,11 +245,12 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
   )
   const textSteps = stages.flatMap((stage) =>
     stage.steps.flatMap((step, sequence) =>
-      step.api === "SendText" &&
+      (step.api === "SendText" || step.api === "ClickNode" || step.api === "ClickJumpNodes") &&
       step.scopes.text === "external" &&
       step.sources.text === "pool.text"
         ? [
             {
+              api: step.api,
               chainName: stage.chainName,
               remark: (step.remark ?? "").trim(),
               sequence,
@@ -443,6 +542,67 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
           <Button onClick={onCancel} type="text">
             取消
           </Button>
+          <Input
+            aria-label="快捷任务名称"
+            maxLength={40}
+            onChange={(event) => setQuickName(event.target.value)}
+            placeholder="快捷任务名称"
+            style={{ width: 160 }}
+            value={quickName}
+          />
+          <Button
+            onClick={() => {
+              const name = quickName.trim()
+              if (name.length === 0) {
+                message.error("请填写快捷任务名称")
+                return
+              }
+              const payload: QuickPayload = {
+                accountCard,
+                chances,
+                continent,
+                language,
+                limits,
+                mediaCards,
+                mediaDraw,
+                proxyCard,
+                refreshes,
+                region,
+                repeats: Object.fromEntries(
+                  Object.entries(repeats).map(([key, value]) => [key, value]),
+                ),
+                instances: cloud.instances,
+                pitRange: cloud.pitRange,
+                retries,
+                taskChainId,
+                taskRemarks,
+                textCards,
+              }
+              void fetch("/api/quick-tasks", {
+                body: JSON.stringify({ name, payload }),
+                credentials: "same-origin",
+                headers: { "content-type": "application/json" },
+                method: "POST",
+              }).then(async (response) => {
+                if (response.status === 409) {
+                  message.error("这个名称已经有了")
+                  return
+                }
+                if (!response.ok) {
+                  message.error("快捷任务没有保存")
+                  return
+                }
+                const created = (await response.json()) as { id?: string }
+                setQuickTasks((current) => [
+                  { id: created.id ?? name, name, payload },
+                  ...current.filter((item) => item.name !== name),
+                ])
+                message.success("已保存快捷任务")
+              })
+            }}
+          >
+            保存
+          </Button>
           <Button loading={saving} onClick={submit} type="primary">
             确认
           </Button>
@@ -454,6 +614,95 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
       width={940}
     >
       <Form labelCol={{ style: { width: 110 } }} layout="horizontal" size="small">
+        <LabelFilterRow
+          multiple
+          onChange={setTaskRemarks}
+          options={taskRemarkChoices.options}
+          selected={taskRemarks}
+          title="备注"
+          tone="remark"
+          unassigned={{ label: usageLabel("未备注", taskRemarkChoices.blank), value: "none" }}
+        />
+        <div className="dispatch-choice quick-tasks">
+          <span className="filter-label">快捷任务</span>
+          {quickTasks.length === 0 ? <span>还没有快捷任务</span> : null}
+          {quickTasks.map((item) => (
+            <Tag
+              aria-label={item.name}
+              className="quick-task-tag"
+              closable
+              key={item.id}
+              onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) return
+                if (event.key !== "Enter" && event.key !== " ") return
+                event.preventDefault()
+                event.currentTarget.click()
+              }}
+              onClick={(event) => {
+                const target = event.target
+                if (target instanceof Element && target.closest(".ant-tag-close-icon") !== null) return
+                const payload = item.payload
+                setTaskChainId(payload.taskChainId)
+                setTaskRemarks(payload.taskRemarks ?? [])
+                setRepeats(
+                  Object.fromEntries(
+                    Object.entries(payload.repeats ?? {}).map(([key, value]) => [Number(key), value]),
+                  ),
+                )
+                setRetries(payload.retries ?? {})
+                setRefreshes(payload.refreshes ?? {})
+                setAccountCard(payload.accountCard ?? emptyCard())
+                setProxyCard(payload.proxyCard ?? emptyCard())
+                setTextCards(payload.textCards ?? {})
+                setMediaCards(payload.mediaCards ?? {})
+                setMediaDraw(payload.mediaDraw ?? {})
+                setLimits(payload.limits ?? {})
+                setChances(payload.chances ?? {})
+                if (
+                  payload.continent === "美洲" ||
+                  payload.continent === "亚洲" ||
+                  payload.continent === "欧洲" ||
+                  payload.continent === "非洲" ||
+                  payload.continent === "大洋洲"
+                ) {
+                  setContinent(payload.continent)
+                }
+                setRegion(payload.region ?? null)
+                setLanguage(payload.language ?? null)
+                setCloud({
+                  instances: keptPits(payload.instances),
+                  pitRange: keptRange(payload.pitRange),
+                })
+                setDraftToken((current) => current + 1)
+              }}
+              onClose={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                void modal.confirm({
+                  cancelText: "取消",
+                  content: `删除快捷任务「${item.name}」？`,
+                  okText: "确定",
+                  onOk: async () => {
+                    const response = await fetch(`/api/quick-tasks/${item.id}`, {
+                      credentials: "same-origin",
+                      method: "DELETE",
+                    })
+                    if (!response.ok) {
+                      message.error("没有删除")
+                      return
+                    }
+                    setQuickTasks((current) => current.filter((task) => task.id !== item.id))
+                  },
+                  title: "提示",
+                })
+              }}
+              role="button"
+              tabIndex={0}
+            >
+              {item.name}
+            </Tag>
+          ))}
+        </div>
         <Form.Item
           className="dispatch-choice"
           label="选择任务"
@@ -471,6 +720,7 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
               setMediaDraw({})
               setMediaFiles({})
               setCloud({ instances: [], pitRange: [1, 2, 3, 4, 5] })
+              setDraftToken((current) => current + 1)
               setContinent("美洲")
               setRegion(null)
               setLanguage(null)
@@ -480,7 +730,7 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
               setLimits({})
               setChances({})
             }}
-            options={options.taskChains.map((item) => ({ label: item.name, value: item.id }))}
+            options={taskChainChoices.map((item) => ({ label: item.name, value: item.id }))}
             placeholder="请选择任务链"
             value={taskChainId}
             virtual={false}
@@ -639,15 +889,14 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
             prepare={(value) =>
               options.accounts
                 .filter((item) =>
-                  combineChecks(value.mode, [
-                    ...(value.selected["group"] ?? []).map((name) =>
-                      name === "未分组" ? item.group.length === 0 : item.group === name,
-                    ),
-                    ...(value.selected["tag"] ?? []).map((name) => item.tags.includes(name)),
-                    value.keyword.trim().length === 0
-                      ? null
-                      : includesText(item.identifier, value.keyword),
-                  ]),
+                  (value.keyword.trim().length === 0 ||
+                    includesText(item.identifier, value.keyword)) &&
+                    combineChecks(value.mode, [
+                      ...(value.selected["group"] ?? []).map((name) =>
+                        name === "未分组" ? item.group.length === 0 : item.group === name,
+                      ),
+                      ...(value.selected["tag"] ?? []).map((name) => item.tags.includes(name)),
+                    ]),
                 )
                 .map((item) => ({
                   cells: [
@@ -658,7 +907,8 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
                   id: item.id,
                 }))
             }
-            key={`account:${taskChainId ?? ""}`}
+            key={`account:${taskChainId ?? ""}:${draftToken}`}
+            value={accountCard}
             required
             title="选择账号"
             unit="个账号"
@@ -671,7 +921,12 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
             labelCol={{ style: { width: "100%" } }}
             required
           >
-            <DispatchCloudPick key={taskChain.id} onChange={setCloud} />
+            <DispatchCloudPick
+              initialInstances={cloud.instances}
+              initialPitRange={cloud.pitRange}
+              key={`${taskChain.id}:${draftToken}`}
+              onChange={applyCloud}
+            />
           </Form.Item>
         )}
         {needsRegion ? (
@@ -789,15 +1044,18 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
             options.proxies
               .filter((item) => {
                 const remarks = remarkNames(item.note)
-                return combineChecks(value.mode, [
-                  ...(value.selected["group"] ?? []).map((name) => item.group === name),
-                  ...(value.selected["remark"] ?? []).map((name) => remarks.includes(name)),
-                  value.keyword.trim().length === 0
-                    ? null
-                    : [item.name, item.address, item.group, ...remarks].some((field) =>
-                        includesText(field, value.keyword),
-                      ),
-                ])
+                const keywordHit =
+                  value.keyword.trim().length === 0 ||
+                  [item.name, item.address, item.group, ...remarks].some((field) =>
+                    includesText(field, value.keyword),
+                  )
+                return (
+                  keywordHit &&
+                  combineChecks(value.mode, [
+                    ...(value.selected["group"] ?? []).map((name) => item.group === name),
+                    ...(value.selected["remark"] ?? []).map((name) => remarks.includes(name)),
+                  ])
+                )
               })
               .map((item) => ({
                 cells: [
@@ -809,7 +1067,8 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
                 id: item.id,
               }))
           }
-          key={`proxy:${taskChainId ?? ""}`}
+          key={`proxy:${taskChainId ?? ""}:${draftToken}`}
+          value={proxyCard}
           title="选择代理"
           unit="个代理"
         />
@@ -842,7 +1101,7 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
                 </span>
               }
               idle={item.kind === "video" ? "请选择视频目录" : "请选择图片目录"}
-              key={`${taskChainId ?? ""}:${key}`}
+              key={`${taskChainId ?? ""}:${key}:${draftToken}`}
               lines={
                 item.nas
                   ? [
@@ -887,15 +1146,14 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
               prepare={(value) =>
                 files
                   .filter((file) =>
-                    combineChecks(value.mode, [
-                      ...(value.selected["box"] ?? []).map((id) => file.deviceId === id),
-                      ...(value.selected["directory"] ?? []).map(
-                        (name) => directoryName(file.directory) === name,
-                      ),
-                      value.keyword.trim().length === 0
-                        ? null
-                        : includesText(directoryName(file.directory), value.keyword),
-                    ]),
+                    (value.keyword.trim().length === 0 ||
+                      includesText(directoryName(file.directory), value.keyword)) &&
+                      combineChecks(value.mode, [
+                        ...(value.selected["box"] ?? []).map((id) => file.deviceId === id),
+                        ...(value.selected["directory"] ?? []).map(
+                          (name) => directoryName(file.directory) === name,
+                        ),
+                      ]),
                   )
                   .map((file) => ({
                     cells: item.nas
@@ -919,12 +1177,19 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
                   ? `${item.chainName} · 第 ${item.sequence + 1} 步 NAS 目录`
                   : `${item.chainName} · 第 ${item.sequence + 1} 步${item.kind === "image" ? "图片" : "视频"}目录`
               }
+              value={mediaCards[key] ?? emptyCard()}
               unit={item.kind === "video" ? "个视频" : "张图片"}
             />
           )
         })}
         {textSteps.map((item) => {
-          const name = item.remark.length > 0 ? item.remark : "输入文字"
+          const fallback =
+            item.api === "ClickJumpNodes"
+              ? "点击节点跳跃"
+              : item.api === "ClickNode"
+                ? "点击节点"
+                : "输入文字"
+          const name = item.remark.length > 0 ? item.remark : fallback
           const key = `${item.stage}:${item.sequence}`
           return (
             <DispatchFilterCard
@@ -947,21 +1212,25 @@ export const DispatchForm = ({ groupId, onCancel, onCreated }: DispatchFormProps
                 options.texts
                   .filter((text) => {
                     const labels = textLabels(text)
-                    return combineChecks(value.mode, [
-                      ...(value.selected["pool"] ?? []).map((tag) => labels.includes(tag)),
-                      value.keyword.trim().length === 0
-                        ? null
-                        : [...labels, text.content, text.remark].some((field) =>
-                            includesText(field, value.keyword),
-                          ),
-                    ])
+                    const keywordHit =
+                      value.keyword.trim().length === 0 ||
+                      [...labels, text.content, text.remark].some((field) =>
+                        includesText(field, value.keyword),
+                      )
+                    return (
+                      keywordHit &&
+                      combineChecks(value.mode, [
+                        ...(value.selected["pool"] ?? []).map((tag) => labels.includes(tag)),
+                      ])
+                    )
                   })
                   .map((text) => ({
                     cells: [text.category, text.content, text.remark || "—"],
                     id: text.id,
                   }))
               }
-              key={`${taskChainId ?? ""}:${key}`}
+              key={`${taskChainId ?? ""}:${key}:${draftToken}`}
+              value={textCards[key] ?? emptyCard()}
               required
               title={name}
               unit="条文案"

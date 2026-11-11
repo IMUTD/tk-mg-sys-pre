@@ -24,6 +24,7 @@ export type OperationResource = {
   readonly name: string
   readonly note: string
   readonly assignedCount?: number
+  readonly lastAccount?: string
   readonly lastAssignedAt?: Date | null
   readonly status: OperationResourceStatus
   readonly tags: readonly string[]

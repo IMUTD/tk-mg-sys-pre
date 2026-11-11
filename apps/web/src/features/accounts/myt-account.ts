@@ -409,7 +409,21 @@ export const filterAccounts = (
       return false
     }
     const remarkParts = splitRemarks(account.remark)
-    return combineChecks(mode, [
+    const searched =
+      (query.username.length === 0 ||
+        account.username.toLowerCase().includes(query.username.toLowerCase())) &&
+      (uids.length === 0 || uids.includes(account.uid)) &&
+      (identity.length === 0 ||
+        identity.some(
+          (token) => account.username.toLowerCase() === token.toLowerCase() || account.uid === token,
+        )) &&
+      (query.remark.length === 0 ||
+        account.remark.toLowerCase().includes(query.remark.toLowerCase())) &&
+      (query.transferKey.length === 0 ||
+        account.transferKey.toLowerCase().includes(query.transferKey.toLowerCase()))
+    return (
+      searched &&
+      combineChecks(mode, [
       query.ungrouped || query.tag.length > 0
         ? query.ungrouped
           ? account.tag.trim().length === 0
@@ -420,19 +434,6 @@ export const filterAccounts = (
       query.backType.length > 0 ? account.backType === query.backType : null,
       deviceId !== null ? account.deviceId === deviceId : null,
       proxyId !== null ? account.proxyId === proxyId : null,
-      query.username.length > 0
-        ? account.username.toLowerCase().includes(query.username.toLowerCase())
-        : null,
-      uids.length > 0 ? uids.includes(account.uid) : null,
-      identity.length > 0
-        ? identity.some(
-            (token) =>
-              account.username.toLowerCase() === token.toLowerCase() || account.uid === token,
-          )
-        : null,
-      query.remark.length > 0
-        ? account.remark.toLowerCase().includes(query.remark.toLowerCase())
-        : null,
       query.unremarked ? remarkParts.length === 0 : null,
       ...(query.unremarked
         ? []
@@ -444,13 +445,11 @@ export const filterAccounts = (
       ...query.region.map((region) => account.region.trim().toLowerCase() === region.toLowerCase()),
       followerGT !== null && !Number.isNaN(followerGT) ? account.follower >= followerGT : null,
       followingGT !== null && !Number.isNaN(followingGT) ? account.following >= followingGT : null,
-      query.transferKey.length > 0
-        ? account.transferKey.toLowerCase().includes(query.transferKey.toLowerCase())
-        : null,
       query.untagged ? !account.tagBucket.some((tag) => tag.trim().length > 0) : null,
       ...(query.untagged ? [] : query.tagBucket.map((tag) => account.tagBucket.includes(tag))),
       ...query.quick.map((item) => matchesQuick(account, [item])),
     ])
+    )
   })
 }
 

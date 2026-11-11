@@ -1,16 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, within } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { type AuthApi, WebApp } from "../../app/router"
-import { createPointFixtures } from "../../features/mall/catalog.test-fixtures"
 import { defaultPagesForRole } from "../../lib/pages"
-
-vi.mock("../../features/mall/catalog", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../features/mall/catalog")>()),
-  createSeedPoints: () => createPointFixtures(),
-}))
 
 beforeEach(() => {
   vi.stubGlobal(
@@ -157,16 +150,8 @@ describe("WebApp route protection", () => {
       "/studio/image-pool",
     )
     expect(screen.queryByRole("link", { name: "账号池" })).toBeVisible()
-    expect(screen.getByRole("menuitem", { name: "制作中心" })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    )
     expect(screen.getByText("资源中心")).toBeVisible()
-    await userEvent.click(screen.getByRole("menuitem", { name: "制作中心" }))
-    expect(await screen.findByRole("link", { name: "视频制作" })).toHaveAttribute(
-      "href",
-      "/studio/video",
-    )
+    expect(screen.queryByText("制作中心")).not.toBeInTheDocument()
     expect(screen.queryByText("工程中心")).not.toBeInTheDocument()
     expect(screen.queryByText("营销中心")).not.toBeInTheDocument()
     expect(screen.queryByText("积分商场")).not.toBeInTheDocument()
@@ -201,55 +186,28 @@ describe("WebApp route protection", () => {
     expect(screen.getByRole("link", { name: "运营机器人" })).toBeVisible()
   })
 
-  it("opens studio whiteboards under Production Center", async () => {
-    // Given
+  it("opens resource pools without the production center", async () => {
     const api = createAuthenticatedApi(engineer)
-
-    // When
-    renderApplication(api, "/studio/video")
-
-    // Then
-    expect(await pageCrumb("视频制作")).toBeVisible()
-    const production = screen.getByRole("menuitem", { name: "制作中心" }).closest("li")
+    renderApplication(api, "/studio/share-video")
+    expect(await pageCrumb("视频池")).toBeVisible()
     const resources = screen.getByRole("menuitem", { name: "资源中心" }).closest("li")
-    expect(production).not.toBeNull()
     expect(resources).not.toBeNull()
-    expect(within(production as HTMLElement).getByRole("link", { name: "视频制作" })).toBeVisible()
-    expect(within(production as HTMLElement).getByRole("link", { name: "图片制作" })).toBeVisible()
-    expect(within(production as HTMLElement).getByRole("link", { name: "文本制作" })).toBeVisible()
-    expect(
-      within(production as HTMLElement).queryByRole("link", { name: "文本池" }),
-    ).not.toBeInTheDocument()
-    const operations = screen.getByRole("menuitem", { name: "运营中心" }).closest("li")
-    expect(operations).not.toBeNull()
-    expect(within(operations as HTMLElement).getByRole("link", { name: "视频数据" })).toBeVisible()
     expect(within(resources as HTMLElement).getByRole("link", { name: "文本池" })).toBeVisible()
     expect(within(resources as HTMLElement).getByRole("link", { name: "视频池" })).toBeVisible()
     expect(within(resources as HTMLElement).getByRole("link", { name: "图片池" })).toBeVisible()
-    expect(
-      within(resources as HTMLElement).queryByRole("link", { name: "共享资源池" }),
-    ).not.toBeInTheDocument()
     expect(within(resources as HTMLElement).getByRole("link", { name: "备份池" })).toBeVisible()
     expect(within(resources as HTMLElement).getByRole("link", { name: "注册池" })).toBeVisible()
-    expect(
-      within(resources as HTMLElement).queryByRole("link", { name: "视频数据" }),
-    ).not.toBeInTheDocument()
-    expect(
-      within(resources as HTMLElement).queryByRole("link", { name: "视频制作" }),
-    ).not.toBeInTheDocument()
-    expect(await screen.findByText("视频制作白板")).toBeVisible()
+    expect(screen.queryByText("制作中心")).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "视频制作" })).not.toBeInTheDocument()
   })
 
-  it("opens points mall records", async () => {
+  it("sends a salesperson away from the removed points mall", async () => {
     const api = createAuthenticatedApi(salesperson)
     renderApplication(api, "/mall/records")
-    expect(await pageCrumb("积分记录")).toBeVisible()
-    expect(screen.getByText("积分商场")).toBeVisible()
-    expect(screen.getByRole("link", { name: "我的订单" })).toBeVisible()
-    expect(screen.getByRole("link", { name: "发票申请" })).toBeVisible()
-    expect(screen.getByRole("link", { name: "兑换中心" })).toBeVisible()
+    expect(await pageCrumb("运营概览")).toBeVisible()
+    expect(screen.queryByText("积分商场")).not.toBeInTheDocument()
     expect(screen.queryByText("商家中心")).not.toBeInTheDocument()
-    expect(await screen.findByText("注册GG")).toBeVisible()
+    expect(screen.getByText("资源中心")).toBeVisible()
   })
 
   it("opens behavior center under Engineering Center", async () => {
@@ -330,9 +288,9 @@ describe("WebApp route protection", () => {
       expect(screen.getByRole("menuitem", { name })).toHaveAttribute("aria-expanded", "true")
     }
     expect(screen.queryByRole("menuitem", { name: "营销中心" })).not.toBeInTheDocument()
-    for (const name of ["积分商场", "商家中心", "制作中心"]) {
-      expect(screen.getByRole("menuitem", { name })).toHaveAttribute("aria-expanded", "false")
-    }
+    expect(screen.queryByText("积分商场")).not.toBeInTheDocument()
+    expect(screen.queryByText("商家中心")).not.toBeInTheDocument()
+    expect(screen.queryByText("制作中心")).not.toBeInTheDocument()
   })
 
   it("does not select 运营中心 on first-level work logs and members", async () => {

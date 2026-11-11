@@ -396,14 +396,20 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
         name: string
         parent: string
         path: string
+        lastAccount: string
         sha256: string
         size: string
       }[]
     >`
       select e.device_id as "deviceId", e.id::text as id, e.mtime, e.name, e.parent_path as parent,
-        e.relative_path as path, e.sha256, e.size_bytes::text as size
+        e.relative_path as path, e.sha256, e.size_bytes::text as size,
+        case when ${backup}::boolean or ${category} not in ('image', 'video') then ''
+          else coalesce(a.identifier, '') end as "lastAccount"
       from box_share_entry e
       join device d on d.id = e.device_id
+      left join operation_account a
+        on ${backup}::boolean = false and ${category} in ('image', 'video')
+        and a.id = e.last_account_id and a.deleted = false
       where e.kind = 'file'
         and e.place = 'box'
         and (
@@ -428,6 +434,7 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
         directories: [...dirs.entries()].map(([path, entries]) => ({
           files: entries.map((file) => ({
             id: file.id,
+            ...((file.lastAccount ?? "").length === 0 ? {} : { lastAccount: file.lastAccount }),
             mtime: file.mtime,
             name: file.name,
             path: file.path,
@@ -445,6 +452,7 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
     })
     type NasListRow = {
       id: string
+      lastAccount: string
       mtime: Date | null
       name: string
       nasId: string
@@ -454,8 +462,13 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
     }
     const nasRows = await sql<NasListRow[]>`
       select e.id::text as id, e.mtime, e.name, e.nas_id::text as "nasId", e.nas_key as path, e.sha256,
-        e.size_bytes::text as size
+        e.size_bytes::text as size,
+        case when ${backup}::boolean or ${category} not in ('image', 'video') then ''
+          else coalesce(a.identifier, '') end as "lastAccount"
       from box_share_entry e
+      left join operation_account a
+        on ${backup}::boolean = false and ${category} in ('image', 'video')
+        and a.id = e.last_account_id and a.deleted = false
       where e.place = 'nas' and e.kind = 'file'
         and e.assignee_user_id = ${administratorId}::uuid
         and (
@@ -491,6 +504,7 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
       directories: dirsByNas.get(nasId) ?? [],
       files: entries.map((file) => ({
         id: file.id,
+        ...((file.lastAccount ?? "").length === 0 ? {} : { lastAccount: file.lastAccount }),
         mtime: file.mtime,
         name: file.name,
         path: file.path.startsWith(`${administratorId}/`) ? file.path.slice(administratorId.length + 1) : file.path,
@@ -613,7 +627,9 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
     const owned = await nasCardBucket(sql, administratorId, nasId)
     if (owned === null) return context.json({ message: "NAS未配置" }, 404)
     const rows = await sql<{ key: string; modified: Date | null; name: string; sha256: string; size: string }[]>`
-      select nas_key as key, seen_at as modified, name, sha256, size_bytes::text as size
+      select nas_key as key,
+        case when bucket = 'backup' then coalesce(mtime, saved_at, seen_at) else seen_at end as modified,
+        name, sha256, size_bytes::text as size
       from box_share_entry
       where place = 'nas' and nas_id = ${nasId}::uuid and assignee_user_id = ${administratorId}::uuid
       order by name

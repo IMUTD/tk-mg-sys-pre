@@ -25,15 +25,8 @@ const registerSession = async (page: Page): Promise<void> => {
   })
 }
 
-test("renders points mall and operations job pages", async ({ page }) => {
+test("renders operations job pages", async ({ page }) => {
   await registerSession(page)
-  await page.goto("/mall/records")
-  await expect(page.getByText("注册GG")).toBeVisible()
-  await expect(page.locator(".breadcrumb")).toContainText("积分记录")
-
-  await page.goto("/mall/redeem")
-  await expect(page.getByText("日本满季度白号100个")).toBeVisible()
-
   await page.goto("/operations/task-records")
   await expect(page.getByText("发布作品完成")).toBeVisible()
 })

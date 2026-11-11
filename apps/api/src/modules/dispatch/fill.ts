@@ -1,5 +1,5 @@
 import { languageParameter } from "./languages"
-import { regionParameter } from "./regions"
+import { regionParameter, regionPoint } from "./regions"
 
 export type FillAccount = {
   readonly backupName: string
@@ -114,12 +114,14 @@ export const usesExternalChance = (step: {
 
 export const externalTextSource = "pool.text"
 
+const externalTextSkills = new Set(["SendText", "ClickNode", "ClickJumpNodes"])
+
 export const usesExternalText = (step: {
   readonly scopes: Readonly<Record<string, string>>
   readonly skill: string
   readonly sources: Readonly<Record<string, string>>
 }): boolean =>
-  step.skill === "SendText" &&
+  externalTextSkills.has(step.skill) &&
   step.scopes["text"] === "external" &&
   step.sources["text"] === externalTextSource
 
@@ -230,7 +232,7 @@ export const fillStep = (step: FillStep, context: FillContext): FilledStep => {
       parameters[key] = step.input[key] ?? ""
       continue
     }
-    if (step.skill === "SendText" && key === "text" && step.sources[key] === externalTextSource) {
+    if (key === "text" && usesExternalText(step)) {
       parameters[key] = context.text?.content ?? ""
       textResourceId = context.text?.resourceId ?? null
       if (parameters[key].length === 0) missingKeys.push(key)
@@ -238,6 +240,23 @@ export const fillStep = (step: FillStep, context: FillContext): FilledStep => {
     }
     parameters[key] = sourceValue(step.sources[key] ?? "", context)
     if (parameters[key].length === 0) missingKeys.push(key)
+  }
+  const point =
+    step.skill === "CreateAndroid" || step.skill === "ResetAndroidContainer"
+      ? regionPoint(context.region)
+      : null
+  if (
+    point !== null &&
+    (parameters["latitude"] ?? "").trim().length === 0 &&
+    (parameters["longitude"] ?? "").trim().length === 0
+  ) {
+    parameters["latitude"] = point.latitude
+    parameters["longitude"] = point.longitude
+    return {
+      missingKeys: missingKeys.filter((key) => key !== "latitude" && key !== "longitude"),
+      parameters,
+      textResourceId,
+    }
   }
   return { missingKeys, parameters, textResourceId }
 }

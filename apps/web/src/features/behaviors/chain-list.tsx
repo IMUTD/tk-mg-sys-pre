@@ -1,8 +1,14 @@
-import { App, Button, Card, Input, Modal, Space, Tag } from "antd"
-import { type ReactNode, useState } from "react"
+import { App, Button, Card, Checkbox, Input, Modal, Space, Tag } from "antd"
+import { type ReactNode, useMemo, useState } from "react"
 
-import { createNamedChain, deleteChain, useChains } from "./chain-store"
+import type { FilterMode } from "../../components/tables/operation-controls"
+import { usageLabel } from "../labels/filter-row"
+import { ChainConditionCard } from "./chain-condition"
+import { countBy, matchBehavior } from "./chain-filter"
+import { useChainRemarkTools } from "./chain-remark-tools"
+import { createNamedChain, deleteChain, loadChains, useChains } from "./chain-store"
 import {
+  apiLabel,
   type BehaviorChain,
   type ChainStep,
   originColor,
@@ -31,23 +37,105 @@ export const ChainList = ({ canDelete, canWrite, onEdit, onTest }: ChainListProp
   const { message, modal } = App.useApp()
   const chains = useChains()
   const [keyword, setKeyword] = useState("")
+  const [origin, setOrigin] = useState<"" | BehaviorChain["origin"]>("")
+  const [account, setAccount] = useState<"" | "bound" | "free">("")
+  const [tested, setTested] = useState<"" | "yes" | "no">("")
+  const [apis, setApis] = useState<readonly string[]>([])
+  const [remarkFilters, setRemarkFilters] = useState<readonly string[]>([])
+  const [mode, setMode] = useState<FilterMode>("and")
   const [naming, setNaming] = useState(false)
   const [name, setName] = useState("")
-  const filtered = chains.filter((item) =>
-    keyword.trim().length === 0 ? true : item.name.includes(keyword.trim()),
-  )
+  const filter = { account, apis, keyword, mode, origin, remarks: remarkFilters, tested }
+  const filtered = chains.filter((item) => matchBehavior(item, filter))
+  const remarks = useChainRemarkTools({
+    canWrite: canWrite === true,
+    filteredIds: filtered.map((item) => item.id),
+    filters: remarkFilters,
+    items: chains,
+    onFilters: setRemarkFilters,
+    onReload: () => {
+      void loadChains()
+    },
+    scope: "behavior",
+  })
+  const originCounts = countBy(chains.map((item) => item.origin))
+  const accountCounts = countBy(chains.map((item) => (item.anchor === null ? "free" : "bound")))
+  const testedCounts = countBy(chains.map((item) => (item.lastTestAt.length > 0 ? "yes" : "no")))
+  const apiOptions = useMemo(() => {
+    const counts = countBy(
+      chains.flatMap((item) => [...new Set(item.steps.map((step) => step.api))]),
+    )
+    return [...counts.entries()]
+      .map(([value, count]) => ({ label: usageLabel(apiLabel(value), count), value }))
+      .sort((left, right) => left.label.localeCompare(right.label, "zh-CN"))
+  }, [chains])
+  const reset = (): void => {
+    setKeyword("")
+    setOrigin("")
+    setAccount("")
+    setTested("")
+    setApis([])
+    setRemarkFilters([])
+  }
 
   return (
     <div className="behaviors-pane">
+      <ChainConditionCard
+        keyword={keyword}
+        mode={mode}
+        onKeyword={setKeyword}
+        onMode={setMode}
+        onReset={reset}
+        placeholder="名称 / 步骤"
+        rows={[
+          remarks.row,
+          {
+            onChange: (values) =>
+              setOrigin(values[0] === "ai" || values[0] === "rpa" ? values[0] : ""),
+            options: [
+              { label: usageLabel("AI", originCounts.get("ai") ?? 0), value: "ai" },
+              { label: usageLabel("RPA", originCounts.get("rpa") ?? 0), value: "rpa" },
+            ],
+            selected: origin === "" ? [] : [origin],
+            system: true,
+            title: "来源",
+            tone: "status",
+          },
+          {
+            onChange: (values) =>
+              setTested(values[0] === "yes" || values[0] === "no" ? values[0] : ""),
+            options: [
+              { label: usageLabel("已测试", testedCounts.get("yes") ?? 0), value: "yes" },
+              { label: usageLabel("未测试", testedCounts.get("no") ?? 0), value: "no" },
+            ],
+            selected: tested === "" ? [] : [tested],
+            system: true,
+            title: "测试",
+          },
+          {
+            onChange: (values) =>
+              setAccount(values[0] === "bound" || values[0] === "free" ? values[0] : ""),
+            options: [
+              { label: usageLabel("需要账号", accountCounts.get("bound") ?? 0), value: "bound" },
+              { label: usageLabel("无需账号", accountCounts.get("free") ?? 0), value: "free" },
+            ],
+            selected: account === "" ? [] : [account],
+            system: true,
+            title: "账号",
+          },
+          {
+            multiple: true,
+            onChange: setApis,
+            options: apiOptions,
+            selected: apis,
+            title: "接口",
+            tone: "remark",
+          },
+        ]}
+        searchLabel="搜索行为链"
+      />
       <div className="behaviors-toolbar">
-        <Input
-          allowClear
-          aria-label="搜索行为链"
-          onChange={(event) => setKeyword(event.target.value)}
-          placeholder="搜索行为链"
-          style={{ width: 240 }}
-          value={keyword}
-        />
+        {remarks.toolbar}
         {canWrite === true ? (
           <Button
             onClick={() => {
@@ -61,7 +149,9 @@ export const ChainList = ({ canDelete, canWrite, onEdit, onTest }: ChainListProp
         ) : null}
       </div>
       {filtered.length === 0 ? (
-        <Card className="behaviors-empty">暂无行为链</Card>
+        <Card className="behaviors-empty">
+          {chains.length === 0 ? "暂无行为链" : "没有符合条件的行为链"}
+        </Card>
       ) : (
         <div className="behaviors-card-grid">
           {filtered.map((item) => (
@@ -98,11 +188,27 @@ export const ChainList = ({ canDelete, canWrite, onEdit, onTest }: ChainListProp
                 </Space>
               }
               key={item.id}
-              title={item.name}
+              title={
+                <span className="chain-card-title">
+                  {canWrite === true ? (
+                    <Checkbox
+                      aria-label={`选择 ${item.name}`}
+                      checked={remarks.selected.has(item.id)}
+                      onChange={() => remarks.toggle(item.id)}
+                    />
+                  ) : null}
+                  <span>{item.name}</span>
+                </span>
+              }
             >
               <Space wrap>
                 <Tag color={originColor(item.origin)}>{originLabel(item.origin)}</Tag>
                 <Tag>{item.steps.length} 步</Tag>
+                {item.remarks.map((remark) => (
+                  <Tag color="blue" key={remark.id}>
+                    {remark.name}
+                  </Tag>
+                ))}
                 {item.anchor === null ? null : (
                   <Tag>账号表 · {item.anchor.key === "identifier" ? "账号" : "编号"}</Tag>
                 )}
@@ -181,6 +287,7 @@ export const ChainList = ({ canDelete, canWrite, onEdit, onTest }: ChainListProp
           />
         </Modal>
       ) : null}
+      {remarks.dialog}
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import { regionCodes, regionContinents, regionParameter } from "./regions"
+import { regionCodes, regionContinents, regionParameter, regionPoint } from "./regions"
 
 describe("region catalog", () => {
   it("lists the 25 hot TikTok countries once", () => {
@@ -27,5 +27,26 @@ describe("region catalog", () => {
     expect(regionParameter("ResetAndroidContainer")).toBe("countryCode")
     expect(regionParameter("SwitchAndroidPhoneModel")).toBe("countryCode")
     expect(regionParameter("SetIPLocation")).toBeNull()
+  })
+
+  it("gives every listed country one city point and no others", () => {
+    const codes = [...regionCodes]
+    expect(codes).toHaveLength(25)
+    for (const code of codes) {
+      const point = regionPoint(code)
+      expect(point).not.toBeNull()
+      const latitude = Number(point?.latitude)
+      const longitude = Number(point?.longitude)
+      expect(point?.latitude).toMatch(/^-?\d+\.\d{4}$/)
+      expect(point?.longitude).toMatch(/^-?\d+\.\d{4}$/)
+      expect(latitude).toBeGreaterThanOrEqual(-90)
+      expect(latitude).toBeLessThanOrEqual(90)
+      expect(longitude).toBeGreaterThanOrEqual(-180)
+      expect(longitude).toBeLessThanOrEqual(180)
+    }
+    expect(regionPoint("CN")).toBeNull()
+    expect(regionPoint("XX")).toBeNull()
+    expect(regionPoint("US")).toEqual({ latitude: "40.7128", longitude: "-74.0060" })
+    expect(regionPoint("JP")).toEqual({ latitude: "35.6762", longitude: "139.6503" })
   })
 })
