@@ -182,75 +182,69 @@ const columns = (
   },
 ]
 
-type MemberRow = { readonly key: string; readonly kind: "member"; readonly member: Member }
-type GroupRow = {
+type MemberRow = {
+  readonly children?: readonly MemberRow[]
+  readonly key: string
+  readonly kind: "member"
+  readonly member: Member
+}
+type HeaderRow = {
   readonly children: readonly MemberRow[]
   readonly key: string
-  readonly kind: "group"
+  readonly kind: "header"
   readonly label: string
 }
-type Row = GroupRow | MemberRow
+type Row = HeaderRow | MemberRow
 
-const LEVEL_ORDER: Record<NonNullable<Member["level"]>, number> = {
-  platform: 0,
-  primary: 1,
-  secondary: 2,
-}
+const byName = (left: Member, right: Member): number =>
+  left.displayName.localeCompare(right.displayName, "zh-CN")
 
-/** 平台方看全部用户时按分组归类：每个客户（一级）有自己的分组，他建的二级也在这个分组里。 */
-const groupRows = (members: readonly Member[], visible: readonly Member[]): GroupRow[] => {
+/**
+ * 平台方按账号从属关系查看：平台方下面是一级用户（客户）和平台自己的二级员工。
+ * 一级用户下面的二级用户不展示；二级归谁按分组判断——和某个一级同组的就是那个客户的。
+ */
+const hierarchyRows = (members: readonly Member[], visible: readonly Member[]): Row[] => {
   const shown = new Set(visible.map((member) => member.id))
-  const buckets = new Map<string, { name: string; members: Member[] }>()
-  for (const member of members) {
-    const groups = member.groups ?? []
-    const targets = groups.length === 0 ? [{ id: "none", name: "未分组" }] : groups
-    for (const group of targets) {
-      const bucket = buckets.get(group.id) ?? { members: [], name: group.name }
-      bucket.members.push(member)
-      buckets.set(group.id, bucket)
-    }
-  }
-  return [...buckets.entries()]
-    .map(([groupId, bucket]) => {
-      const sorted = [...bucket.members].sort(
-        (left, right) => LEVEL_ORDER[levelOf(left)] - LEVEL_ORDER[levelOf(right)],
-      )
-      const platform = sorted.some((member) => levelOf(member) === "platform")
-      const primaries = sorted
-        .filter((member) => levelOf(member) === "primary")
-        .map((member) => member.displayName)
-      const owner = platform
-        ? "平台方"
-        : primaries.length > 0
-          ? `一级：${primaries.join("、")}`
-          : "没有一级用户"
-      return {
-        // 分组标题按全部成员统计，筛选只决定展开后显示哪些人。
-        children: sorted
-          .filter((member) => shown.has(member.id))
-          .map((member) => ({
-            key: `${groupId}:${member.id}`,
-            kind: "member" as const,
-            member,
-          })),
-        key: `group:${groupId}`,
-        kind: "group" as const,
-        label: `${bucket.name} · ${owner} · ${sorted.length} 人`,
-        platform,
-      }
-    })
-    .sort((left, right) =>
-      left.platform === right.platform
-        ? left.label.localeCompare(right.label, "zh-CN")
-        : left.platform
-          ? -1
-          : 1,
+  const customerGroups = new Set(
+    members.filter((member) => levelOf(member) === "primary").flatMap((member) => member.groupIds),
+  )
+  const platforms = members.filter((member) => levelOf(member) === "platform").sort(byName)
+  const primaries = members.filter((member) => levelOf(member) === "primary").sort(byName)
+  const staff = members
+    .filter(
+      (member) =>
+        levelOf(member) === "secondary" &&
+        !member.groupIds.some((groupId) => customerGroups.has(groupId)),
     )
-    .filter((row) => row.children.length > 0)
-    .map(({ platform: _platform, ...row }) => row)
+    .sort(byName)
+  const toRow = (member: Member): MemberRow => ({
+    key: member.id,
+    kind: "member",
+    member,
+  })
+  const subordinates = [...primaries, ...staff].filter((member) => shown.has(member.id)).map(toRow)
+  const [onlyPlatform] = platforms
+  if (platforms.length === 1 && onlyPlatform !== undefined) {
+    // 只有一个平台账号时，一级用户直接挂在这个账号下面。
+    if (!shown.has(onlyPlatform.id) && subordinates.length === 0) return []
+    return [{ ...toRow(onlyPlatform), children: subordinates }]
+  }
+  const children = [
+    ...platforms.filter((member) => shown.has(member.id)).map(toRow),
+    ...subordinates,
+  ]
+  if (children.length === 0) return []
+  return [
+    {
+      children,
+      key: "platform",
+      kind: "header",
+      label: `平台方 · ${platforms.length} 个平台账号 · ${primaries.length} 个一级用户`,
+    },
+  ]
 }
 
-/** 分组行占满整行显示分组信息，成员行沿用平铺列表的列。 */
+/** 标题行占满整行，成员行沿用平铺列表的列。 */
 const groupedColumns = (base: readonly TableColumnType<Member>[]): TableColumnType<Row>[] =>
   base.map((column, index) => {
     const { align, ellipsis, fixed, key, render, title, width } = column
@@ -262,9 +256,9 @@ const groupedColumns = (base: readonly TableColumnType<Member>[]): TableColumnTy
       ...(typeof title === "string" ? { title } : {}),
       ...(width === undefined ? {} : { width }),
       onCell: (row: Row) =>
-        row.kind === "group" ? { colSpan: index === 0 ? base.length : 0 } : {},
+        row.kind === "header" ? { colSpan: index === 0 ? base.length : 0 } : {},
       render: (_value: unknown, row: Row, rowIndex: number) =>
-        row.kind === "group" ? (
+        row.kind === "header" ? (
           index === 0 ? (
             <Typography.Text strong>{row.label}</Typography.Text>
           ) : null
@@ -284,7 +278,8 @@ export const MemberPage = ({ api: suppliedApi }: MemberPageProps): ReactNode => 
   // 只有平台方和一级用户（管理员）能建成员；二级用户不能再建下级。
   const canCreate = session.kind === "authenticated" && session.user.scope.role === "administrator"
   const platformView = session.kind === "authenticated" && isPlatformUser(session.user.scope)
-  const [expandedGroups, setExpandedGroups] = useState<readonly Key[]>([])
+  // 树默认展开，这里只记用户手动收起的行。
+  const [collapsedRows, setCollapsedRows] = useState<ReadonlySet<Key>>(new Set())
   const queryClient = useQueryClient()
   const [editing, setEditing] = useState<Member | null | undefined>(undefined)
   const [permissionsMember, setPermissionsMember] = useState<Member>()
@@ -363,13 +358,15 @@ export const MemberPage = ({ api: suppliedApi }: MemberPageProps): ReactNode => 
     confirmDelete,
     currentUserId,
   )
-  const grouped = useMemo(
-    () => (platformView ? groupRows(members.data ?? [], rows) : []),
+  const tree = useMemo(
+    () => (platformView ? hierarchyRows(members.data ?? [], rows) : []),
     [members.data, platformView, rows],
   )
-  // 搜索或筛选时展开所有命中的分组，免得结果藏在折叠里。
+  // 搜索或筛选时全部展开，免得结果藏在折叠里。
   const filtering =
     keyword.trim().length > 0 || roleFilter !== undefined || statusFilter !== undefined
+  const treeKeys = tree.map((row) => row.key)
+  const primaryCount = (members.data ?? []).filter((member) => levelOf(member) === "primary").length
   const dialogError =
     (create.error instanceof Error ? create.error.message : undefined) ??
     (update.error instanceof Error ? update.error.message : undefined)
@@ -433,20 +430,20 @@ export const MemberPage = ({ api: suppliedApi }: MemberPageProps): ReactNode => 
       {platformView ? (
         <Table<Row>
           columns={groupedColumns(memberColumns)}
-          dataSource={grouped}
+          dataSource={tree}
           expandable={{
-            expandedRowKeys: filtering ? grouped.map((row) => row.key) : [...expandedGroups],
+            expandedRowKeys: filtering
+              ? treeKeys
+              : treeKeys.filter((key) => !collapsedRows.has(key)),
             onExpandedRowsChange: (keys) => {
-              if (!filtering) setExpandedGroups(keys)
+              if (filtering) return
+              setCollapsedRows(new Set(treeKeys.filter((key) => !keys.includes(key))))
             },
           }}
+          footer={() => `共 ${primaryCount} 个一级用户，一级用户名下的二级用户不在这里展示`}
           loading={members.isLoading}
           locale={{ emptyText: "暂无成员" }}
-          pagination={{
-            pageSize: 10,
-            showSizeChanger: true,
-            showTotal: (total) => `共 ${total} 个分组`,
-          }}
+          pagination={false}
           rowKey="key"
           scroll={{ x: "max-content" }}
           size="small"

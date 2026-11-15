@@ -83,37 +83,50 @@ const renderPage = (user: SessionUser, list: MembersApi["list"] = membersApi.lis
   )
 }
 
-describe("MemberPage grouping", () => {
-  it("groups every user by access group for the platform, collapsed until opened", async () => {
+describe("MemberPage hierarchy", () => {
+  it("shows the platform account with its first-level users and its own staff", async () => {
     renderPage(sessionUser(false))
-    expect(await screen.findByText("平台库存 · 平台方 · 2 人")).toBeVisible()
-    expect(screen.getByText("一组客户 · 一级：客户甲 · 2 人")).toBeVisible()
-    expect(screen.queryByText("甲的销售")).not.toBeInTheDocument()
-
-    const customerRow = screen.getByText("一组客户 · 一级：客户甲 · 2 人").closest("tr")
-    if (customerRow === null) throw new Error("missing group row")
-    await userEvent.click(within(customerRow).getByRole("button"))
-
-    expect(await screen.findByText("甲的销售")).toBeVisible()
+    expect(await screen.findByText("平台管理员")).toBeVisible()
     expect(screen.getByText("客户甲")).toBeVisible()
+    expect(screen.getByText("平台运营")).toBeVisible()
+    // 一级用户名下的二级用户不展示。
+    expect(screen.queryByText("甲的销售")).not.toBeInTheDocument()
+    expect(screen.getByText("共 1 个一级用户，一级用户名下的二级用户不在这里展示")).toBeVisible()
+
+    const platformRow = screen.getByText("平台管理员").closest("tr")
+    if (platformRow === null) throw new Error("missing platform row")
+    await userEvent.click(within(platformRow).getByRole("button", { name: /收起|Collapse/ }))
+    expect(screen.queryByText("客户甲")).not.toBeInTheDocument()
+  })
+
+  it("keeps the platform row as context while searching", async () => {
+    renderPage(sessionUser(false))
+    await screen.findByText("客户甲")
+    await userEvent.type(screen.getByRole("searchbox", { name: "搜索成员" }), "客户")
+
+    expect(await screen.findByText("客户甲")).toBeVisible()
+    expect(screen.getByText("平台管理员")).toBeVisible()
     expect(screen.queryByText("平台运营")).not.toBeInTheDocument()
   })
 
-  it("expands matching groups while searching", async () => {
-    renderPage(sessionUser(false))
-    await screen.findByText("平台库存 · 平台方 · 2 人")
-    await userEvent.type(screen.getByRole("searchbox", { name: "搜索成员" }), "销售")
-
-    expect(await screen.findByText("甲的销售")).toBeVisible()
-    expect(screen.getByText("一组客户 · 一级：客户甲 · 2 人")).toBeVisible()
-    expect(screen.queryByText("客户甲")).not.toBeInTheDocument()
-    expect(screen.queryByText("平台库存 · 平台方 · 2 人")).not.toBeInTheDocument()
+  it("puts several platform accounts under one platform heading", async () => {
+    const second = {
+      ...members[0],
+      displayName: "平台管理员二",
+      email: "p2@example.test",
+      id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+    } as Member
+    renderPage(sessionUser(false), async () => [...members, second])
+    expect(await screen.findByText("平台方 · 2 个平台账号 · 1 个一级用户")).toBeVisible()
+    expect(screen.getByText("平台管理员二")).toBeVisible()
+    expect(screen.getByText("客户甲")).toBeVisible()
+    expect(screen.queryByText("甲的销售")).not.toBeInTheDocument()
   })
 
   it("keeps the flat list for a first-level user", async () => {
     renderPage(sessionUser(true), async () => members.slice(2))
     expect(await screen.findByText("甲的销售")).toBeVisible()
     expect(screen.getByText("客户甲")).toBeVisible()
-    expect(screen.queryByText(/一组客户 · /)).not.toBeInTheDocument()
+    expect(screen.queryByText(/一级用户名下/)).not.toBeInTheDocument()
   })
 })
