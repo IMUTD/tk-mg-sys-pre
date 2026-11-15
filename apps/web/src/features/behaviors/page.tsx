@@ -366,13 +366,15 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
       const body = (await response.json().catch(() => null)) as { error?: string; taskId?: string } | null
       const at = nowText()
       const failure =
-        body?.error === "备注过长" ||
-          body?.error === "备注无效" ||
-          body?.error === "行为链名无效" ||
-          body?.error === "没有外部概率" ||
-          body?.error === "没有文本池"
-          ? body.error
-          : "下发失败"
+        body?.error === "service_expired"
+          ? "盒子已到期，请到「盒子使用时长」页续费"
+          : body?.error === "备注过长" ||
+              body?.error === "备注无效" ||
+              body?.error === "行为链名无效" ||
+              body?.error === "没有外部概率" ||
+              body?.error === "没有文本池"
+            ? body.error
+            : "下发失败"
       note(response.ok ? `${label} 已下发` : failure, response.ok)
       if (response.ok && chainId !== undefined) touchChainTest(chainId, at)
       if (!response.ok || body?.taskId === undefined) {
@@ -381,9 +383,7 @@ export const BehaviorsPage = ({ canDelete, canWrite }: BehaviorsPageProps): Reac
           errorCode: null,
           name: label,
           status: "failed",
-          steps: [
-            { errorCode: "下发失败", kind: label, result: null, sequence: 0, status: "failed" },
-          ],
+          steps: [{ errorCode: failure, kind: label, result: null, sequence: 0, status: "failed" }],
         })
         return null
       }

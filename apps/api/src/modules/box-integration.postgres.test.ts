@@ -984,6 +984,26 @@ describe("initializer and box software integration", () => {
     expect((await status(pointer)).status).toBe(200)
   })
 
+  pgTest("refuses new tasks on expired limited boxes but still runs queued ones", async () => {
+    const { sql, device, enqueue, claim } = await setup()
+    const saved = process.env["BOX_SERVICE_LIMITED_HOSTS"]
+    process.env["BOX_SERVICE_LIMITED_HOSTS"] = "192.0.2.99"
+    expect((await enqueue("unlimited-box")).status).toBe(201)
+    process.env["BOX_SERVICE_LIMITED_HOSTS"] = "192.0.2.10"
+    await sql`update device set service_until = now() + interval '1 day' where id = ${device.id}`
+    expect((await enqueue("before-expiry")).status).toBe(201)
+    await sql`update device set service_until = now() - interval '1 minute' where id = ${device.id}`
+    const expired = await enqueue("after-expiry")
+    expect(expired.status).toBe(403)
+    expect(await expired.json()).toEqual({ error: "service_expired" })
+    await sql`update device set service_until = null where id = ${device.id}`
+    expect((await enqueue("never-paid")).status).toBe(403)
+    if (saved === undefined) delete process.env["BOX_SERVICE_LIMITED_HOSTS"]
+    else process.env["BOX_SERVICE_LIMITED_HOSTS"] = saved
+    expect(await sql`select id from execution_task`).toHaveLength(2)
+    expect((await claim()).status).toBe(200)
+  })
+
   pgTest(
     "serializes submissions, canonical idempotency and claims without Worker competition",
     async () => {

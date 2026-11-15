@@ -28,6 +28,7 @@ import {
   WatchSchema,
 } from "./box-contract"
 import { markBoxesWithoutHeartbeat, presenceHolder, sqlState, tryAcquirePresenceLease } from "./box-presence"
+import { serviceActive } from "./box-service-limit"
 import { registerTaskChains } from "./task-chains"
 import {
   administratorFor,
@@ -1202,6 +1203,15 @@ export const registerBoxLink = (
       path.startsWith("/api/behavior-chains")
     )
       pages = [PageKey.Behaviors]
+    // Buying belongs to the duration page; the payment return lands there too, so either
+    // page may ask Alipay for an order's result.
+    else if (path === "/api/box-service/orders" && context.req.method === "POST")
+      pages = [PageKey.BoxService]
+    else if (path === "/api/box-service/orders/reconcile")
+      pages = [PageKey.BoxService, PageKey.BoxOrders]
+    else if (path.startsWith("/api/box-service/orders") || path === "/api/box-service/fees")
+      pages = [PageKey.BoxOrders]
+    else if (path.startsWith("/api/box-service")) pages = [PageKey.BoxService]
     else if (path.startsWith("/api/box-") || path === "/api/devices/labels")
       pages = [PageKey.Devices]
     else if (
@@ -2090,6 +2100,16 @@ export const registerBoxLink = (
                 join user_group theirs on theirs.group_id = mine.group_id
                 where mine.user_id = ${user}::uuid and theirs.user_id = a.id
               )
+              or a.id in (
+                with recursive down as (
+                  select id from app_user where parent_user_id = ${user}::uuid and enabled
+                  union all
+                  select c.id from app_user c
+                  join down d on c.parent_user_id = d.id
+                  where c.enabled
+                )
+                select id from down
+              )
             )
         )
       order by d.host
@@ -2528,7 +2548,8 @@ export const registerBoxLink = (
       where device_id = ${device.deviceId} and instance_index = ${indexNum}
     `
       const created = await sql.begin(async (tx) => {
-        const current = await tx`select d.id from device d
+        const current = await tx<{ active: boolean }[]>`select
+         ${serviceActive(tx, tx`d.service_until`, tx`d.host`)} as active from device d
          where d.id = ${device.deviceId}::uuid and d.group_id = ${device.groupId}::uuid
            and d.enabled and not d.assignment_pending
            and d.assignee_user_id in (select a.id from app_user a where a.enabled
@@ -2537,7 +2558,9 @@ export const registerBoxLink = (
                join user_group theirs on theirs.group_id = mine.group_id
                where mine.user_id = ${user}::uuid and theirs.user_id = a.id)))
          for update of d`
-        if (current.length === 0) return { kind: "not_found" as const }
+        if (current[0] === undefined) return { kind: "not_found" as const }
+        // A box without paid time left takes no new work; queued tasks still finish.
+        if (!current[0].active) return { kind: "expired" as const }
         const inserted = await tx`
         insert into execution_task (
           id, group_id, requester_id, device_id, idempotency_key, fingerprint, name, executor_key, parameters, status, chain_name
@@ -2595,6 +2618,7 @@ export const registerBoxLink = (
         return { kind: "created" as const }
       })
       if (created.kind === "not_found") return context.json({ error: "not_found" }, 404)
+      if (created.kind === "expired") return context.json({ error: "service_expired" }, 403)
       if (created.kind === "conflict") return context.json({ error: "idempotency_conflict" }, 409)
       if (created.kind === "existing")
         return context.json({ status: created.status, taskId: created.taskId })

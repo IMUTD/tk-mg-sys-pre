@@ -53,6 +53,7 @@ export const devices = pgTable(
     model: text("model").notNull(),
     name: text("name").notNull(),
     resourceCount: integer("resource_count").notNull().default(0),
+    serviceUntil: timestamp("service_until", { mode: "date", withTimezone: true }),
     status: deviceStatus("status").notNull().default("unknown"),
     updatedAt: timestamp("updated_at", { mode: "date", withTimezone: true }).defaultNow().notNull(),
     version: text("version"),

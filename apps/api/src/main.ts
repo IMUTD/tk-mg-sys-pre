@@ -3,6 +3,8 @@ import { z } from "zod"
 import { createProductionApp } from "./composition"
 import { retentionMs } from "./db/retention"
 
+const orderSweepMs = 5 * 60 * 1000
+
 const ApiRuntimeConfigurationSchema = z.object({
   AUTH_COOKIE_SECURE: z.enum(["true", "false"]).default("true"),
   DATABASE_URL: z.string().url(),
@@ -76,6 +78,21 @@ export const startApiServer = (environment: Record<string, string | undefined>) 
       console.error("alipay sweep failed", error)
     })
   }, rechargeSweepMs)
+  // A slow gateway can stretch one sweep past the interval; never run two at once.
+  let sweeping = false
+  const sweep = () => {
+    if (sweeping) return
+    sweeping = true
+    void productionApp
+      .sweepPendingOrders()
+      .catch((error: unknown) => {
+        console.error("box service order sweep failed", error)
+      })
+      .finally(() => {
+        sweeping = false
+      })
+  }
+  const sweepTimer = setInterval(sweep, orderSweepMs)
   const server = Bun.serve({
     fetch: createApiRequestHandler({
       appFetch: productionApp.app.fetch,
@@ -93,6 +110,7 @@ export const startApiServer = (environment: Record<string, string | undefined>) 
       stopped = true
       clearInterval(retentionTimer)
       clearInterval(rechargeSweepTimer)
+      clearInterval(sweepTimer)
       server.stop(true)
       await productionApp.close()
     },

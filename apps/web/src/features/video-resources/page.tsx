@@ -15,6 +15,7 @@ import {
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { filteredRowSelection } from "../../components/tables/filtered-selection"
+import { ServiceExpiredNotice } from "../box-service/expired-notice"
 
 type ShareFile = {
   id: string
@@ -56,9 +57,17 @@ const reportScan = (
   },
 ): void => {
   const offline = scans.filter((item) => item.status === "offline")
+  const expired = scans.filter((item) => item.status === "expired")
   const busy = scans.filter((item) => item.status === "busy").length
   const sent = scans.filter((item) => item.status === "pending" || item.status === "running").length
-  if (sent === 0 && offline.length > 0) {
+  if (expired.length > 0) {
+    const names = expired
+      .map((item) => item.host || item.name || "")
+      .filter((name) => name !== "")
+      .join("、")
+    notify.warning(names === "" ? "有盒子已到期" : `无法扫描：${names} 已到期`)
+  }
+  if (sent === 0 && offline.length + expired.length > 0) {
     notify.error("无法扫描")
     return
   }
@@ -474,7 +483,8 @@ export const VideoResourcesPage = ({ view = "pool" }: VideoResourcesPageProps): 
     })
     setSending(false)
     if (!response.ok) {
-      message.error("转移没有下发")
+      const body = (await response.json().catch(() => null)) as { error?: string } | null
+      message.error(body?.error === "service_expired" ? <ServiceExpiredNotice /> : "转移没有下发")
       return
     }
     message.success(

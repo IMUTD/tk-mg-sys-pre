@@ -4,6 +4,7 @@ import {
   CloudServerOutlined,
   DatabaseOutlined,
   DesktopOutlined,
+  FieldTimeOutlined,
   FileImageOutlined,
   FileProtectOutlined,
   FileTextOutlined,
@@ -83,6 +84,12 @@ const navigation: readonly NavigationItem[] = [
     children: [
       { icon: <TabletOutlined aria-hidden />, label: "盒子管理", path: "/operations/devices" },
       { icon: <DesktopOutlined aria-hidden />, label: "云机预览", path: "/operations/previews" },
+      {
+        icon: <FieldTimeOutlined aria-hidden />,
+        label: "盒子时长",
+        path: "/operations/box-service",
+      },
+      { icon: <ProfileOutlined aria-hidden />, label: "时长订单", path: "/operations/box-orders" },
       { icon: <UserOutlined aria-hidden />, label: "账号管理", path: "/operations/accounts" },
       { icon: <TeamOutlined aria-hidden />, label: "账号池", path: "/operations/account-pool" },
       { icon: <UnorderedListOutlined aria-hidden />, label: "任务列表", path: "/operations/tasks" },

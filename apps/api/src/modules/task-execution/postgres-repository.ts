@@ -31,6 +31,8 @@ import {
 } from "@tk-mg/task-execution"
 import type { Sql, TransactionSql } from "postgres"
 
+import { ServiceExpiredError, serviceActive } from "../box-service-limit"
+
 type Query = Sql | TransactionSql
 type JsonObject = Readonly<Record<string, unknown>>
 type OutboxRow = {
@@ -191,6 +193,12 @@ export const createPostgresExecutionTaskRepository = (
         }
         return { task: await toTask(tx, previous, actor), created: false }
       }
+      // A box without paid time left takes no new work, whichever API the task came through.
+      // Throwing rolls back the insert above; replays of an earlier task are answered above.
+      const device = await tx<{ active: boolean }[]>`select
+        ${serviceActive(tx, tx`service_until`, tx`host`)} as active
+        from device where id = ${input.deviceId}::uuid for update`
+      if (device[0]?.active === false) throw new ServiceExpiredError()
       for (const step of input.steps) {
         await tx`insert into execution_task_step
         (id, task_id, group_id, sequence, command_id, command_idempotency_key, fingerprint, kind, target, parameters)

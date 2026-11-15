@@ -21,6 +21,7 @@ import { GroupIdSchema, Permission, Role } from "../../lib/authorization"
 import { PageKey } from "../../lib/pages"
 import { createInMemoryAuditRepository } from "../audit/service"
 import { createAuthService, createInMemoryAuthRepository } from "../auth/service"
+import { ServiceExpiredError } from "../box-service-limit"
 import { createPostgresDeviceCommandRepository } from "../device-commands/postgres-repository"
 import { CommandConflictError } from "../device-commands/repository"
 import { createInMemoryDeviceRepository } from "../devices/in-memory-repository"
@@ -3753,4 +3754,58 @@ describe("PostgreSQL execution task repository", () => {
       )[0]?.["status"],
     ).toBe("pending")
   })
+})
+
+describe("box service time", () => {
+  databaseTest(
+    "refuses new tasks for a box without paid time but replays earlier ones",
+    async () => {
+      await prepare()
+      const saved = process.env["BOX_SERVICE_LIMITED_HOSTS"]
+      process.env["BOX_SERVICE_LIMITED_HOSTS"] = "execution-repository"
+      try {
+        const client = getClient()
+        const api = createPostgresExecutionTaskRepository(client, systemActor)
+        await client`update device set service_until = now() + interval '1 day' where id = ${deviceId}`
+        await api.submit(submission, actor)
+        await client`update device set service_until = now() - interval '1 minute' where id = ${deviceId}`
+
+        const replay = await api.submit(submission, actor)
+        const nextCommand = parseExecutableCommand({
+          commandId: "88888888-8888-4888-8888-888888888888",
+          idempotencyKey: "command-key-2",
+          target: { deviceId },
+          timeoutMs: 1000,
+          type: "health_check",
+        })
+        const refused = await captureError(() =>
+          api.submit(
+            {
+              ...submission,
+              taskId: "99999999-9999-4999-8999-999999999999",
+              idempotencyKey: "task-key-2",
+              fingerprint: "task-fingerprint-2",
+              steps: [
+                {
+                  stepId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                  sequence: 0,
+                  fingerprint: "step-fingerprint-2",
+                  command: nextCommand,
+                },
+              ],
+            },
+            actor,
+          ),
+        )
+
+        expect(replay.created).toBe(false)
+        expect(refused).toBeInstanceOf(ServiceExpiredError)
+        const tasks = await client`select id from execution_task`
+        expect(tasks.length).toBe(1)
+      } finally {
+        if (saved === undefined) delete process.env["BOX_SERVICE_LIMITED_HOSTS"]
+        else process.env["BOX_SERVICE_LIMITED_HOSTS"] = saved
+      }
+    },
+  )
 })

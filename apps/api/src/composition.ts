@@ -16,6 +16,7 @@ import { createPostgresAuditRepository } from "./modules/audit/service"
 import { createPostgresAuthRepository } from "./modules/auth/postgres-repository"
 import { createAuthService } from "./modules/auth/service"
 import { registerBoxLink } from "./modules/box-link"
+import { registerBoxService } from "./modules/box-service"
 import { createPostgresDeviceCommandRepository } from "./modules/device-commands/postgres-repository"
 import { createDeviceCommandService } from "./modules/device-commands/service"
 import { createPostgresDeviceRepository } from "./modules/devices/postgres-repository"
@@ -55,6 +56,7 @@ export type ProductionApp = {
   readonly close: () => Promise<void>
   readonly sweepRecharges: () => Promise<void>
   readonly purgeExpiredRows: () => Promise<void>
+  readonly sweepPendingOrders: () => Promise<void>
 }
 export const createProductionApp = (config: ProductionAppConfig): ProductionApp => {
   const client = createSqlClient(config.databaseUrl)
@@ -156,6 +158,7 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
     (groupId, taskId) => dispatchRepository.autoReplay(groupId, taskId),
     cipher,
   )
+  const boxService = registerBoxService(app, client, auditRepository)
   registerDispatchRoutes(app, client, cipher, authService, auditRepository)
   return {
     app,
@@ -173,5 +176,6 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
     },
     purgeExpiredRows: () => purgeExpiredOperationalRows(client),
     sweepRecharges: () => mallService.sweepRecharges(),
+    sweepPendingOrders: boxService.sweepPendingOrders,
   }
 }

@@ -7,6 +7,7 @@ import { requireGroupAccess, requirePageView, requirePermission } from "../acces
 import type { AuditRepository } from "../audit/service"
 import { writeAuditEvent } from "../audit/service"
 import type { AuthService, SessionPrincipal } from "../auth/service"
+import { ServiceExpiredError } from "../box-service-limit"
 import {
   InvalidTaskRequestError,
   ReconcileTaskSchema,
@@ -177,6 +178,8 @@ export const registerTaskExecutionRoutes = (
     } catch (error) {
       if (error instanceof TaskIdempotencyConflictError)
         return context.json({ error: error.code }, 409)
+      if (error instanceof ServiceExpiredError)
+        return context.json({ error: "service_expired" }, 403)
       if (error instanceof ForbiddenInputTextError)
         return context.json({ error: "invalid_task_request" }, 400)
       if (error instanceof InvalidTaskRequestError)

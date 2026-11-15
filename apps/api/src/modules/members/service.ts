@@ -197,6 +197,7 @@ export const createMemberService = (dependencies: Dependencies): MemberService =
           displayName,
           email: input.email,
           groupIds,
+          parentUserId: actor?.id ?? null,
           passwordHash,
           role: input.role,
         })
@@ -215,6 +216,7 @@ export const createMemberService = (dependencies: Dependencies): MemberService =
       displayName,
       email: input.email,
       groupIds,
+      parentUserId: actor?.id ?? null,
       passwordHash,
       role: input.role,
     })

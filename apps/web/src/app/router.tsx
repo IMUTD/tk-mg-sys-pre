@@ -18,6 +18,8 @@ import { AuditPage } from "../features/audit/page"
 import { AuthProvider, useAuth } from "../features/auth/auth-provider"
 import { LoginPage } from "../features/auth/login-page"
 import { BehaviorsPage } from "../features/behaviors/page"
+import { BoxOrdersPage } from "../features/box-service/orders-page"
+import { BoxServicePage } from "../features/box-service/page"
 import { createDevicesApi } from "../features/devices/api"
 import { DeviceControlPage } from "../features/devices/control-page"
 import { DeviceCreatePage } from "../features/devices/create-page"
@@ -339,6 +341,14 @@ const AuthenticatedRoutes = (): ReactNode => (
       <Route
         path="/operations/previews"
         element={guarded(PageKey.CloudPreview, <DevicePreviewPage />)}
+      />
+      <Route
+        path="/operations/box-service"
+        element={guarded(PageKey.BoxService, <BoxServicePage />)}
+      />
+      <Route
+        path="/operations/box-orders"
+        element={guarded(PageKey.BoxOrders, <BoxOrdersPage />)}
       />
       <Route
         path="/operations/devices/:deviceId/control"

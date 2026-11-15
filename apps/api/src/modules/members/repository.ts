@@ -57,6 +57,7 @@ export type MemberCreateInput = {
   readonly displayName: string
   readonly email: string
   readonly groupIds: readonly GroupId[]
+  readonly parentUserId?: MemberId | null
   readonly passwordHash: string
   readonly role: Role
 }
@@ -252,14 +253,15 @@ const createMember = async (client: QueryClient, input: MemberCreateInput): Prom
   const groupIds = uniqueGroupIds(input.groupIds)
   await assertGroupsExist(client, groupIds)
   await client`
-    insert into app_user (id, email, display_name, password_hash, role, enabled)
+    insert into app_user (id, email, display_name, password_hash, role, enabled, parent_user_id)
     values (
       ${memberId},
       ${input.email.toLowerCase()},
       ${input.displayName},
       ${input.passwordHash},
       ${input.role},
-      true
+      true,
+      ${input.parentUserId ?? null}
     )
   `
   await insertGroups(client, memberId, groupIds)

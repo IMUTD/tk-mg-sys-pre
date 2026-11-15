@@ -239,9 +239,13 @@ export type DispatchCreateInput = {
 
 const readError = async (response: Response): Promise<string> => {
   const body = (await response.json().catch(() => null)) as {
+    boxes?: readonly string[]
     error?: string
     items?: readonly { account?: string; keys?: readonly string[]; sequence?: number }[]
   } | null
+  if (body?.error === "service_expired") {
+    return `这些盒子已到期，请到「盒子使用时长」页续费：${body.boxes?.join("、") ?? ""}`
+  }
   if (body?.error === "dispatch_incomplete") {
     const first = body.items?.[0]
     const where =

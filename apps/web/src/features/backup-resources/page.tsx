@@ -13,6 +13,7 @@ import {
 } from "antd"
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { filteredRowSelection } from "../../components/tables/filtered-selection"
+import { ServiceExpiredNotice } from "../box-service/expired-notice"
 
 type ShareFile = {
   id: string
@@ -119,11 +120,19 @@ export const BackupResourcesPage = (): ReactNode => {
       scans: { host?: string; name?: string; status: string }[]
     }
     const offline = body.scans.filter((item) => item.status === "offline")
+    const expired = body.scans.filter((item) => item.status === "expired")
     const busy = body.scans.filter((item) => item.status === "busy").length
     const sent = body.scans.filter(
       (item) => item.status === "pending" || item.status === "running",
     ).length
-    if (sent === 0 && offline.length > 0) {
+    if (expired.length > 0) {
+      const names = expired
+        .map((item) => item.host || item.name || "")
+        .filter((name) => name !== "")
+        .join("、")
+      message.warning(names === "" ? "有盒子已到期" : `无法扫描：${names} 已到期`)
+    }
+    if (sent === 0 && offline.length + expired.length > 0) {
       message.error("无法扫描")
       await load()
       return
@@ -162,7 +171,8 @@ export const BackupResourcesPage = (): ReactNode => {
     })
     setSending(false)
     if (!response.ok) {
-      message.error("转移没有下发")
+      const body = (await response.json().catch(() => null)) as { error?: string } | null
+      message.error(body?.error === "service_expired" ? <ServiceExpiredNotice /> : "转移没有下发")
       return
     }
     message.success("转移任务已下发，对应盒子领到后会复制文件")

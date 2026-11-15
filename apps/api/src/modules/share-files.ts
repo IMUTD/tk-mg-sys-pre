@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto"
 
 import type { Hono } from "hono"
 import type { Sql } from "postgres"
+import { serviceActive } from "./box-service-limit"
 import { administratorFor } from "./business-labels"
 import { backupPhone, directoryOk, fileCategory, isBucket, phoneQuery, splitRelative } from "./share-path"
 import { boxDirForNasBucket, dirNameOk, nasDeleteKeyOk, storageCardItems } from "./storage/nas-place"
@@ -253,9 +254,17 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
     if (only === undefined) return context.json({ error: "invalid_payload" }, 400)
     const scope = buckets === backupBuckets ? "backup" : "files"
     const owned = await sql<
-      { deviceId: string; groupId: string; host: string; name: string; status: string }[]
+      {
+        active: boolean
+        deviceId: string
+        groupId: string
+        host: string
+        name: string
+        status: string
+      }[]
     >`
-      select d.id as "deviceId", d.group_id as "groupId", d.host, d.name, d.status
+      select d.id as "deviceId", d.group_id as "groupId", d.host, d.name, d.status,
+        ${serviceActive(sql, sql`d.service_until`, sql`d.host`)} as active
       from device d
       where d.enabled = true and d.assignment_pending = false and d.external_id is not null
         and d.group_id <> ${unassignedGroup}::uuid
@@ -265,6 +274,17 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
     const devices = only === null ? owned : owned.filter((device) => only.includes(device.deviceId))
     const scans = []
     for (const device of devices) {
+      if (!device.active) {
+        scans.push({
+          deviceId: device.deviceId,
+          host: device.host,
+          name: device.name,
+          scanId: "",
+          status: "expired",
+          taskId: null,
+        })
+        continue
+      }
       if (device.status !== "online") {
         scans.push({
           deviceId: device.deviceId,
@@ -522,15 +542,19 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
     )
       return context.json({ error: "invalid_payload" }, 400)
     if (!directoryOk(targetDirectory)) return context.json({ error: "invalid_directory" }, 400)
-    const target = await sql<{ groupId: string; host: string }[]>`
-      select group_id as "groupId", host from device
+    const target = await sql<{ active: boolean; groupId: string; host: string }[]>`
+      select group_id as "groupId", host,
+        ${serviceActive(sql, sql`service_until`, sql`host`)} as active
+      from device
       where id = ${targetDeviceId}::uuid and enabled and not assignment_pending
         and group_id <> ${unassignedGroup}::uuid
         and assignee_user_id = ${administratorId}::uuid
     `
     if (target[0] === undefined) return context.json({ error: "not_found" }, 404)
+    if (!target[0].active) return context.json({ error: "service_expired" }, 403)
     const rows = await sql<
       {
+        active: boolean
         bucket: string
         deviceId: string
         groupId: string
@@ -540,7 +564,8 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
         size: string
       }[]
     >`
-      select e.bucket, e.device_id as "deviceId", d.group_id as "groupId", d.host, e.relative_path as path, e.sha256, e.size_bytes::text as size
+      select e.bucket, e.device_id as "deviceId", d.group_id as "groupId", d.host, e.relative_path as path, e.sha256, e.size_bytes::text as size,
+        ${serviceActive(sql, sql`d.service_until`, sql`d.host`)} as active
       from box_share_entry e
       join device d on d.id = e.device_id
       where e.id = any(${fileIds}::uuid[]) and e.kind = 'file'
@@ -551,6 +576,8 @@ export const registerShareFiles = (app: Hono, sql: Sql, wake: (deviceId: string)
         and d.assignee_user_id = ${administratorId}::uuid and d.enabled and not d.assignment_pending
     `
     if (rows.length !== fileIds.length) return context.json({ error: "not_found" }, 404)
+    // Moves run on the source boxes, so each of them needs paid time too.
+    if (rows.some((row) => !row.active)) return context.json({ error: "service_expired" }, 403)
     const kinds = new Set(rows.map((row) => (row.bucket === "backup" ? "backup" : "files")))
     if (kinds.size !== 1) return context.json({ error: "invalid_payload" }, 400)
     const bySource = new Map<string, (typeof rows)[number][]>()

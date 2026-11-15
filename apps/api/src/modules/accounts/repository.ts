@@ -374,7 +374,25 @@ const filteredFrom = (client: Sql, filter: Omit<AccountListFilter, "page" | "pag
     left join device d on d.id = a.device_id
     left join device_instance i on i.id = a.device_instance_id
     left join operation_proxy p on p.id = a.proxy_id
-    where a.group_id = ${filter.groupId}
+    where (
+      a.group_id = ${filter.groupId}
+      or a.group_id in (
+        select ug.group_id from user_group ug
+        where ug.user_id in (
+          with recursive down as (
+            select c.id from app_user c
+            where c.enabled and c.parent_user_id in (
+              select user_id from user_group where group_id = ${filter.groupId}
+            )
+            union all
+            select c.id from app_user c
+            join down d on c.parent_user_id = d.id
+            where c.enabled
+          )
+          select id from down
+        )
+      )
+    )
       and a.deleted = ${deleted}
       ${filter.app === undefined ? client`` : client`and a.app = ${filter.app}`}
       ${filter.backupType === undefined ? client`` : client`and a.backup_type = ${filter.backupType}`}

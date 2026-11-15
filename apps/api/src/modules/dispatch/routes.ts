@@ -681,6 +681,9 @@ export const registerDispatchRoutes = (
       input.ids,
     )
     if (started.kind === "missing") return context.json({ error: "not_found" }, 404)
+    if (started.kind === "expired") {
+      return context.json({ boxes: started.boxes, error: "service_expired" }, 409)
+    }
     if (started.kind === "incomplete") {
       return context.json({ error: "dispatch_incomplete", items: started.gaps }, 409)
     }

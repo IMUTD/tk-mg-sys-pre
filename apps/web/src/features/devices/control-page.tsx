@@ -1,4 +1,4 @@
-import { Button } from "antd"
+import { App, Button } from "antd"
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 
@@ -10,6 +10,7 @@ import {
   type PlayerSnapshot,
 } from "./control-link"
 import "./devices.css"
+import { ServiceExpiredNotice } from "../box-service/expired-notice"
 
 type Slot = {
   readonly apiPort: number
@@ -63,6 +64,7 @@ const readPlayer = (frame: HTMLIFrameElement | undefined): PlayerSnapshot => {
 }
 
 export const DeviceControlPage = (): ReactNode => {
+  const { message } = App.useApp()
   const { deviceId = "" } = useParams()
   const navigate = useNavigate()
   const [slots, setSlots] = useState<Slot[]>([])
@@ -192,7 +194,7 @@ export const DeviceControlPage = (): ReactNode => {
   }, [])
 
   const run = async (skill: string, slot: Slot) => {
-    await fetch("/api/tasks", {
+    const response = await fetch("/api/tasks", {
       body: JSON.stringify({
         deviceId,
         indexNum: slot.index,
@@ -202,6 +204,9 @@ export const DeviceControlPage = (): ReactNode => {
       headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() },
       method: "POST",
     })
+    if (response.ok) return
+    const body = (await response.json().catch(() => null)) as { error?: string } | null
+    if (body?.error === "service_expired") message.error(<ServiceExpiredNotice />)
   }
 
   const byIndex = new Map(slots.map((slot) => [slot.index, slot]))

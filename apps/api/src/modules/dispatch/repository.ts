@@ -5,6 +5,7 @@ import type { Sql } from "postgres"
 import type { SecretCipher } from "../../lib/crypto"
 import { listDeskAccounts, readDeskQuery } from "../account-pool/desk-pool"
 import { fingerprint } from "../box-contract"
+import { serviceActive } from "../box-service-limit"
 import { parseCredentials } from "../proxies/configuration"
 import { skillCatalog } from "../skills"
 import { nodeNameOf } from "../step-remark"
@@ -2429,6 +2430,15 @@ export const createDispatchRepository = (
             and (i.status = 'incomplete' or s.fill_status = 'incomplete')
           order by coalesce(a.identifier, ''), s.sequence`
         if (gaps.length > 0) return { gaps, kind: "incomplete" as const }
+        const expired = await tx<{ name: string }[]>`
+          select distinct coalesce(nullif(dv.name, ''), dv.host) as name
+          from operation_dispatch_item i
+          join device dv on dv.id = i.device_id
+          where i.dispatch_id = any(${[...ids]}::uuid[]) and i.status = 'ready'
+            and not ${serviceActive(tx, tx`dv.service_until`, tx`dv.host`)}
+          order by 1`
+        if (expired.length > 0)
+          return { boxes: expired.map((row) => row.name), kind: "expired" as const }
         const items = await tx<
           {
             accountId: string | null
