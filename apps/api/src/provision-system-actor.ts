@@ -6,8 +6,8 @@ export const provisionSystemActor = async (sql: Sql, actorId: string): Promise<v
   const id = z.string().uuid().parse(actorId)
   const passwordHash = await Bun.password.hash(crypto.randomUUID())
   await sql.begin(async (tx) => {
-    await tx`insert into app_user(id,email,display_name,password_hash,role,enabled)
-      values (${id}, ${`system-${id}@execution.internal`}, 'System execution audit', ${passwordHash}, 'administrator', false)
+    await tx`insert into app_user(id,email,display_name,password_hash,role,enabled,is_platform)
+      values (${id}, ${`system-${id}@execution.internal`}, 'System execution audit', ${passwordHash}, 'administrator', false, true)
       on conflict(id) do nothing`
     const existing =
       await tx`select id from app_user where id = ${id} and role = 'administrator' and not enabled`

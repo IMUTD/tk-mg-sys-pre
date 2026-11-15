@@ -142,6 +142,7 @@ export type InMemoryAuthUserInput = {
   readonly password: string
   readonly pages?: readonly PageAccess[]
   readonly permissions: readonly Permission[]
+  readonly restrictGroups?: boolean
   readonly role: AccessScope["role"]
 }
 
@@ -163,6 +164,7 @@ export const createInMemoryAuthRepository = (
         groupIds: user.groupIds.map((groupId) => GroupIdSchema.parse(groupId)),
         ...(user.pages === undefined ? {} : { pages: user.pages }),
         permissions: user.permissions.map((permission) => PermissionSchema.parse(permission)),
+        ...(user.restrictGroups === true ? { restrictGroups: true } : {}),
         role: user.role,
       }),
     }

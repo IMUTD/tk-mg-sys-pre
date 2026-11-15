@@ -52,8 +52,8 @@ const runBootstrap = async (): Promise<void> => {
     const result = await bootstrapAdministrator(config, {
       create: async (input) => {
         const rows = await client<{ readonly email: string }[]>`
-          insert into app_user (id, email, display_name, password_hash, role)
-          values (${crypto.randomUUID()}, ${input.email}, ${"管理员"}, ${input.passwordHash}, ${Role.Administrator})
+          insert into app_user (id, email, display_name, password_hash, role, is_platform)
+          values (${crypto.randomUUID()}, ${input.email}, ${"管理员"}, ${input.passwordHash}, ${Role.Administrator}, true)
           on conflict (email) do nothing
           returning email
         `

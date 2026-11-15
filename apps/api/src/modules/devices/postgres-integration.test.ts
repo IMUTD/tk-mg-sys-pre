@@ -52,12 +52,13 @@ describe("device PostgreSQL integration", () => {
         values (${groupId}, ${"研发组"}), (${secondGroupId}, ${"交付组"})
       `
       await client`
-        insert into app_user (id, email, password_hash, role, enabled)
+        insert into app_user (id, email, password_hash, role, enabled, is_platform)
         values (
           ${administratorId},
           ${"admin@example.com"},
           ${await Bun.password.hash("correct-horse-battery-staple")},
           ${Role.Administrator},
+          true,
           true
         )
       `

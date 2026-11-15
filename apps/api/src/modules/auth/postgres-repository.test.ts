@@ -148,4 +148,55 @@ describe("createPostgresAuthRepository", () => {
       expect(Array.from(auditEvents)).toEqual([{ action: "resource.export", outcome: "allowed" }])
     },
   )
+
+  databaseIntegrationTest(
+    "treats only explicitly marked administrators as the platform",
+    async () => {
+      activeDatabase = await createMigratedTestDatabase()
+      const client = activeDatabase.client
+      const groupId = "11111111-1111-4111-8111-111111111111"
+      await client`insert into access_group (id, name) values (${groupId}, ${"客户"})`
+      await client`
+      insert into app_user (id, email, password_hash, role, is_platform)
+      values
+        (${"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}, ${"platform@example.com"}, ${"h"}, ${Role.Administrator}, true),
+        (${"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}, ${"unmarked@example.com"}, ${"h"}, ${Role.Administrator}, false)
+    `
+      await client`
+      insert into app_user (id, email, password_hash, role, provisioned_by)
+      values (${"cccccccc-cccc-4ccc-8ccc-cccccccccccc"}, ${"primary@example.com"}, ${"h"}, ${Role.Administrator}, ${"init-tool"})
+    `
+      const repository = createPostgresAuthRepository(client)
+
+      const platform = await repository.findUserByEmail("platform@example.com")
+      const unmarked = await repository.findUserByEmail("unmarked@example.com")
+      const primary = await repository.findUserByEmail("primary@example.com")
+
+      expect(platform?.scope.restrictGroups).toBeUndefined()
+      expect(unmarked?.scope.restrictGroups).toBe(true)
+      expect(primary?.scope.restrictGroups).toBe(true)
+      // postgres.js 的查询要等到 then 才执行，包一层 async 让 Bun 的 rejects 能等到结果。
+      const fails = async (run: () => Promise<unknown>): Promise<boolean> => {
+        try {
+          await run()
+          return false
+        } catch {
+          return true
+        }
+      }
+      expect(
+        await fails(
+          async () =>
+            await client`update app_user set is_platform = true where email = ${"primary@example.com"}`,
+        ),
+      ).toBe(true)
+      await client`update app_user set is_platform = true where email = ${"unmarked@example.com"}`
+      expect(
+        await fails(
+          async () =>
+            await client`update app_user set role = ${Role.Operator} where email = ${"unmarked@example.com"}`,
+        ),
+      ).toBe(true)
+    },
+  )
 })

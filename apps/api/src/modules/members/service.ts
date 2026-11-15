@@ -178,6 +178,9 @@ export const createMemberService = (dependencies: Dependencies): MemberService =
       throw new MemberConflictError("administrator_only_in_init_tool")
     }
     if (actor !== null) {
+      // 一级用户（初始化工具建的管理员）和平台方可以建成员；建出来的是二级用户，二级不能再建下级。
+      if (actor.role !== Role.Administrator)
+        throw new MemberConflictError("secondary_cannot_create")
       if (actor.groupIds.length === 0) throw new MemberConflictError("invalid_group_ids")
       groupIds = actor.groupIds
     }

@@ -2,8 +2,8 @@ import { describe, expect, it } from "bun:test"
 import { z } from "zod"
 
 import { createApp } from "../../app"
-import { Permission, Role } from "../../lib/authorization"
-import { PageKey } from "../../lib/pages"
+import { GroupIdSchema, Permission, Role } from "../../lib/authorization"
+import { defaultPagesForRole, PageKey } from "../../lib/pages"
 import { createInMemoryAuditRepository } from "../audit/service"
 import { createAuthService, createInMemoryAuthRepository } from "../auth/service"
 import { MEMBER_DISPLAY_NAMES } from "./display-names"
@@ -264,5 +264,148 @@ describe("member routes", () => {
       method: "DELETE",
     })
     expect(self.status).toBe(409)
+  })
+
+  describe("account levels", () => {
+    const otherGroup = "22222222-2222-4222-8222-222222222222"
+    const password = "correct-horse-battery-staple"
+
+    const levelApp = async () => {
+      const repository = createInMemoryMemberRepository()
+      const primary = await repository.create({
+        displayName: "客户一级",
+        email: "primary@example.com",
+        groupIds: [GroupIdSchema.parse(groupId)],
+        passwordHash: "unused",
+        role: Role.Administrator,
+      })
+      const secondary = await repository.create({
+        displayName: "客户二级",
+        email: "secondary@example.com",
+        groupIds: [GroupIdSchema.parse(groupId)],
+        passwordHash: "unused",
+        role: Role.Operator,
+      })
+      const elsewhere = await repository.create({
+        displayName: "别家二级",
+        email: "elsewhere@example.com",
+        groupIds: [GroupIdSchema.parse(otherGroup)],
+        passwordHash: "unused",
+        role: Role.Operator,
+      })
+      const auditRepository = createInMemoryAuditRepository()
+      const memberPages = defaultPagesForRole(Role.Operator).map((page) =>
+        page.key === PageKey.Members ? { ...page, canView: true } : page,
+      )
+      const authService = createAuthService(
+        createInMemoryAuthRepository([
+          {
+            email: "platform@example.com",
+            groupIds: [],
+            id: administratorId,
+            password,
+            permissions: [Permission.ConfigurationWrite],
+            role: Role.Administrator,
+          },
+          {
+            email: primary.email,
+            groupIds: [groupId],
+            id: primary.id,
+            password,
+            permissions: [Permission.ConfigurationWrite],
+            restrictGroups: true,
+            role: Role.Administrator,
+          },
+          {
+            email: secondary.email,
+            groupIds: [groupId],
+            id: secondary.id,
+            pages: memberPages,
+            password,
+            permissions: [Permission.ConfigurationWrite],
+            role: Role.Operator,
+          },
+        ]),
+        async (input, passwordHash) => input === passwordHash,
+      )
+      const memberService = createMemberService({
+        auditRepository,
+        pagePermissions: createInMemoryPagePermissionRepository(),
+        repository,
+      })
+      const app = createApp({ auditRepository, authService, memberService })
+      const cookieFor = async (email: string): Promise<string> => {
+        const response = await app.request("/api/auth/login", {
+          body: JSON.stringify({ email, password }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        })
+        return response.headers.get("set-cookie") ?? ""
+      }
+      return { app, cookieFor, elsewhere, primary, secondary }
+    }
+
+    const listLevels = async (
+      app: ReturnType<typeof createApp>,
+      cookie: string,
+    ): Promise<Record<string, string>> => {
+      const response = await app.request("/api/members", { headers: { Cookie: cookie } })
+      expect(response.status).toBe(200)
+      const body = z
+        .object({ items: z.array(z.object({ email: z.string(), level: z.string() })) })
+        .parse(await response.json())
+      return Object.fromEntries(body.items.map((item) => [item.email, item.level]))
+    }
+
+    it("shows the platform every user with their level, including init-tool administrators", async () => {
+      const { app, cookieFor } = await levelApp()
+      expect(await listLevels(app, await cookieFor("platform@example.com"))).toEqual({
+        "elsewhere@example.com": "secondary",
+        "primary@example.com": "primary",
+        "secondary@example.com": "secondary",
+      })
+    })
+
+    it("keeps a primary user to its own group's members", async () => {
+      const { app, cookieFor } = await levelApp()
+      expect(await listLevels(app, await cookieFor("primary@example.com"))).toEqual({
+        "primary@example.com": "primary",
+        "secondary@example.com": "secondary",
+      })
+    })
+
+    it("lets a primary user create secondary users but not a secondary user", async () => {
+      const { app, cookieFor } = await levelApp()
+      const create = (cookie: string, email: string) =>
+        app.request("/api/members", {
+          body: JSON.stringify({ email, password: "member-password", role: "operator" }),
+          headers: { "Content-Type": "application/json", Cookie: cookie },
+          method: "POST",
+        })
+      const byPrimary = await create(await cookieFor("primary@example.com"), "child@example.com")
+      expect(byPrimary.status).toBe(201)
+      const bySecondary = await create(
+        await cookieFor("secondary@example.com"),
+        "grandchild@example.com",
+      )
+      expect(bySecondary.status).toBe(403)
+      await expect(bySecondary.json()).resolves.toEqual({ error: "secondary_cannot_create" })
+    })
+
+    it("does not let a secondary user with the members page touch another customer's members", async () => {
+      const { app, cookieFor, elsewhere } = await levelApp()
+      const cookie = await cookieFor("secondary@example.com")
+      const patched = await app.request(`/api/members/${elsewhere.id}`, {
+        body: JSON.stringify({ enabled: false, role: "operator" }),
+        headers: { "Content-Type": "application/json", Cookie: cookie },
+        method: "PATCH",
+      })
+      expect(patched.status).toBe(404)
+      const removed = await app.request(`/api/members/${elsewhere.id}`, {
+        headers: { Cookie: cookie },
+        method: "DELETE",
+      })
+      expect(removed.status).toBe(404)
+    })
   })
 })

@@ -568,6 +568,13 @@
       "when": 1798022400000,
       "tag": "0080_mall_invoice_refund_payment",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1798108800000,
+      "tag": "0081_app_user_platform",
+      "breakpoints": true
     }
   ]
 }

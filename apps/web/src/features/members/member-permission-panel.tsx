@@ -147,7 +147,7 @@ export const MemberPermissionPanel = ({
       <Typography.Paragraph type="secondary">
         {readOnly
           ? "管理员始终拥有全部页面权限，不能微调。"
-          : "该成员创建时已写入角色默认权限，可在此微调最终权限。成员与权限、工作日志仅管理员可见；运营概览不能开删除。"}
+          : "该成员创建时已写入角色默认权限，可在此微调最终权限。积分商场、工作日志仅管理员可见；运营概览不能开删除。"}
       </Typography.Paragraph>
       {error ? (
         <Alert className="form-error" message="成员权限保存或加载失败" showIcon type="error" />

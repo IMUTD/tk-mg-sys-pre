@@ -4,6 +4,7 @@ import {
   createAccessScope,
   GroupIdSchema,
   PermissionSchema,
+  Role,
   RoleSchema,
   UserIdSchema,
 } from "../../lib/authorization"
@@ -19,6 +20,7 @@ type AuthUserRow = {
   readonly id: string
   readonly passwordHash: string
   readonly role: string
+  readonly isPlatform: boolean
   readonly provisionedBy: string
 }
 
@@ -40,7 +42,9 @@ const toAuthenticatedUser = async (client: Sql, row: AuthUserRow): Promise<Authe
     id: UserIdSchema.parse(row.id),
     passwordHash: row.passwordHash,
     scope: createAccessScope({
-      restrictGroups: row.provisionedBy === "init-tool",
+      // 只有显式标记的平台方不受分组限制；其他管理员（初始化工具建的一级用户）只看自己的分组。
+      restrictGroups:
+        role === Role.Administrator ? !row.isPlatform : row.provisionedBy === "init-tool",
       groupIds: row.groupIds.map((groupId) => GroupIdSchema.parse(groupId)),
       pages,
       permissions: PermissionSchema.array().parse(permissionsForPages(pages)),
@@ -70,6 +74,7 @@ const userBy = async (
       app_user.password_hash as "passwordHash",
       app_user.role,
       app_user.provisioned_by as "provisionedBy",
+      app_user.is_platform as "isPlatform",
       coalesce(array_agg(user_group.group_id) filter (where user_group.group_id is not null), '{}') as "groupIds"
     from app_user
     left join user_group on user_group.user_id = app_user.id

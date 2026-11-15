@@ -33,6 +33,7 @@ export const appUsers = pgTable("app_user", {
   enabled: boolean("enabled").notNull().default(true),
   email: text("email").notNull().unique(),
   id: uuid("id").defaultRandom().primaryKey(),
+  isPlatform: boolean("is_platform").notNull().default(false),
   passwordHash: text("password_hash").notNull(),
   passwordPlain: text("password_plain").notNull().default(""),
   provisionedBy: text("provisioned_by").notNull().default("sys"),

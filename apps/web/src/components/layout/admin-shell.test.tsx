@@ -261,8 +261,13 @@ describe("WebApp route protection", () => {
     expect(await screen.findByText("视频制作白板")).toBeVisible()
   })
 
-  it("opens points mall records", async () => {
-    const api = createAuthenticatedApi(salesperson)
+  it("opens points mall records for a first-level user", async () => {
+    // 一级用户：初始化工具建的管理员，只能用自己的分组。
+    const primary = {
+      ...administrator,
+      scope: { ...administrator.scope, groupIds: salesperson.scope.groupIds, restrictGroups: true },
+    }
+    const api = createAuthenticatedApi(primary)
     renderApplication(api, "/mall/records")
     expect(await pageCrumb("积分记录")).toBeVisible()
     expect(screen.getByText("积分商场")).toBeVisible()
@@ -271,6 +276,12 @@ describe("WebApp route protection", () => {
     expect(screen.getByRole("link", { name: "兑换中心" })).toBeVisible()
     expect(screen.queryByText("商家中心")).not.toBeInTheDocument()
     expect(await screen.findByText("注册GG")).toBeVisible()
+  })
+
+  it("hides the points mall from a second-level user even with a sales role", async () => {
+    renderApplication(createAuthenticatedApi(salesperson), "/mall/records")
+    expect(await pageCrumb("运营概览")).toBeVisible()
+    expect(screen.queryByText("积分商场")).not.toBeInTheDocument()
   })
 
   it("shows the merchant center to the platform administrator", async () => {

@@ -7,12 +7,12 @@ import {
   Select,
   Space,
   Table,
-  type TableColumnsType,
+  type TableColumnType,
   Typography,
 } from "antd"
-import { type ReactNode, useMemo, useState } from "react"
+import { type Key, type ReactNode, useMemo, useState } from "react"
 
-import { MEMBER_ROLE_OPTIONS, ROLE_LABELS } from "../../lib/pages"
+import { isPlatformUser, MEMBER_ROLE_OPTIONS, ROLE_LABELS } from "../../lib/pages"
 import { useAuth } from "../auth/auth-provider"
 import {
   createMembersApi,
@@ -66,14 +66,34 @@ const CopyCell = ({
   )
 }
 
+const LEVEL_LABELS: Record<NonNullable<Member["level"]>, string> = {
+  platform: "平台方",
+  primary: "一级用户",
+  secondary: "二级用户",
+}
+
+const levelOf = (member: Member): NonNullable<Member["level"]> =>
+  member.level ??
+  (member.isPlatform === true
+    ? "platform"
+    : member.role === "administrator"
+      ? "primary"
+      : "secondary")
+
 const columns = (
   onCopy: (value: string, label: string) => void,
   onEdit: (member: Member) => void,
   onPermissions: (member: Member) => void,
   onDelete: (member: Member) => void,
   currentUserId: string | undefined,
-): TableColumnsType<Member> => [
-  { dataIndex: "displayName", ellipsis: true, key: "displayName", title: "名字", width: 120 },
+): TableColumnType<Member>[] => [
+  {
+    ellipsis: true,
+    key: "displayName",
+    render: (_value: unknown, member: Member) => member.displayName,
+    title: "名字",
+    width: 120,
+  },
   {
     ellipsis: true,
     key: "email",
@@ -84,10 +104,26 @@ const columns = (
     width: 240,
   },
   {
+    key: "level",
+    render: (_value: unknown, member: Member) => LEVEL_LABELS[levelOf(member)],
+    title: "级别",
+    width: 100,
+  },
+  {
     key: "role",
     render: (_value: unknown, member: Member) => ROLE_LABELS[member.role] ?? member.role,
     title: "角色",
     width: 120,
+  },
+  {
+    ellipsis: true,
+    key: "groups",
+    render: (_value: unknown, member: Member) =>
+      member.groups === undefined || member.groups.length === 0
+        ? "—"
+        : member.groups.map((group) => group.name).join("、"),
+    title: "所属分组",
+    width: 180,
   },
   {
     key: "status",
@@ -146,6 +182,98 @@ const columns = (
   },
 ]
 
+type MemberRow = { readonly key: string; readonly kind: "member"; readonly member: Member }
+type GroupRow = {
+  readonly children: readonly MemberRow[]
+  readonly key: string
+  readonly kind: "group"
+  readonly label: string
+}
+type Row = GroupRow | MemberRow
+
+const LEVEL_ORDER: Record<NonNullable<Member["level"]>, number> = {
+  platform: 0,
+  primary: 1,
+  secondary: 2,
+}
+
+/** 平台方看全部用户时按分组归类：每个客户（一级）有自己的分组，他建的二级也在这个分组里。 */
+const groupRows = (members: readonly Member[], visible: readonly Member[]): GroupRow[] => {
+  const shown = new Set(visible.map((member) => member.id))
+  const buckets = new Map<string, { name: string; members: Member[] }>()
+  for (const member of members) {
+    const groups = member.groups ?? []
+    const targets = groups.length === 0 ? [{ id: "none", name: "未分组" }] : groups
+    for (const group of targets) {
+      const bucket = buckets.get(group.id) ?? { members: [], name: group.name }
+      bucket.members.push(member)
+      buckets.set(group.id, bucket)
+    }
+  }
+  return [...buckets.entries()]
+    .map(([groupId, bucket]) => {
+      const sorted = [...bucket.members].sort(
+        (left, right) => LEVEL_ORDER[levelOf(left)] - LEVEL_ORDER[levelOf(right)],
+      )
+      const platform = sorted.some((member) => levelOf(member) === "platform")
+      const primaries = sorted
+        .filter((member) => levelOf(member) === "primary")
+        .map((member) => member.displayName)
+      const owner = platform
+        ? "平台方"
+        : primaries.length > 0
+          ? `一级：${primaries.join("、")}`
+          : "没有一级用户"
+      return {
+        // 分组标题按全部成员统计，筛选只决定展开后显示哪些人。
+        children: sorted
+          .filter((member) => shown.has(member.id))
+          .map((member) => ({
+            key: `${groupId}:${member.id}`,
+            kind: "member" as const,
+            member,
+          })),
+        key: `group:${groupId}`,
+        kind: "group" as const,
+        label: `${bucket.name} · ${owner} · ${sorted.length} 人`,
+        platform,
+      }
+    })
+    .sort((left, right) =>
+      left.platform === right.platform
+        ? left.label.localeCompare(right.label, "zh-CN")
+        : left.platform
+          ? -1
+          : 1,
+    )
+    .filter((row) => row.children.length > 0)
+    .map(({ platform: _platform, ...row }) => row)
+}
+
+/** 分组行占满整行显示分组信息，成员行沿用平铺列表的列。 */
+const groupedColumns = (base: readonly TableColumnType<Member>[]): TableColumnType<Row>[] =>
+  base.map((column, index) => {
+    const { align, ellipsis, fixed, key, render, title, width } = column
+    return {
+      ...(align === undefined ? {} : { align }),
+      ...(ellipsis === undefined ? {} : { ellipsis }),
+      ...(fixed === undefined ? {} : { fixed }),
+      ...(key === undefined ? {} : { key }),
+      ...(typeof title === "string" ? { title } : {}),
+      ...(width === undefined ? {} : { width }),
+      onCell: (row: Row) =>
+        row.kind === "group" ? { colSpan: index === 0 ? base.length : 0 } : {},
+      render: (_value: unknown, row: Row, rowIndex: number) =>
+        row.kind === "group" ? (
+          index === 0 ? (
+            <Typography.Text strong>{row.label}</Typography.Text>
+          ) : null
+        ) : (
+          ((render?.(undefined, row.member, rowIndex) as ReactNode) ?? null)
+        ),
+    }
+  })
+
 type MemberPageProps = { readonly api?: MembersApi }
 
 export const MemberPage = ({ api: suppliedApi }: MemberPageProps): ReactNode => {
@@ -153,6 +281,10 @@ export const MemberPage = ({ api: suppliedApi }: MemberPageProps): ReactNode => 
   const { message, modal } = App.useApp()
   const { session } = useAuth()
   const currentUserId = session.kind === "authenticated" ? session.user.userId : undefined
+  // 只有平台方和一级用户（管理员）能建成员；二级用户不能再建下级。
+  const canCreate = session.kind === "authenticated" && session.user.scope.role === "administrator"
+  const platformView = session.kind === "authenticated" && isPlatformUser(session.user.scope)
+  const [expandedGroups, setExpandedGroups] = useState<readonly Key[]>([])
   const queryClient = useQueryClient()
   const [editing, setEditing] = useState<Member | null | undefined>(undefined)
   const [permissionsMember, setPermissionsMember] = useState<Member>()
@@ -224,6 +356,20 @@ export const MemberPage = ({ api: suppliedApi }: MemberPageProps): ReactNode => 
       return true
     })
   }, [keyword, members.data, roleFilter, statusFilter])
+  const memberColumns = columns(
+    copyValue,
+    (member) => setEditing(member),
+    setPermissionsMember,
+    confirmDelete,
+    currentUserId,
+  )
+  const grouped = useMemo(
+    () => (platformView ? groupRows(members.data ?? [], rows) : []),
+    [members.data, platformView, rows],
+  )
+  // 搜索或筛选时展开所有命中的分组，免得结果藏在折叠里。
+  const filtering =
+    keyword.trim().length > 0 || roleFilter !== undefined || statusFilter !== undefined
   const dialogError =
     (create.error instanceof Error ? create.error.message : undefined) ??
     (update.error instanceof Error ? update.error.message : undefined)
@@ -231,11 +377,13 @@ export const MemberPage = ({ api: suppliedApi }: MemberPageProps): ReactNode => 
     <section className="module-page">
       <div className="page-toolbar">
         <Typography.Paragraph type="secondary">
-          仅管理员可进入。新建成员会随机分配名字，并写入该角色的默认页面权限；创建后再从「成员权限」微调最终权限。密码只能通过重置更新，不会保存可查看副本。
+          仅管理员可进入。新建的成员是二级用户，二级用户不能再建成员；新建成员会随机分配名字，并写入该角色的默认页面权限；创建后再从「成员权限」微调最终权限。密码只能通过重置更新，不会保存可查看副本。
         </Typography.Paragraph>
-        <Button onClick={() => setEditing(null)} type="primary">
-          新建成员
-        </Button>
+        {canCreate ? (
+          <Button onClick={() => setEditing(null)} type="primary">
+            新建成员
+          </Button>
+        ) : null}
       </div>
       <Space className="filter-bar" wrap>
         <Input.Search
@@ -282,26 +430,43 @@ export const MemberPage = ({ api: suppliedApi }: MemberPageProps): ReactNode => 
           type="error"
         />
       )}
-      <Table
-        columns={columns(
-          copyValue,
-          (member) => setEditing(member),
-          setPermissionsMember,
-          confirmDelete,
-          currentUserId,
-        )}
-        dataSource={[...rows]}
-        loading={members.isLoading}
-        locale={{ emptyText: "暂无成员" }}
-        pagination={{
-          pageSize: 10,
-          showSizeChanger: true,
-          showTotal: (total) => `共 ${total} 条`,
-        }}
-        rowKey="id"
-        scroll={{ x: "max-content" }}
-        size="small"
-      />
+      {platformView ? (
+        <Table<Row>
+          columns={groupedColumns(memberColumns)}
+          dataSource={grouped}
+          expandable={{
+            expandedRowKeys: filtering ? grouped.map((row) => row.key) : [...expandedGroups],
+            onExpandedRowsChange: (keys) => {
+              if (!filtering) setExpandedGroups(keys)
+            },
+          }}
+          loading={members.isLoading}
+          locale={{ emptyText: "暂无成员" }}
+          pagination={{
+            pageSize: 10,
+            showSizeChanger: true,
+            showTotal: (total) => `共 ${total} 个分组`,
+          }}
+          rowKey="key"
+          scroll={{ x: "max-content" }}
+          size="small"
+        />
+      ) : (
+        <Table<Member>
+          columns={memberColumns}
+          dataSource={[...rows]}
+          loading={members.isLoading}
+          locale={{ emptyText: "暂无成员" }}
+          pagination={{
+            pageSize: 10,
+            showSizeChanger: true,
+            showTotal: (total) => `共 ${total} 条`,
+          }}
+          rowKey="id"
+          scroll={{ x: "max-content" }}
+          size="small"
+        />
+      )}
       {editing === undefined ? null : (
         <MemberDialog
           api={api}

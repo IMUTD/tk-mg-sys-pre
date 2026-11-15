@@ -10,7 +10,10 @@ export const MemberSchema = z
     email: z.string().email(),
     enabled: z.boolean(),
     groupIds: z.array(z.string().uuid()).default([]),
+    groups: z.array(z.object({ id: z.string().uuid(), name: z.string() })).optional(),
     id: z.string().uuid(),
+    isPlatform: z.boolean().optional(),
+    level: z.enum(["platform", "primary", "secondary"]).optional(),
     role: RoleSchema,
   })
   .strict()
@@ -50,6 +53,7 @@ const MEMBER_ERROR_MESSAGES: Record<string, string> = {
   last_administrator: "至少保留一名启用中的管理员",
   member_in_use: "该成员有业务记录，无法删除，请改为停用",
   not_found: "成员不存在",
+  secondary_cannot_create: "二级用户不能创建下级用户",
 }
 
 export const describeMemberError = async (error: unknown): Promise<string> => {

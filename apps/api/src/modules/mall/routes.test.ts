@@ -37,6 +37,9 @@ const principal = (
 const principals: Readonly<Record<string, SessionPrincipal>> = {
   operator: principal("operator", Role.Operator, [ownGroup]),
   platform: principal("platform", Role.Administrator, []),
+  // 一级用户：初始化工具建的管理员，只能用自己的分组。
+  buyer: principal("buyer", Role.Administrator, [ownGroup], true),
+  // 二级用户：一级在本系统建的成员，不能进积分商场。
   sales: principal("sales", Role.Salesperson, [ownGroup]),
   tenant: principal("tenant", Role.Administrator, [ownGroup], true),
 }
@@ -262,7 +265,7 @@ const adjustBody = { delta: -5, groupId: ownGroup, idempotencyKey: key, remark: 
 describe("merchant routes", () => {
   it("hides every merchant endpoint from tenants and members and audits the denial", async () => {
     const { auditRepository, calls, send } = setup()
-    for (const token of ["tenant", "sales", "operator"]) {
+    for (const token of ["tenant", "buyer", "operator"]) {
       expect((await send("/api/merchant/wallets", token)).status).toBe(404)
       expect((await send("/api/merchant/ledger", token)).status).toBe(404)
       expect((await send("/api/merchant/recharges", token, rechargeBody)).status).toBe(404)
@@ -349,8 +352,21 @@ describe("merchant routes", () => {
 describe("mall routes", () => {
   it("returns only the caller's own groups from the wallet list", async () => {
     const { calls, send } = setup()
-    expect((await send("/api/mall/wallets", "sales")).status).toBe(200)
+    expect((await send("/api/mall/wallets", "buyer")).status).toBe(200)
     expect(calls).toEqual([{ args: [ownGroup], method: "listWallets" }])
+  })
+
+  it("keeps secondary users out of the points mall even with a sales role", async () => {
+    const { calls, send } = setup()
+    expect((await send("/api/mall/wallets", "sales")).status).toBe(404)
+    expect((await send("/api/mall/products", "sales")).status).toBe(404)
+    for (const resource of ["ledger", "orders", "invoices", "invoice-quota", "recharges"]) {
+      expect((await send(`/api/groups/${ownGroup}/mall/${resource}`, "sales")).status).toBe(404)
+    }
+    expect((await send(`/api/groups/${ownGroup}/mall/orders`, "sales", purchaseBody)).status).toBe(
+      404,
+    )
+    expect(calls).toEqual([])
   })
 
   it("hides wallets from roles without a mall page", async () => {
@@ -363,7 +379,7 @@ describe("mall routes", () => {
     const { calls, send } = setup()
     const response = await send(
       `/api/groups/${ownGroup}/mall/ledger?groupId=${otherGroup}`,
-      "sales",
+      "buyer",
     )
     expect(response.status).toBe(200)
     expect(calls[0]?.args).toMatchObject({ groupId: ownGroup })
@@ -375,7 +391,7 @@ describe("mall routes", () => {
     const { calls, send } = setup()
     for (const resource of ["ledger", "orders"]) {
       expect((await send(`/api/groups/${otherGroup}/mall/${resource}`, "tenant")).status).toBe(404)
-      expect((await send(`/api/groups/${otherGroup}/mall/${resource}`, "sales")).status).toBe(404)
+      expect((await send(`/api/groups/${otherGroup}/mall/${resource}`, "buyer")).status).toBe(404)
       expect((await send(`/api/groups/${ownGroup}/mall/${resource}`, "operator")).status).toBe(404)
     }
     expect(calls).toEqual([])
@@ -384,8 +400,8 @@ describe("mall routes", () => {
   it("rejects invalid list filters", async () => {
     const { send } = setup()
     const path = `/api/groups/${ownGroup}/mall`
-    expect((await send(`${path}/ledger?type=gift`, "sales")).status).toBe(400)
-    expect((await send(`${path}/orders?pageSize=1000`, "sales")).status).toBe(400)
+    expect((await send(`${path}/ledger?type=gift`, "buyer")).status).toBe(400)
+    expect((await send(`${path}/orders?pageSize=1000`, "buyer")).status).toBe(400)
   })
 })
 
@@ -393,7 +409,7 @@ describe("product and purchase routes", () => {
   it("hides product management and order handling from everyone but the platform", async () => {
     const { calls, send } = setup()
     const productBody = { kind: "account", name: "新品", pricePoints: 10 }
-    for (const token of ["tenant", "sales", "operator"]) {
+    for (const token of ["tenant", "buyer", "operator"]) {
       expect((await send("/api/merchant/products", token)).status).toBe(404)
       expect((await send("/api/merchant/products", token, productBody)).status).toBe(404)
       expect(
@@ -410,9 +426,9 @@ describe("product and purchase routes", () => {
 
   it("shows buyers only enabled products and the platform all of them", async () => {
     const { calls, send } = setup()
-    expect((await send("/api/mall/products", "sales")).status).toBe(200)
+    expect((await send("/api/mall/products", "buyer")).status).toBe(200)
     expect(calls.at(-1)?.args).toMatchObject({ enabledOnly: true })
-    expect((await send("/api/mall/products?enabledOnly=false", "sales")).status).toBe(200)
+    expect((await send("/api/mall/products?enabledOnly=false", "buyer")).status).toBe(200)
     expect(calls.at(-1)?.args).toMatchObject({ enabledOnly: true })
     expect((await send("/api/merchant/products", "platform")).status).toBe(200)
     expect(calls.at(-1)?.args).toMatchObject({ enabledOnly: false })
@@ -421,7 +437,7 @@ describe("product and purchase routes", () => {
 
   it("lets group members buy and audits the purchase", async () => {
     const { auditRepository, calls, send } = setup()
-    const response = await send(`/api/groups/${ownGroup}/mall/orders`, "sales", purchaseBody)
+    const response = await send(`/api/groups/${ownGroup}/mall/orders`, "buyer", purchaseBody)
     expect(response.status).toBe(201)
     expect(calls).toEqual([
       { args: { groupId: ownGroup, input: purchaseBody }, method: "purchase" },
@@ -435,7 +451,7 @@ describe("product and purchase routes", () => {
     const { calls, send } = setup()
     const path = `/api/groups/${otherGroup}/mall/orders`
     expect((await send(path, "tenant", purchaseBody)).status).toBe(404)
-    expect((await send(path, "sales", purchaseBody)).status).toBe(404)
+    expect((await send(path, "buyer", purchaseBody)).status).toBe(404)
     // 平台方能看任意分组，但不是成员就不能替分组花积分。
     expect((await send(path, "platform", purchaseBody)).status).toBe(404)
     expect(
@@ -453,7 +469,7 @@ describe("product and purchase routes", () => {
     { ...purchaseBody, idempotencyKey: "x" },
   ])("rejects an invalid purchase %#", async (body) => {
     const { calls, send } = setup()
-    expect((await send(`/api/groups/${ownGroup}/mall/orders`, "sales", body)).status).toBe(400)
+    expect((await send(`/api/groups/${ownGroup}/mall/orders`, "buyer", body)).status).toBe(400)
     expect(calls).toEqual([])
   })
 
@@ -472,7 +488,7 @@ describe("product and purchase routes", () => {
           throw new MallError(code)
         },
       })
-      const response = await send(`/api/groups/${ownGroup}/mall/orders`, "sales", purchaseBody)
+      const response = await send(`/api/groups/${ownGroup}/mall/orders`, "buyer", purchaseBody)
       expect(response.status).toBe(status)
       expect(await response.json()).toEqual({ error: code })
     }
@@ -481,7 +497,7 @@ describe("product and purchase routes", () => {
   it("hides the buyer's internal name from buyer order lists but not from the platform", async () => {
     const listOrders: MallRepository["listOrders"] = async () => ({ items: [orderRow], total: 1 })
     const { send } = setup({ listOrders })
-    const buyer = (await (await send(`/api/groups/${ownGroup}/mall/orders`, "sales")).json()) as {
+    const buyer = (await (await send(`/api/groups/${ownGroup}/mall/orders`, "buyer")).json()) as {
       items: Record<string, unknown>[]
     }
     expect(buyer.items[0]).not.toHaveProperty("buyerName")
@@ -523,7 +539,7 @@ describe("transfer and shipping routes", () => {
   const shipPath = `/api/merchant/orders/${orderId}/ship`
 
   it("hides the merchant endpoints from non-platform users", async () => {
-    for (const token of ["operator", "sales", "tenant"]) {
+    for (const token of ["operator", "buyer", "tenant"]) {
       const { auditRepository, calls, send } = setup()
       const list = `/api/merchant/transferable/accounts?groupId=${sourceGroup}`
       expect((await send(shipPath, token, shipBody)).status).toBe(404)
@@ -691,7 +707,7 @@ describe("invoice, refund and payment routes", () => {
   it("lets only group members apply, and hides review from everyone but the platform", async () => {
     const { auditRepository, calls, send } = setup()
     expect((await send(invoicesPath, "platform", company)).status).toBe(404)
-    for (const token of ["sales", "tenant"]) {
+    for (const token of ["buyer", "tenant"]) {
       const list = await send("/api/merchant/invoices", token, undefined, "GET")
       expect(list.status).toBe(404)
       const reject = `/api/merchant/invoices/${invoiceId}/reject`

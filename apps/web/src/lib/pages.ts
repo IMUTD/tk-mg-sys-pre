@@ -144,7 +144,14 @@ const RESOURCE_PAGES: readonly PageKey[] = [
   PageKey.StudioRegistration,
 ]
 
-export const ADMIN_ONLY_PAGE_KEYS: readonly PageKey[] = [PageKey.WorkLogs]
+/** 积分商场只给平台方和一级用户（管理员）；二级用户不能进入，也不能被勾选开通。 */
+export const ADMIN_ONLY_PAGE_KEYS: readonly PageKey[] = [
+  PageKey.MallRecords,
+  PageKey.MallOrders,
+  PageKey.MallInvoices,
+  PageKey.MallRedeem,
+  PageKey.WorkLogs,
+]
 export const NO_DELETE_PAGE_KEYS: readonly PageKey[] = [PageKey.Overview, PageKey.WorkLogs]
 
 export const isAdminOnlyPath = (path: string): boolean =>

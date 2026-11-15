@@ -28,8 +28,8 @@ export const initializeDeploymentDatabase = async (
   const actorEmail = `system-${config.systemActorId}@tk-mg.internal`
   await client.begin(async (transaction) => {
     await transaction`
-      insert into app_user (id, email, display_name, password_hash, role, enabled)
-      values (${config.systemActorId}, ${actorEmail}, '部署系统账号', ${actorHash}, 'administrator', false)
+      insert into app_user (id, email, display_name, password_hash, role, enabled, is_platform)
+      values (${config.systemActorId}, ${actorEmail}, '部署系统账号', ${actorHash}, 'administrator', false, true)
       on conflict do nothing
     `
     const actors = await transaction<{ readonly id: string }[]>`
@@ -38,13 +38,13 @@ export const initializeDeploymentDatabase = async (
     `
     if (actors.length !== 1) throw new DeploymentIdentityConflictError()
     await transaction`
-      insert into app_user (id, email, display_name, password_hash, role)
-      values (${crypto.randomUUID()}, ${config.email}, '管理员', ${adminHash}, 'administrator')
+      insert into app_user (id, email, display_name, password_hash, role, is_platform)
+      values (${crypto.randomUUID()}, ${config.email}, '管理员', ${adminHash}, 'administrator', true)
       on conflict (email) do nothing
     `
     const admins = await transaction<{ readonly id: string }[]>`
       select id from app_user where email = ${config.email} and enabled = true
-      and role = 'administrator' and id <> ${config.systemActorId}
+      and role = 'administrator' and is_platform and id <> ${config.systemActorId}
     `
     if (admins.length !== 1) throw new DeploymentIdentityConflictError()
   })

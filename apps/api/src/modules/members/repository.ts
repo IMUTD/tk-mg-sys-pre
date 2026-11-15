@@ -24,6 +24,7 @@ export type MemberConflictCode =
   | "member_in_use"
   | "init_tool_account"
   | "administrator_only_in_init_tool"
+  | "secondary_cannot_create"
 
 export class MemberConflictError extends Error {
   public readonly code: MemberConflictCode
@@ -47,6 +48,8 @@ export type Member = {
   readonly enabled: boolean
   readonly groupIds: readonly GroupId[]
   readonly id: MemberId
+  /** 平台方（超级用户）显式标记；内存仓库可省略，视为 false。 */
+  readonly isPlatform?: boolean
   readonly role: Role
 }
 
@@ -104,6 +107,7 @@ type MemberRow = {
   readonly enabled: boolean
   readonly groupIds: readonly string[]
   readonly id: string
+  readonly isPlatform: boolean
   readonly role: string
 }
 
@@ -123,6 +127,7 @@ const columns = (client: QueryClient) => client`
   app_user.role,
   app_user.enabled,
   app_user.created_at as "createdAt",
+  app_user.is_platform as "isPlatform",
   coalesce(array_agg(user_group.group_id) filter (where user_group.group_id is not null), '{}') as "groupIds"
 `
 
@@ -133,6 +138,7 @@ const toMember = (row: MemberRow): Member => ({
   enabled: row.enabled,
   groupIds: row.groupIds.map((groupId) => GroupIdSchema.parse(groupId)),
   id: MemberIdSchema.parse(row.id),
+  isPlatform: row.isPlatform,
   role: RoleSchema.parse(row.role),
 })
 

@@ -36,7 +36,11 @@ describe("defaultPagesForRole", () => {
     const engineeringDirector = defaultPagesForRole("engineering_director").find(
       (page) => page.key === PageKey.StudioTextPool,
     )
-    expect(sales).toEqual({ canDelete: true, canView: true, key: PageKey.MallRecords })
+    // 销售总监是二级用户，积分商场只给平台方和一级用户。
+    expect(sales).toEqual({ canDelete: false, canView: false, key: PageKey.MallRecords })
+    expect(
+      defaultPagesForRole("sales_director").find((page) => page.key === PageKey.StudioVideoPool),
+    ).toEqual({ canDelete: true, canView: true, key: PageKey.StudioVideoPool })
     expect(ops).toEqual({ canDelete: true, canView: true, key: PageKey.Devices })
     expect(opsResource).toEqual({ canDelete: true, canView: true, key: PageKey.StudioVideoPool })
     expect(opsLogs).toEqual({ canDelete: false, canView: false, key: PageKey.WorkLogs })

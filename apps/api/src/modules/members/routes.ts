@@ -1,7 +1,7 @@
 import type { Hono } from "hono"
 import type { z } from "zod"
 
-import { Role } from "../../lib/authorization"
+import { isPlatformScope, Role } from "../../lib/authorization"
 
 import {
   authorizeAdministratorRequest,
@@ -9,7 +9,7 @@ import {
 } from "../access/administrator-authorization"
 import type { AuditRepository } from "../audit/service"
 import type { AuthService, SessionPrincipal } from "../auth/service"
-import { MemberIdSchema } from "./repository"
+import { type Member, MemberIdSchema } from "./repository"
 import {
   AccessGroupCreateSchema,
   MemberConflictError,
@@ -29,7 +29,23 @@ const parseJson = async <T>(request: Request, schema: z.ZodType<T>): Promise<T |
   }
 }
 
-const conflictStatus = (code: string): 400 | 409 => (code === "invalid_group_ids" ? 400 : 409)
+const conflictStatus = (code: string): 400 | 403 | 409 =>
+  code === "invalid_group_ids" ? 400 : code === "secondary_cannot_create" ? 403 : 409
+
+const LEGACY_SYSTEM_ACTOR_ID = "99999999-9999-4999-8999-999999999999"
+
+/** 部署和执行审计用的内部账号：停用的管理员、邮箱在 .internal 域，不是真实用户。 */
+const isSystemAccount = (member: Member): boolean =>
+  member.id === LEGACY_SYSTEM_ACTOR_ID ||
+  (member.role === Role.Administrator && !member.enabled && /@[^@]+\.internal$/.test(member.email))
+
+/** 平台方 → 一级用户（初始化工具建的管理员）→ 二级用户（一级在本系统建的成员）。 */
+const memberLevel = (member: Member): "platform" | "primary" | "secondary" =>
+  member.isPlatform === true
+    ? "platform"
+    : member.role === Role.Administrator
+      ? "primary"
+      : "secondary"
 
 const handleConflict = (error: unknown): error is MemberConflictError =>
   error instanceof MemberConflictError
@@ -41,7 +57,7 @@ export const registerMemberRoutes = (
   service: MemberService,
 ): void => {
   const visibleMember = async (principal: SessionPrincipal, memberId: string): Promise<boolean> => {
-    if (!principal.scope.restrictGroups) return true
+    if (isPlatformScope(principal.scope)) return true
     const member = (await service.list()).find((item) => item.id === memberId)
     return (
       member !== undefined &&
@@ -161,16 +177,29 @@ export const registerMemberRoutes = (
       "member:all",
     )
     if (hasAdministratorAuthorizationFailure(authorization)) return authorization.response
-    const items = await service.list()
+    const [items, groups] = await Promise.all([service.list(), service.listGroups()])
     const mine = new Set(authorization.principal.scope.groupIds)
     const selfId = authorization.principal.userId
+    const platform = isPlatformScope(authorization.principal.scope)
+    const groupNames = new Map(groups.map((group) => [group.id, group.name]))
     return context.json({
-      items: items.filter((item) => {
-        if (item.id === "99999999-9999-4999-8999-999999999999") return false
-        if (item.id === selfId) return true
-        if (item.role === Role.Administrator) return false
-        return item.groupIds.some((groupId) => mine.has(groupId))
-      }),
+      items: items
+        .filter((item) => {
+          if (isSystemAccount(item)) return false
+          // 平台方能看到所有用户，包括初始化工具建的一级用户和各客户的二级用户。
+          if (platform) return true
+          if (item.id === selfId) return true
+          if (item.role === Role.Administrator) return false
+          return item.groupIds.some((groupId) => mine.has(groupId))
+        })
+        .map((item) => ({
+          ...item,
+          groups: item.groupIds.flatMap((groupId) => {
+            const name = groupNames.get(groupId)
+            return name === undefined ? [] : [{ id: groupId, name }]
+          }),
+          level: memberLevel(item),
+        })),
     })
   })
   app.post("/api/members", async (context) => {

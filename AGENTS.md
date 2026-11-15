@@ -95,6 +95,14 @@
   export, refunds of shipped orders and linking stock to real inventory. Alipay
   stays off until `ALIPAY_*` is configured; its keys belong in the deployment
   environment only.
+- On 2026-11-15 the user authorized explicit account levels: the platform is
+  marked by `app_user.is_platform` instead of being inferred from
+  `provisioned_by`; init-tool administrators are first-level users; members a
+  first-level user creates in this system are second-level users, who cannot
+  create members or use the points mall; the platform sees all users on the
+  members page. Director roles stay as they are for now. This covers the
+  additive migration, auth scope, members API and page, mall page access, and
+  tests only.
 - Deliver `docs/后端完善与联调说明.md` with compatibility, configuration,
   migrations, verification, rollback, and honestly reported remaining gaps.
 
