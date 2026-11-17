@@ -20,6 +20,7 @@ import { LoginPage } from "../features/auth/login-page"
 import { BehaviorsPage } from "../features/behaviors/page"
 import { BoxOrdersPage } from "../features/box-service/orders-page"
 import { BoxServicePage } from "../features/box-service/page"
+import { CustomerPage } from "../features/customers/page"
 import { createDevicesApi } from "../features/devices/api"
 import { DeviceControlPage } from "../features/devices/control-page"
 import { DeviceCreatePage } from "../features/devices/create-page"
@@ -294,6 +295,7 @@ const AuthenticatedRoutes = (): ReactNode => (
         path="/merchant/invoices"
         element={guarded("/merchant/invoices", <MerchantInvoicesPage />)}
       />
+      <Route path="/customers" element={guarded("/customers", <CustomerPage />)} />
       <Route path="/studio" element={<Navigate replace to="/studio/video" />} />
       <Route
         path="/studio/video"

@@ -12,6 +12,7 @@ export const MemberSchema = z
     groupIds: z.array(z.string().uuid()).default([]),
     groups: z.array(z.object({ id: z.string().uuid(), name: z.string() })).optional(),
     id: z.string().uuid(),
+    isCustomer: z.boolean().optional(),
     isPlatform: z.boolean().optional(),
     level: z.enum(["platform", "primary", "secondary"]).optional(),
     role: RoleSchema,
@@ -21,6 +22,7 @@ export type Member = z.infer<typeof MemberSchema>
 export const MemberCreateSchema = z.object({
   displayName: z.string().trim().min(1).max(40),
   email: z.string().email(),
+  groupIds: z.array(z.string().uuid()).min(1).optional(),
   password: z.string(),
   role: RoleSchema,
 })
@@ -49,6 +51,7 @@ const MEMBER_ERROR_MESSAGES: Record<string, string> = {
   cannot_delete_self: "不能删除当前登录账号",
   duplicate_email: "该账号已被使用",
   invalid_member_permissions: "请检查页面权限",
+  invalid_group_ids: "请选择放进哪个盒子管理员的分组",
   invalid_member_request: "请检查账号、密码和角色",
   last_administrator: "至少保留一名启用中的管理员",
   member_in_use: "该成员有业务记录，无法删除，请改为停用",
@@ -70,10 +73,14 @@ export const describeMemberError = async (error: unknown): Promise<string> => {
   return "成员操作失败"
 }
 
+export type MemberGroup = { readonly id: string; readonly name: string }
+
 export interface MembersApi {
   create(input: MemberCreate): Promise<Member>
   delete(memberId: string): Promise<void>
   list(): Promise<readonly Member[]>
+  /** 当前账号所在的分组；客户方新建成员时用来选放进哪个盒子管理员的分组。 */
+  listGroups?(): Promise<readonly MemberGroup[]>
   listMemberPermissions(memberId: string): Promise<readonly PageAccess[]>
   listPages(): Promise<readonly z.infer<typeof PageDefinitionSchema>[]>
   replaceMemberPermissions(
@@ -113,6 +120,13 @@ export const createMembersApi = (apiBaseUrl = "/api"): MembersApi => {
         async () =>
           z.object({ items: z.array(MemberSchema) }).parse(await client.get("members").json())
             .items,
+      ),
+    listGroups: async () =>
+      parseOrThrow(
+        async () =>
+          z
+            .object({ items: z.array(z.object({ id: z.string().uuid(), name: z.string() })) })
+            .parse(await client.get("members/groups").json()).items,
       ),
     listMemberPermissions: async (memberId) =>
       parseOrThrow(

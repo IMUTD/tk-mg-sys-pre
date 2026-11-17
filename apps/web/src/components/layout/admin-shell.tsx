@@ -23,6 +23,7 @@ import {
   SafetyCertificateOutlined,
   ShopOutlined,
   ShoppingOutlined,
+  SolutionOutlined,
   SwapOutlined,
   TabletOutlined,
   TeamOutlined,
@@ -155,6 +156,7 @@ const navigation: readonly NavigationItem[] = [
     label: "成员与权限",
     path: "/members",
   },
+  { icon: <SolutionOutlined aria-hidden />, label: "客户管理", path: "/customers" },
 ]
 
 const canSeeItem = (item: NavigationItem, user: SessionUser): boolean => {

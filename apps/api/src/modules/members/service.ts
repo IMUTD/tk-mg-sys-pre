@@ -177,12 +177,34 @@ export const createMemberService = (dependencies: Dependencies): MemberService =
     if (input.role === Role.Administrator) {
       throw new MemberConflictError("administrator_only_in_init_tool")
     }
+    let parentUserId: MemberId | null = actor?.id ?? null
     if (actor !== null) {
-      // 一级用户（初始化工具建的管理员）和平台方可以建成员；建出来的是二级用户，二级不能再建下级。
+      // 平台方、客户方和一级用户（盒子管理员）可以建成员；建出来的是二级用户，二级不能再建下级。
       if (actor.role !== Role.Administrator)
         throw new MemberConflictError("secondary_cannot_create")
       if (actor.groupIds.length === 0) throw new MemberConflictError("invalid_group_ids")
-      groupIds = actor.groupIds
+      if (actor.isCustomer === true) {
+        // 客户方名下有多个盒子管理员，要指定放进哪一个的分组；新成员挂在那个盒子管理员名下。
+        const [groupId] = requestedGroups
+        if (
+          requestedGroups.length !== 1 ||
+          groupId === undefined ||
+          !actor.groupIds.includes(groupId)
+        )
+          throw new MemberConflictError("invalid_group_ids")
+        groupIds = [groupId]
+        const owner = (await dependencies.repository.list()).find(
+          (member) =>
+            member.id !== actor.id &&
+            member.role === Role.Administrator &&
+            member.isCustomer !== true &&
+            member.isPlatform !== true &&
+            member.groupIds.includes(groupId),
+        )
+        parentUserId = owner?.id ?? actor.id
+      } else {
+        groupIds = actor.groupIds
+      }
     }
     const taken = await dependencies.repository.listDisplayNames()
     const displayName =
@@ -197,7 +219,7 @@ export const createMemberService = (dependencies: Dependencies): MemberService =
           displayName,
           email: input.email,
           groupIds,
-          parentUserId: actor?.id ?? null,
+          parentUserId,
           passwordHash,
           role: input.role,
         })
@@ -216,7 +238,7 @@ export const createMemberService = (dependencies: Dependencies): MemberService =
       displayName,
       email: input.email,
       groupIds,
-      parentUserId: actor?.id ?? null,
+      parentUserId,
       passwordHash,
       role: input.role,
     })

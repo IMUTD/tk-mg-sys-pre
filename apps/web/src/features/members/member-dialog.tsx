@@ -6,6 +6,7 @@ import {
   type Member,
   type MemberCreate,
   MemberCreateSchema,
+  type MemberGroup,
   type MembersApi,
   type MemberUpdate,
   MemberUpdateSchema,
@@ -14,6 +15,8 @@ import {
 type MemberDialogProps = {
   readonly api: MembersApi
   readonly errorMessage?: string
+  /** 客户方新建成员时要选放进哪个盒子管理员的分组；其他账号不传。 */
+  readonly groupOptions?: readonly MemberGroup[]
   readonly member: Member | null
   readonly onClose: () => void
   readonly onCreate: (input: MemberCreate) => void
@@ -24,6 +27,7 @@ type MemberDialogProps = {
 export const MemberDialog = ({
   api,
   errorMessage,
+  groupOptions,
   member,
   onClose,
   onCreate,
@@ -34,6 +38,7 @@ export const MemberDialog = ({
     readonly displayName: string
     readonly email: string
     readonly enabled: boolean
+    readonly groupId?: string
     readonly password: string
     readonly role: string
   }>()
@@ -69,6 +74,7 @@ export const MemberDialog = ({
     readonly displayName?: string
     readonly email?: string
     readonly enabled: boolean
+    readonly groupId?: string
     readonly password?: string
     readonly role: string
   }): void => {
@@ -76,6 +82,7 @@ export const MemberDialog = ({
       const created = MemberCreateSchema.safeParse({
         displayName: values.displayName,
         email: values.email,
+        ...(values.groupId === undefined ? {} : { groupIds: [values.groupId] }),
         password: values.password,
         role: values.role,
       })
@@ -148,6 +155,20 @@ export const MemberDialog = ({
             >
               <Input aria-label="账号" autoComplete="off" />
             </Form.Item>
+            {groupOptions === undefined ? null : (
+              <Form.Item
+                extra="新成员归在这个盒子管理员名下，只能看到这个分组的数据。"
+                label="所属分组"
+                name="groupId"
+                rules={[{ message: "请选择所属分组", required: true }]}
+              >
+                <Select
+                  aria-label="所属分组"
+                  options={groupOptions.map((group) => ({ label: group.name, value: group.id }))}
+                  placeholder="选择盒子管理员的分组"
+                />
+              </Form.Item>
+            )}
           </>
         ) : null}
         <Form.Item

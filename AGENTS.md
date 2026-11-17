@@ -103,6 +103,18 @@
   members page. Director roles stay as they are for now. This covers the
   additive migration, auth scope, members API and page, mall page access, and
   tests only.
+- On 2026-11-18 the user restored the members page UI to `main`, added a
+  platform-only customer management page that creates customer administrators
+  (`app_user.is_customer`), and explicitly authorized adding a login page to
+  `IMUTD/hmg-init-tool`. Only the platform and customers may log in to the
+  initializer; customers see unassigned boxes and boxes of their own box
+  administrators, and manage only the box administrators they created. Box
+  administrators created there are first-level users under that customer and
+  the customer joins their groups; customers may create second-level members
+  in a chosen box administrator's group. This exception covers the initializer
+  login, session and per-customer scoping on the separate
+  `feat/customer-login` branch only; it does not permit other initializer
+  changes, wire protocol changes, commits or pushes without a later request.
 - Deliver `docs/后端完善与联调说明.md` with compatibility, configuration,
   migrations, verification, rollback, and honestly reported remaining gaps.
 

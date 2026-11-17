@@ -300,6 +300,27 @@ describe("WebApp route protection", () => {
     expect(screen.queryByText("商家中心")).not.toBeInTheDocument()
   })
 
+  it("shows customer management only to the platform administrator", async () => {
+    renderApplication(createAuthenticatedApi(administrator), "/customers")
+    expect(await pageCrumb("客户管理")).toBeVisible()
+    expect(screen.getByRole("link", { name: "客户管理" })).toBeVisible()
+  })
+
+  it("hides customer management from a customer administrator", async () => {
+    const customer = {
+      ...administrator,
+      scope: {
+        ...administrator.scope,
+        customer: true,
+        groupIds: [mallGroup],
+        restrictGroups: true,
+      },
+    }
+    renderApplication(createAuthenticatedApi(customer), "/customers")
+    expect(await pageCrumb("运营概览")).toBeVisible()
+    expect(screen.queryByRole("link", { name: "客户管理" })).not.toBeInTheDocument()
+  })
+
   it("opens behavior center under Engineering Center", async () => {
     // Given
     const api = createAuthenticatedApi(engineer)

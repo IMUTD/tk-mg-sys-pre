@@ -603,6 +603,13 @@
       "when": 1798454400000,
       "tag": "0085_box_service_device_missing",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1798540800000,
+      "tag": "0086_app_user_customer",
+      "breakpoints": true
     }
   ]
 }

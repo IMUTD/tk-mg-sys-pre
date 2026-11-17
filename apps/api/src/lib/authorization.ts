@@ -65,6 +65,8 @@ export const ConfigurableRoleSchema = RoleSchema.exclude([Role.Administrator])
 export type ConfigurableRole = z.infer<typeof ConfigurableRoleSchema>
 
 export type AccessScope = {
+  /** 客户方：平台方在“客户管理”里建的管理员，能看到名下盒子管理员的分组。 */
+  readonly customer?: boolean
   readonly restrictGroups?: boolean
   readonly groupIds: readonly GroupId[]
   readonly pages: readonly PageAccess[]
@@ -73,6 +75,7 @@ export type AccessScope = {
 }
 
 type AccessScopeInput = {
+  readonly customer?: boolean
   readonly restrictGroups?: boolean
   readonly groupIds: readonly GroupId[]
   readonly pages?: readonly PageAccess[]
@@ -85,6 +88,7 @@ export const createAccessScope = (input: AccessScopeInput): AccessScope => {
   const permissions =
     input.permissions ?? PermissionSchema.array().parse(permissionsForPages(pages))
   return {
+    ...(input.customer ? { customer: true } : {}),
     ...(input.restrictGroups ? { restrictGroups: true } : {}),
     groupIds: input.groupIds,
     pages,

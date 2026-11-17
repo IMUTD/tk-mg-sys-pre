@@ -20,6 +20,7 @@ type AuthUserRow = {
   readonly id: string
   readonly passwordHash: string
   readonly role: string
+  readonly isCustomer: boolean
   readonly isPlatform: boolean
   readonly provisionedBy: string
 }
@@ -42,6 +43,7 @@ const toAuthenticatedUser = async (client: Sql, row: AuthUserRow): Promise<Authe
     id: UserIdSchema.parse(row.id),
     passwordHash: row.passwordHash,
     scope: createAccessScope({
+      customer: role === Role.Administrator && row.isCustomer,
       // 只有显式标记的平台方不受分组限制；其他管理员（初始化工具建的一级用户）只看自己的分组。
       restrictGroups:
         role === Role.Administrator ? !row.isPlatform : row.provisionedBy === "init-tool",
@@ -75,6 +77,7 @@ const userBy = async (
       app_user.role,
       app_user.provisioned_by as "provisionedBy",
       app_user.is_platform as "isPlatform",
+      app_user.is_customer as "isCustomer",
       coalesce(array_agg(user_group.group_id) filter (where user_group.group_id is not null), '{}') as "groupIds"
     from app_user
     left join user_group on user_group.user_id = app_user.id

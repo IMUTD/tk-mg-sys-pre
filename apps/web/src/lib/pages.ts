@@ -235,7 +235,10 @@ export const isPlatformUser = (scope: {
 }): boolean => scope.role === "administrator" && scope.restrictGroups !== true
 
 export const isPlatformOnlyPath = (path: string): boolean =>
-  path === "/merchant" || path.startsWith("/merchant/")
+  path === "/merchant" ||
+  path.startsWith("/merchant/") ||
+  path === "/customers" ||
+  path.startsWith("/customers/")
 
 export const canViewScopedPage = (
   scope: {

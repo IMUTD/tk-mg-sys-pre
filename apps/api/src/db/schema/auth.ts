@@ -33,6 +33,7 @@ export const appUsers = pgTable("app_user", {
   enabled: boolean("enabled").notNull().default(true),
   email: text("email").notNull().unique(),
   id: uuid("id").defaultRandom().primaryKey(),
+  isCustomer: boolean("is_customer").notNull().default(false),
   isPlatform: boolean("is_platform").notNull().default(false),
   // Who created this member; the foreign key lives in migration 0083.
   parentUserId: uuid("parent_user_id"),

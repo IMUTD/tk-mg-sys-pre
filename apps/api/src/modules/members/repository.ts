@@ -48,6 +48,8 @@ export type Member = {
   readonly enabled: boolean
   readonly groupIds: readonly GroupId[]
   readonly id: MemberId
+  /** 客户方：平台方在“客户管理”里建的管理员；内存仓库可省略，视为 false。 */
+  readonly isCustomer?: boolean
   /** 平台方（超级用户）显式标记；内存仓库可省略，视为 false。 */
   readonly isPlatform?: boolean
   readonly role: Role
@@ -108,6 +110,7 @@ type MemberRow = {
   readonly enabled: boolean
   readonly groupIds: readonly string[]
   readonly id: string
+  readonly isCustomer: boolean
   readonly isPlatform: boolean
   readonly role: string
 }
@@ -129,6 +132,7 @@ const columns = (client: QueryClient) => client`
   app_user.enabled,
   app_user.created_at as "createdAt",
   app_user.is_platform as "isPlatform",
+  app_user.is_customer as "isCustomer",
   coalesce(array_agg(user_group.group_id) filter (where user_group.group_id is not null), '{}') as "groupIds"
 `
 
@@ -139,6 +143,7 @@ const toMember = (row: MemberRow): Member => ({
   enabled: row.enabled,
   groupIds: row.groupIds.map((groupId) => GroupIdSchema.parse(groupId)),
   id: MemberIdSchema.parse(row.id),
+  isCustomer: row.isCustomer,
   isPlatform: row.isPlatform,
   role: RoleSchema.parse(row.role),
 })

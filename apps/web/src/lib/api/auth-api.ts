@@ -19,6 +19,7 @@ const PageAccessSchema = z.object({
 })
 
 const ScopeSchema = z.object({
+  customer: z.boolean().optional(),
   groupIds: z.array(z.string().uuid()),
   pages: z.array(PageAccessSchema),
   permissions: z.array(z.string()),

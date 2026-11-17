@@ -39,7 +39,10 @@ const isSystemAccount = (member: Member): boolean =>
   member.id === LEGACY_SYSTEM_ACTOR_ID ||
   (member.role === Role.Administrator && !member.enabled && /@[^@]+\.internal$/.test(member.email))
 
-/** 平台方 → 一级用户（初始化工具建的管理员）→ 二级用户（一级在本系统建的成员）。 */
+/**
+ * 平台方 → 一级用户（客户方和盒子管理员都是一级）→ 二级用户（本系统建的成员）。
+ * 客户方另有 isCustomer 标记，用来区分他和他在初始化工具里建的盒子管理员。
+ */
 const memberLevel = (member: Member): "platform" | "primary" | "secondary" =>
   member.isPlatform === true
     ? "platform"

@@ -17,6 +17,8 @@ import { createPostgresAuthRepository } from "./modules/auth/postgres-repository
 import { createAuthService } from "./modules/auth/service"
 import { registerBoxLink } from "./modules/box-link"
 import { registerBoxService } from "./modules/box-service"
+import { createPostgresCustomerRepository } from "./modules/customers/repository"
+import { registerCustomerRoutes } from "./modules/customers/routes"
 import { createPostgresDeviceCommandRepository } from "./modules/device-commands/postgres-repository"
 import { createDeviceCommandService } from "./modules/device-commands/service"
 import { createPostgresDeviceRepository } from "./modules/devices/postgres-repository"
@@ -159,6 +161,12 @@ export const createProductionApp = (config: ProductionAppConfig): ProductionApp 
     cipher,
   )
   const boxService = registerBoxService(app, client, auditRepository)
+  registerCustomerRoutes(
+    app,
+    authService,
+    auditRepository,
+    createPostgresCustomerRepository(client),
+  )
   registerDispatchRoutes(app, client, cipher, authService, auditRepository)
   return {
     app,
