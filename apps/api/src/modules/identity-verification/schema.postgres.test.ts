@@ -36,9 +36,9 @@ integration("creates all three identity tables when migrations run", async () =>
 })
 
 integration(
-  "preserves baseline 0060 data across the incremental identity migration and its replay",
+  "preserves baseline 0086 data across the incremental identity migration and its replay",
   async () => {
-    // Given: a genuine 0060 database built from the original migration journal prefix.
+    // Given: a database migrated through 0086, before the identity migration.
     const migrationsFolder = fileURLToPath(new URL("../../db/migrations", import.meta.url))
     const baselineFolder = await mkdtemp(join(tmpdir(), "identity-migration-baseline-"))
     const sql = createSqlClient(getTestDatabaseUrl())
@@ -60,8 +60,12 @@ integration(
       })
       const journalPath = join(baselineFolder, "meta", "_journal.json")
       const journal = journalSchema.parse(JSON.parse(await readFile(journalPath, "utf8")))
-      const entries = journal.entries.filter((entry) => entry.idx < 60)
-      expect(entries.at(-1)?.tag).toBe("0060_box_service_refund")
+      const identityIndex = journal.entries.findIndex(
+        (entry) => entry.tag === "0087_admin_identity_verification",
+      )
+      expect(identityIndex).toBe(journal.entries.length - 1)
+      const entries = journal.entries.slice(0, identityIndex)
+      expect(entries.at(-1)?.tag).toBe("0086_app_user_customer")
       await writeFile(journalPath, JSON.stringify({ ...journal, entries }))
       await sql`select pg_advisory_lock(705203901)`
       await sql`drop schema if exists public cascade`
