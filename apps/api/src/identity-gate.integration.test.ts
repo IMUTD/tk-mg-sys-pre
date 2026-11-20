@@ -23,6 +23,7 @@ integrationTest(
     await db.client`insert into app_user(id,email,password_hash,role,provisioned_by) values
     (${tenantId},'tenant@example.test',${hash},'administrator','init-tool'),
     (${platformId},'platform@example.test',${hash},'administrator','sys')`
+    await db.client`update app_user set is_platform = true where id = ${platformId}`
     let calls = 0
     const runtime = createProductionApp({
       databaseUrl: getTestDatabaseUrl(),

@@ -15,6 +15,7 @@ export type Actor = {
   readonly enabled: boolean
   readonly role: string
   readonly provisionedBy: string
+  readonly isPlatform: boolean
   readonly passwordHash: string
   readonly email: string
   readonly displayName: string
@@ -31,11 +32,11 @@ export type Binding = {
 export const eligible = (actor: Actor): boolean =>
   actor.role === "administrator" && actor.provisionedBy === "init-tool"
 export const platform = (actor: Actor): boolean =>
-  actor.enabled && actor.role === "administrator" && actor.provisionedBy === "sys"
+  actor.enabled && actor.role === "administrator" && actor.isPlatform
 export const actorById = async (sql: IdentitySql, userId: string, lock = false): Promise<Actor> => {
   const rows = await sql<
     Actor[]
-  >`select id, enabled, role, provisioned_by as "provisionedBy", password_hash as "passwordHash", email, display_name as "displayName" from app_user where id=${userId} ${lock ? sql`for update` : sql``}`
+  >`select id, enabled, role, provisioned_by as "provisionedBy", is_platform as "isPlatform", password_hash as "passwordHash", email, display_name as "displayName" from app_user where id=${userId} ${lock ? sql`for update` : sql``}`
   const actor = rows[0]
   if (!actor) throw new IdentityError("not_found", 404)
   return actor

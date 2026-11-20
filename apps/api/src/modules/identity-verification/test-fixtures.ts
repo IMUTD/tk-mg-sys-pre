@@ -13,6 +13,7 @@ export const setupIdentity = async (provider?: IdentityProvider, clock?: () => D
   const sql = database.client
   const hash = await Bun.password.hash("operator-password")
   await sql`insert into app_user(id,email,password_hash,role,provisioned_by) values (${firstUserId},'first@test.test',${hash},'administrator','init-tool'),(${secondUserId},'second@test.test',${hash},'administrator','init-tool'),(${platformId},'platform@test.test',${hash},'administrator','sys')`
+  await sql`update app_user set is_platform = true where id = ${platformId}`
   const config = parseIdentityConfig({
     ADMIN_IDENTITY_MODE: "enforced",
     ALIBABA_CLOUD_ACCESS_KEY_ID: "test",
